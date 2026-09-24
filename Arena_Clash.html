@@ -705,12 +705,23 @@ function stone(x, z, s) {
   m.castShadow = m.receiveShadow = true; scene.add(m);
 }
 const breakables = [];   // { kind:'block'|'fence', x, z, hp, parts:[mesh], home:[pos,rot], ... }
-function block(x, z, w, d) {
+const brickMats = [0x8a9299, 0x7d858c, 0x939ba1, 0x6b737a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, flatShading: true }));
+function block(x, z, w, d) {           // a stack of individual bricks that can be knocked loose
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = (srand() - .5) * 0.1; scene.add(g);
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.28, d), stoneMat.clone()); m.position.y = 0.14;
-  m.castShadow = m.receiveShadow = true; g.add(m);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 0.92, 0.06, d * 0.92), stoneDark); cap.position.y = 0.3; cap.castShadow = true; g.add(cap);
-  breakables.push({ kind: 'block', x, z, w, d, g, body: m, cap, hp: 3, maxHp: 3, home: { rot: g.rotation.y } });
+  const long = Math.max(w, d), alongX = w >= d, rows = 3, bh = 0.34 / rows, bricks = [];
+  for (let r = 0; r < rows; r++) {
+    const cuts = r % 2 ? [0.25, 0.5, 0.25] : [0.5, 0.5]; let at = -long / 2;
+    for (const c of cuts) {
+      const L = long * c - 0.008, inset = r === rows - 1 ? 0.92 : 1;
+      const geo = alongX ? new THREE.BoxGeometry(L, bh - 0.006, d * inset) : new THREE.BoxGeometry(w * inset, bh - 0.006, L);
+      const m = new THREE.Mesh(geo, brickMats[Math.floor(srand() * brickMats.length)]);
+      const off = at + long * c / 2; at += long * c;
+      m.position.set(alongX ? off : 0, bh * r + bh / 2, alongX ? 0 : off); m.rotation.y = (srand() - .5) * 0.04;
+      m.castShadow = m.receiveShadow = true; m.userData.half = bh / 2; g.add(m);
+      bricks.push({ m, row: r, home: m.position.clone(), rot: m.rotation.y });
+    }
+  }
+  breakables.push({ kind: 'block', x, z, w, d, g, bricks, hp: 3, maxHp: 3, home: { rot: g.rotation.y }, crumbleT: 0 });
 }
 function fence(x0, x1, z) {
   const n = Math.max(2, Math.round((x1 - x0) / 0.45)), posts = [];
@@ -976,11 +987,42 @@ function chunks(x, y, z, n, size, mat, dir, power) {
     flyPiece(m, v, new THREE.Vector3((Math.random() - .5) * 14, 0, (Math.random() - .5) * 14), 2.5 + Math.random() * 1.5, true);
   }
 }
-const stoneCrackTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
-  g.fillStyle = '#fff'; g.fillRect(0, 0, 128, 128); g.strokeStyle = '#23272b'; g.lineCap = 'round';
-  for (let k = 0; k < 5; k++) { let x = 20 + Math.random() * 88, y = 20 + Math.random() * 88; g.lineWidth = 5; g.beginPath(); g.moveTo(x, y);
-    for (let i = 0; i < 6; i++) { x += (Math.random() - .5) * 40; y += (Math.random() - .5) * 40; g.lineTo(x, y); g.lineWidth = Math.max(2, g.lineWidth - 0.5); } g.stroke(); }
-  const t = new THREE.CanvasTexture(c); return t; })();
+// loose bricks tumble, bounce and then stay where they land until the next match
+const looseBricks = [];
+function knockBrick(b, br, dir, power) {
+  const m = br.m; if (m.parent !== b.g) return;
+  const wp = m.getWorldPosition(new THREE.Vector3()), wq = m.getWorldQuaternion(new THREE.Quaternion());
+  b.g.remove(m); m.position.copy(wp); m.quaternion.copy(wq); scene.add(m); b.rubble.push(m);
+  looseBricks.push({ m, v: new THREE.Vector3(dir.x * power * (0.6 + Math.random()) + (Math.random() - .5) * 0.8, 0.8 + Math.random() * 1.6 * power, dir.z * power * (0.6 + Math.random()) + (Math.random() - .5) * 0.8),
+    spin: new THREE.Vector3((Math.random() - .5) * 10, (Math.random() - .5) * 4, (Math.random() - .5) * 10), rest: 0 });
+  smoke(wp.x, wp.y, wp.z, 3);
+}
+function updateLooseBricks(dt) {
+  for (let i = looseBricks.length - 1; i >= 0; i--) { const L = looseBricks[i], m = L.m, h = m.userData.half || 0.05;
+    L.v.y -= 9 * dt; m.position.addScaledVector(L.v, dt); m.rotation.x += L.spin.x * dt; m.rotation.y += L.spin.y * dt; m.rotation.z += L.spin.z * dt;
+    if (m.position.y < h) { m.position.y = h;
+      if (Math.abs(L.v.y) > 1.2) { dust(m.position.x, m.position.z, 2, 0.08, 0.25, 0xb9b9b0); L.v.y = -L.v.y * 0.3; L.v.x *= 0.5; L.v.z *= 0.5; L.spin.multiplyScalar(0.5); }
+      else {   // settle flat on a face and leave it there
+        const q = Math.PI / 2; m.rotation.x = Math.round(m.rotation.x / q) * q; m.rotation.z = Math.round(m.rotation.z / q) * q;
+        m.position.y = h; looseBricks.splice(i, 1); } }
+  }
+}
+function smoke(x, y, z, n) {   // soft grey dust cloud that drifts up and spreads
+  for (let i = 0; i < n; i++) sprite('dust', new THREE.Vector3(x + (Math.random() - .5) * 0.2, y + Math.random() * 0.1, z + (Math.random() - .5) * 0.2),
+    { color: 0xb4b2aa, size: 0.3 + Math.random() * 0.25, life: 1.2 + Math.random() * 0.8, grow: 2.4, opacity: 0.7,
+      vel: new THREE.Vector3((Math.random() - .5) * 0.25, 0.25 + Math.random() * 0.25, (Math.random() - .5) * 0.25) });
+}
+function topBricks(b, n) { return b.bricks.filter(br => br.m.parent === b.g).sort((p, q) => q.row - p.row + (Math.random() - .5) * 0.9).slice(0, n); }
+function crumbleWalls(dt) {    // damaged stacks keep settling: they shed dust and, now and then, another brick
+  for (const b of breakables) { if (b.kind !== 'block' || b.hp <= 0 || b.hp >= b.maxHp) continue;
+    const stage = b.maxHp - b.hp; b.crumbleT -= dt;
+    if (Math.random() < dt * 1.5 * stage) smoke(b.x + (Math.random() - .5) * 0.2, 0.15 + Math.random() * 0.2, b.z + (Math.random() - .5) * 0.2, 1);
+    if (Math.random() < dt * 0.6 * stage) chunks(b.x, 0.3, b.z, 1, 0.03, stoneDark, new THREE.Vector3(), 0.2);
+    if (b.crumbleT <= 0) { b.crumbleT = (stage >= 2 ? 3 : 6) + Math.random() * 4;
+      if (Math.random() < 0.3 * stage) { const out = new THREE.Vector3(Math.sign(b.x) * (Math.abs(b.x) > HW - 0.2 ? 1 : 0), 0, Math.sign(b.z) * (Math.abs(b.x) > HW - 0.2 ? 0 : 1));
+        topBricks(b, 1).forEach(br => knockBrick(b, br, out, 0.4)); } }
+  }
+}
 function damageWall(b, dmg, dir) {
   if (b.hp <= 0) return;
   b.hp -= dmg;
@@ -993,21 +1035,19 @@ function damageWall(b, dmg, dir) {
     chunks(b.x, 0.2, b.z, 5, 0.04, woodMat, dir, 0.8); dust(b.x, b.z, 4, 0.2, 0.35, 0xc9ab7e); addShake(0.03);
     return;
   }
-  // concrete block
+  // brick stack: knock some bricks loose, jostle the rest, and throw up dust
+  b.rubble = b.rubble || [];
   const stage = b.maxHp - Math.max(0, b.hp);
   if (b.hp > 0) {
-    if (!b.body.material.map) { b.body.material.map = stoneCrackTex; b.body.material.needsUpdate = true; }
-    b.body.material.color.setScalar(1 - stage * 0.12);
-    b.g.rotation.y += (Math.random() - .5) * 0.25; b.g.rotation.z += dir.x * 0.07 * stage; b.g.rotation.x += dir.z * 0.07 * stage;
-    b.g.position.x += dir.x * 0.04; b.g.position.z += dir.z * 0.04;
-    if (stage >= 2 && b.cap.parent) { const wp = b.cap.getWorldPosition(new THREE.Vector3()); b.g.remove(b.cap); b.cap.position.copy(wp); scene.add(b.cap);
-      flyPiece(b.cap, new THREE.Vector3(dir.x * 1.2, 1.5, dir.z * 1.2), new THREE.Vector3(6, 0, 4), 3, true); }
-    chunks(b.x, 0.2, b.z, 4 + stage * 2, 0.06, stoneDark, dir, 0.7); dust(b.x, b.z, 3, 0.2, 0.35, 0xb9b9b0); addShake(0.03 * stage);
+    topBricks(b, 1 + stage + Math.floor(Math.random() * 2)).forEach(br => knockBrick(b, br, dir, 0.9));
+    b.bricks.forEach(br => { if (br.m.parent === b.g) { br.m.position.x += (Math.random() - .5) * 0.03 + dir.x * 0.015 * stage; br.m.position.z += (Math.random() - .5) * 0.03 + dir.z * 0.015 * stage; br.m.rotation.y += (Math.random() - .5) * 0.2; } });
+    b.g.rotation.z += dir.x * 0.04 * stage; b.g.rotation.x -= dir.z * 0.04 * stage;
+    chunks(b.x, 0.2, b.z, 3 + stage * 2, 0.04, stoneDark, dir, 0.7); dust(b.x, b.z, 4, 0.25, 0.4, 0xb9b9b0); smoke(b.x, 0.2, b.z, 3 + stage * 2); addShake(0.03 * stage);
+    b.crumbleT = 1 + Math.random() * 2;
   } else {
-    b.g.visible = false;
-    chunks(b.x, 0.14, b.z, 12, 0.11, stoneMat, dir, 1.2); chunks(b.x, 0.14, b.z, 8, 0.06, stoneDark, dir, 1.4);
-    for (let i = 0; i < 4; i++) { const r = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.07, 0.1), stoneDark); r.position.set(b.x + (Math.random() - .5) * 0.3, 0.035, b.z + (Math.random() - .5) * 0.4); r.rotation.y = Math.random() * 3; r.castShadow = true; scene.add(r); b.rubble = (b.rubble || []).concat(r); }
-    dust(b.x, b.z, 10, 0.35, 0.5, 0xb9b9b0); addShake(0.07);
+    b.bricks.forEach(br => knockBrick(b, br, dir, 1.3));
+    chunks(b.x, 0.14, b.z, 10, 0.06, stoneDark, dir, 1.4);
+    dust(b.x, b.z, 10, 0.35, 0.5, 0xb9b9b0); smoke(b.x, 0.15, b.z, 10); addShake(0.07);
   }
 }
 function wallsNear(x, z, r) { return breakables.filter(b => b.hp > 0 && Math.hypot(b.x - x, b.z - z) < r); }
@@ -1017,12 +1057,12 @@ function wallImpact(x, z, power, dir) {           // a fighter slams the boundar
   if (hit[1] && power > 2) damageWall(hit[1], 1, dir);
 }
 function repairWalls() {
+  looseBricks.length = 0;
   for (const b of breakables) {
     b.hp = b.maxHp;
     if (b.kind === 'fence') { b.rails.forEach(r => { if (!r.parent) scene.add(r); }); b.posts.forEach(p => { p.rotation.set(0, 0, 0); }); continue; }
-    b.g.visible = true; b.g.rotation.set(0, b.home.rot, 0); b.g.position.set(b.x, 0, b.z); b.body.material.map = null; b.body.material.color.setScalar(1); b.body.material.needsUpdate = true;
-    if (b.cap.parent !== b.g) { if (b.cap.parent) b.cap.parent.remove(b.cap); b.cap.position.set(0, 0.3, 0); b.cap.rotation.set(0, 0, 0); b.cap.scale.setScalar(1); b.g.add(b.cap); }
-    (b.rubble || []).forEach(r => scene.remove(r)); b.rubble = [];
+    b.g.rotation.set(0, b.home.rot, 0); b.g.position.set(b.x, 0, b.z); b.rubble = []; b.crumbleT = 0;
+    b.bricks.forEach(br => { if (br.m.parent) br.m.parent.remove(br.m); br.m.position.copy(br.home); br.m.rotation.set(0, br.rot, 0); b.g.add(br.m); });
   }
 }
 function checkWallSlams(dt) {
@@ -1325,6 +1365,7 @@ const fx = {
   hit(att, def, x, z, dmg, tag, mv, M) {
     const heavy = M.cls !== 'light', p = new THREE.Vector3(def.x * 0.7 + att.x * 0.3, 0.32, def.z * 0.7 + att.z * 0.3);
     impact(p, att.c.color, heavy);
+    if (heavy) { const w = wallsNear(def.x, def.z, 0.75)[0]; if (w) damageWall(w, 1, new THREE.Vector3(w.x - att.x, 0, w.z - att.z).normalize()); }   // heavy hits near the edge chip the boundary
     if (M.fx === 'pounce' || M.fx === 'thunder') crackle(new THREE.Vector3(def.x, 0.3, def.z), 0xffe45c, heavy ? 6 : 3, 0.45);
     if (M.fx === 'tail' || M.fx === 'roar') { dust(def.x, def.z, 4, 0.2, 0.4); debris(def.x, def.z, 5, 1.2); }
     if (heavy) tearGround(def.x, def.z, 0.22, 0.6); addShake(heavy ? 0.06 : 0.025); views[def.id].flash = 0.12; views[def.id].squash = 0.22; views[def.id].squashK = heavy ? 0.12 : 0.07;
@@ -1428,7 +1469,7 @@ Promise.all([loadAsset(ASSETS.monster), loadAsset(ASSETS.tiger)]).then(([mon, ti
     battle.f.forEach((f, i) => { const v = views[i]; v.mixer.update(adt); v.group.position.set(f.x, 0, f.z); v.group.rotation.y = f.yaw;
       v.ring.position.set(f.x, 0.012, f.z); v.flash = Math.max(0, v.flash - dt); const e = v.flash > 0 ? 0.55 : (f.invuln() ? 0.15 : 0); v.mats.forEach(m => m.emissive.setRGB(e, e, e)); });
     if (battle.hitstop <= 0) battle.f.forEach(f => moveFx(f, adt));
-    battle.f.forEach((f, i) => bodyLanguage(f, views[i], dt)); updateAmbient(dt); checkWallSlams(dt);
+    battle.f.forEach((f, i) => bodyLanguage(f, views[i], dt)); updateAmbient(dt); checkWallSlams(dt); updateLooseBricks(dt); crumbleWalls(dt);
     lightPulse = Math.max(0, lightPulse - dt * 3); flashLight.intensity = lightPulse * lightPulse * 7;
     updateParts(dt); updateEffects(dt);
     camera.position.copy(camBase); if (shake > 0) { camera.position.x += (Math.random() - .5) * shake * 2; camera.position.z += (Math.random() - .5) * shake * 2; shake = Math.max(0, shake - dt * 0.4); }
