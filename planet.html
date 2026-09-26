@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Flat Planet RTS</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+  canvas { display: block; }
+  #hud { position: fixed; top: 8px; left: 8px; color: #fff; background: rgba(0,0,0,.5);
+         padding: 6px 10px; border-radius: 4px; font-size: 13px; pointer-events: none; }
+  #mini { position: fixed; right: 8px; bottom: 8px; border: 2px solid #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<canvas id="mini"></canvas>
+<div id="hud">WASD / arrows / edge-scroll: pan &middot; drag-left: select &middot; right-click: move &middot; click minimap: jump<br>The world wraps on both axes (torus).</div>
+<script>
+// ---- World config ----
+const TILE = 32;             // pixels per tile
+const W = 128, H = 96;       // map size in tiles
+const WORLD_W = W * TILE, WORLD_H = H * TILE;
+const mod = (a, n) => ((a % n) + n) % n;
+// Shortest signed delta on a wrapped axis
+const wrapDelta = (d, n) => d - n * Math.round(d / n);
+
+// ---- Seamless (tileable) value noise ----
+let seed = Math.random() * 1e9 | 0;
+function rand2(x, y, p) { // hash on a lattice that repeats every p cells
+  x = mod(x, p); y = mod(y, p);
+  let h = (x * 374761393 + y * 668265263 + seed * 144269504) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+function noise(x, y, p) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const s = t => t * t * (3 - 2 * t), u = s(xf), v = s(yf);
+  const a = rand2(xi, yi, p), b = rand2(xi + 1, yi, p);
+  const c = rand2(xi, yi + 1, p), d = rand2(xi + 1, yi + 1, p);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(tx, ty) {
+  let sum = 0, amp = 1, norm = 0;
+  for (let o = 0; o < 5; o++) {
+    const p = 4 << o;                 // lattice periods divide the map evenly
+    sum += amp * noise(tx / W * p, ty / H * p, p);
+    norm += amp; amp *= 0.5;
+  }
+  return sum / norm;
+}
+
+// ---- Terrain ----
+const terrain = new Float32Array(W * H);
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) terrain[y * W + x] = fbm(x, y);
+function tileColor(h) {
+  if (h < 0.38) return '#1d3f7a';   // deep water
+  if (h < 0.45) return '#2f64b0';   // shallow
+  if (h < 0.48) return '#d9c98a';   // beach
+  if (h < 0.60) return '#4f9a3a';   // grass
+  if (h < 0.70) return '#2f6b2a';   // forest
+  if (h < 0.78) return '#7a7064';   // rock
+  return '#eeeeee';                 // snow
+}
+const passable = (tx, ty) => { const h = terrain[mod(ty, H) * W + mod(tx, W)]; return h >= 0.45 && h < 0.78; };
+
+// Pre-render the whole map once into an offscreen canvas
+const mapCanvas = document.createElement('canvas');
+mapCanvas.width = WORLD_W; mapCanvas.height = WORLD_H;
+{
+  const g = mapCanvas.getContext('2d');
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    g.fillStyle = tileColor(terrain[y * W + x]);
+    g.fillRect(x * TILE, y * TILE, TILE, TILE);
+  }
+  g.strokeStyle = 'rgba(0,0,0,.08)';
+  for (let x = 0; x <= W; x++) { g.beginPath(); g.moveTo(x * TILE, 0); g.lineTo(x * TILE, WORLD_H); g.stroke(); }
+  for (let y = 0; y <= H; y++) { g.beginPath(); g.moveTo(0, y * TILE); g.lineTo(WORLD_W, y * TILE); g.stroke(); }
+}
+
+// ---- Units ----
+const units = [];
+for (let i = 0; i < 12; i++) {
+  let tx, ty;
+  do { tx = Math.random() * W | 0; ty = Math.random() * H | 0; } while (!passable(tx, ty));
+  units.push({ x: (tx + .5) * TILE, y: (ty + .5) * TILE, tx: null, ty: null, sel: false, speed: 120 });
+}
+
+// ---- Camera & input ----
+const view = document.getElementById('view'), ctx = view.getContext('2d');
+const mini = document.getElementById('mini'), mctx = mini.getContext('2d');
+const MINI_SCALE = 1.5; mini.width = W * MINI_SCALE; mini.height = H * MINI_SCALE;
+const cam = { x: units[0].x, y: units[0].y }; // camera centre in world coords
+const keys = {}; let mouse = { x: -1, y: -1 }, drag = null;
+function resize() { view.width = innerWidth; view.height = innerHeight; }
+addEventListener('resize', resize); resize();
+addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+view.addEventListener('contextmenu', e => e.preventDefault());
+
+const screenToWorld = (sx, sy) => ({
+  x: mod(cam.x + sx - view.width / 2, WORLD_W),
+  y: mod(cam.y + sy - view.height / 2, WORLD_H),
+});
+// Screen position of a world point, choosing the wrapped copy nearest the camera
+const worldToScreen = (wx, wy) => ({
+  x: wrapDelta(wx - cam.x, WORLD_W) + view.width / 2,
+  y: wrapDelta(wy - cam.y, WORLD_H) + view.height / 2,
+});
+
+view.addEventListener('mousemove', e => { mouse = { x: e.clientX, y: e.clientY }; if (drag) { drag.x2 = e.clientX; drag.y2 = e.clientY; } });
+view.addEventListener('mouseleave', () => mouse = { x: -1, y: -1 });
+view.addEventListener('mousedown', e => {
+  if (e.button === 0) drag = { x1: e.clientX, y1: e.clientY, x2: e.clientX, y2: e.clientY };
+  if (e.button === 2) {
+    const t = screenToWorld(e.clientX, e.clientY);
+    const sel = units.filter(u => u.sel);
+    sel.forEach((u, i) => { // simple formation spread
+      const a = i * 2.4, r = 14 * Math.sqrt(i);
+      u.tx = mod(t.x + Math.cos(a) * r, WORLD_W); u.ty = mod(t.y + Math.sin(a) * r, WORLD_H);
+    });
+  }
+});
+addEventListener('mouseup', e => {
+  if (e.button !== 0 || !drag) return;
+  const x1 = Math.min(drag.x1, drag.x2), x2 = Math.max(drag.x1, drag.x2);
+  const y1 = Math.min(drag.y1, drag.y2), y2 = Math.max(drag.y1, drag.y2);
+  const click = x2 - x1 < 4 && y2 - y1 < 4;
+  units.forEach(u => {
+    const s = worldToScreen(u.x, u.y);
+    u.sel = click ? Math.hypot(s.x - x1, s.y - y1) < 12 : (s.x >= x1 && s.x <= x2 && s.y >= y1 && s.y <= y2);
+  });
+  drag = null;
+});
+mini.addEventListener('mousedown', e => {
+  const r = mini.getBoundingClientRect();
+  cam.x = (e.clientX - r.left) / MINI_SCALE * TILE; cam.y = (e.clientY - r.top) / MINI_SCALE * TILE;
+});
+
+// ---- Update ----
+function update(dt) {
+  const pan = 600 * dt, edge = 20;
+  if (keys.a || keys.arrowleft || (mouse.x >= 0 && mouse.x < edge)) cam.x -= pan;
+  if (keys.d || keys.arrowright || (mouse.x >= 0 && mouse.x > view.width - edge)) cam.x += pan;
+  if (keys.w || keys.arrowup || (mouse.y >= 0 && mouse.y < edge)) cam.y -= pan;
+  if (keys.s || keys.arrowdown || (mouse.y >= 0 && mouse.y > view.height - edge)) cam.y += pan;
+  cam.x = mod(cam.x, WORLD_W); cam.y = mod(cam.y, WORLD_H);
+
+  for (const u of units) {
+    if (u.tx === null) continue;
+    const dx = wrapDelta(u.tx - u.x, WORLD_W), dy = wrapDelta(u.ty - u.y, WORLD_H); // shortest way around
+    const d = Math.hypot(dx, dy), step = u.speed * dt;
+    if (d <= step) { u.x = u.tx; u.y = u.ty; u.tx = null; continue; }
+    const nx = mod(u.x + dx / d * step, WORLD_W), ny = mod(u.y + dy / d * step, WORLD_H);
+    if (passable(Math.floor(nx / TILE), Math.floor(ny / TILE))) { u.x = nx; u.y = ny; }
+    else u.tx = null; // blocked by water/mountain (no pathfinding yet)
+  }
+}
+
+// ---- Render ----
+function render() {
+  const vw = view.width, vh = view.height;
+  const ox = mod(cam.x - vw / 2, WORLD_W), oy = mod(cam.y - vh / 2, WORLD_H);
+  // Blit map, tiling it so the seam is invisible
+  for (let sy = -oy; sy < vh; sy += WORLD_H)
+    for (let sx = -ox; sx < vw; sx += WORLD_W) ctx.drawImage(mapCanvas, sx, sy);
+
+  for (const u of units) {
+    const s = worldToScreen(u.x, u.y);
+    if (s.x < -20 || s.y < -20 || s.x > vw + 20 || s.y > vh + 20) continue;
+    if (u.sel) {
+      ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 12, 0, 7); ctx.stroke();
+      if (u.tx !== null) {
+        const t = worldToScreen(u.tx, u.ty);
+        ctx.strokeStyle = 'rgba(0,255,0,.4)'; ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + wrapDelta(u.tx - u.x, WORLD_W), s.y + wrapDelta(u.ty - u.y, WORLD_H));
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#d33'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  if (drag) {
+    ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1;
+    ctx.strokeRect(drag.x1, drag.y1, drag.x2 - drag.x1, drag.y2 - drag.y1);
+  }
+
+  // Minimap
+  mctx.drawImage(mapCanvas, 0, 0, mini.width, mini.height);
+  mctx.fillStyle = '#f44';
+  for (const u of units) mctx.fillRect(u.x / TILE * MINI_SCALE - 1.5, u.y / TILE * MINI_SCALE - 1.5, 3, 3);
+  // Viewport rect, drawn at all wrapped offsets so it splits across edges
+  const k = MINI_SCALE / TILE, rx = ox * k, ry = oy * k, rw = vw * k, rh = vh * k;
+  mctx.strokeStyle = '#fff'; mctx.lineWidth = 1;
+  for (const dx of [0, -mini.width]) for (const dy of [0, -mini.height]) mctx.strokeRect(rx + dx, ry + dy, rw, rh);
+}
+
+let last = performance.now();
+(function loop(now) {
+  update(Math.min(0.05, (now - last) / 1000)); last = now;
+  render(); requestAnimationFrame(loop);
+})(last);
+</script>
+</body>
+</html>
