@@ -708,7 +708,7 @@ const fillL=new THREE.DirectionalLight(0x9fb8ff,0.6); fillL.position.set(5,4,6);
 const camKey=new THREE.DirectionalLight(0xfff0e0,1.1); camKey.position.set(0.4,0.6,1); camera.add(camKey); camKey.target.position.set(0,-0.2,-1); camera.add(camKey.target);
 const composer=new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene,camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(1,1),0.5,0.4,0.86));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(1,1),0.28,0.3,1.6));   // HDR threshold: only lamps, windows, flashes, fire and sun glints glow; bright sky and sunlit ground don't
 composer.addPass(new OutputPass());
 function resize(){ const w=host.clientWidth,h=host.clientHeight; renderer.setSize(w,h,false); composer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); particlesA.setScale(h); particlesN.setScale(h); particlesF.setScale(h); }
 addEventListener('resize',()=>resize());
