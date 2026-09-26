@@ -180,7 +180,7 @@ export function createTerrain(opts={}){
 // point {x,y,z} and unit up {ux,uy,uz}; the surface point is base + up*h.
 // Flat tile:  base = (x0+u*size, 0, z0+v*size), up = +Y.
 // Planet tile: base = cubeToSphere(face,u,v)*R, up = normalize(base).
-export function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1, cellSize=1}){
+export function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1, cellSize=1, smooth=0}){
   const M=4, W=res+1+2*M, n=W*W;                         // margin for normals, cavity, erosion
   const bx=new Float32Array(n), by=new Float32Array(n), bz=new Float32Array(n), ux=new Float32Array(n), uy=new Float32Array(n), uz=new Float32Array(n);
   const h=new Float32Array(n), gully=new Float32Array(n), mount=new Float32Array(n), pt={x:0,y:0,z:0,ux:0,uy:1,uz:0}, s={};
@@ -189,6 +189,10 @@ export function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1,
     bx[k]=pt.x; by[k]=pt.y; bz[k]=pt.z; ux[k]=pt.ux; uy[k]=pt.uy; uz[k]=pt.uz;
     terrain.sample(pt.x,pt.y,pt.z,pt.ux,pt.uy,pt.uz,s); h[k]=s.h; gully[k]=s.gully; mount[k]=s.mountain;
   }
+  // optional smoothing over the padded grid: averages out micro-jaggedness; neighbours share margin samples,
+  // so adjacent tiles smooth identically and edges still match
+  for(let pass=0;pass<smooth;pass++){ const a=h.slice();
+    for(let j=1;j<W-1;j++) for(let i=1;i<W-1;i++){ const k=j*W+i; h[k]=(a[k]*4+a[k-1]+a[k+1]+a[k-W]+a[k+W])/8; } }
   let flow=new Float32Array(n), dep=new Float32Array(n); const h0=droplets>0?h.slice():null;
   if(droplets>0) ({flow,dep}=erodeDroplets(h,W,{droplets,seed:dropletSeed,cellSize,margin:M}));
 
