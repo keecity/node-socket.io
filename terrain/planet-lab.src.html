@@ -108,7 +108,7 @@ async function workerSource(){
 }
 let tilesys=null, groundT=createTerrain(planetParams(7));
 workerSource().then(src=>{
-  tilesys=createPlanetTiles({THREE,gridIndex,faceDir,dirFace,tileKey},{scene,radius:R,res:48,maxLevel:9,workerSrc:src,params:planetParams(+$('seed').value),terrainMaterial:terrainMat,oceanMaterial:oceanMat});
+  tilesys=createPlanetTiles({THREE,gridIndex,faceDir,dirFace,tileKey},{scene,radius:R,res:48,maxLevel:11,workerSrc:src,params:planetParams(+$('seed').value),terrainMaterial:terrainMat,oceanMaterial:oceanMat});
 });
 
 // ------------------------------------------------------------ camera: continuous orbit → ground

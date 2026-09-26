@@ -134,7 +134,7 @@ self.onmessage=e=>{ const m=e.data;
   const {f,L,x,y}=m, n=1<<L, FACE=Math.PI/2*R;
   const pointAt=(u,v,o)=>{ faceDir(f,-1+2*(x+u)/n,-1+2*(y+v)/n,o3); o.x=o3[0]*R; o.y=o3[1]*R; o.z=o3[2]*R; o.ux=o3[0]; o.uy=o3[1]; o.uz=o3[2]; return o; };
   // band-limit per level: only noise the grid can resolve (finest wavelength ≥ 4 cells) — no aliasing spikes
-  const cell=FACE/n/RES, fmax=1/(4*cell), P=Object.assign({},DEFAULT_TERRAIN,P0);
+  const cell=FACE/n/RES, fmax=1/(5*cell), P=Object.assign({},DEFAULT_TERRAIN,P0);
   const oct=Math.max(2,Math.min(P.octaves,Math.floor(Math.log2(fmax/P.ridgeScale))+1)), goct=Math.max(0,Math.min(P.gullyOctaves,Math.floor(Math.log2(fmax/(P.gullyScale*2)))+1));
   const tk=oct+'/'+goct; T=TC.get(tk); if(!T){ T=createTerrain(Object.assign({},P0,{octaves:oct,normOctaves:P.octaves,gullyOctaves:goct,gullyStrength:goct?P.gullyStrength:0})); TC.set(tk,T); }
   const r=buildTile(T,{res:RES,pointAt,cellSize:cell});
