@@ -914,9 +914,9 @@ function hash2(x,y){ const s=Math.sin(x*127.1+y*311.7)*43758.5453; return s-Math
 function vnoise(x,y){ const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi; const u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
   const a=hash2(xi,yi), b=hash2(xi+1,yi), c=hash2(xi,yi+1), d=hash2(xi+1,yi+1); return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v; }
 function fbm(x,y){ let s=0,a=0.5,f=1; for(let i=0;i<5;i++){ s+=a*vnoise(x*f,y*f); f*=2.03; a*=0.5; } return s; }
-// ===================================================== generated world — shared terrain modules (1 unit = 25 m)
+// ===================================================== generated world — shared terrain modules (1 unit = 50 m)
 // Each match builds a new world from its seed: terrain, town site (settlement finder), road layout, grass, water depth.
-const KM=40, WATER_KM=DEFAULT_WATER.level, TILE_RES=320, IN_KM=60/KM, INH=IN_KM/2*0.985;   // 1 unit = 25 m; fine town patch stays 60 units wide
+const KM=20, WATER_KM=DEFAULT_WATER.level, TILE_RES=320, IN_KM=60/KM, INH=IN_KM/2*0.985;   // 1 unit = 50 m; fine town patch stays 60 units wide
 let TER=null;   // {cx,cz (km), outer, inner} — current world's tiles
 function sampleGrid(tr,half,res,kx,kz){ const u=clamp((kx+half)/(2*half)*res,0,res-1e-4), v=clamp((kz+half)/(2*half)*res,0,res-1e-4);
   const i=u|0, j=v|0, fu=u-i, fv=v-j, R=res+1, a=tr[(j*R+i)*4], b=tr[(j*R+i+1)*4], c=tr[((j+1)*R+i)*4], d=tr[((j+1)*R+i+1)*4];
@@ -967,21 +967,25 @@ function buildWorld(seed){
   // town layout for this world
   maskSeed=seed;
   // terrain: the lab's generator settings; only the seed changes, so every world has full-quality mountains
-  const params={...DEFAULT_TERRAIN,seed};
+  const params={...DEFAULT_TERRAIN,seed,octaves:7,gullyOctaves:3};   // finest noise ≥ ~4 grid cells: no sub-cell spikes
   // town site: any dry, buildable spot (benches, slopes, plateaus, shores), not just the lowest flattest one
-  const sites=findSettlementSites(createTerrain(params),{radius:2.6,count:1,water:WATER_KM,seed,pick:'random',maxSlope:0.03});
+  const sites=findSettlementSites(createTerrain(params),{radius:4-IN_KM/2-0.2,count:1,water:WATER_KM,seed,pick:'random',maxSlope:0.03});
   const PAD_R=(PLAZA_R+0.6)/KM, PAD_FALL=0.04;   // only the plaza is levelled; streets are graded into the terrain below
   const pads=sitesToPads(sites,{r:PAD_R,fall:PAD_FALL,water:WATER_KM});
   const T=createTerrain({...params,pads}), c=sites[0];
   const outer=buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-4,c.z-4,8),cellSize:8/TILE_RES,droplets:45000,dropletSeed:seed});
-  const inner=buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-IN_KM/2,c.z-IN_KM/2,IN_KM),cellSize:IN_KM/TILE_RES});
-  // the fine patch inherits the coarse tile's erosion (so they meet exactly), except on the flat town pad
+  // fine town patch: smooth (Catmull-Rom) interpolation of the coarse tile — same surface, same erosion,
+  // none of the sub-cell noise that reads as spikes at game scale; small detail comes from the material
   const R=TILE_RES+1, oh=new Float32Array(R*R); for(let k=0;k<oh.length;k++) oh[k]=outer.terrain[k*4];
-  const bil=(arr,stride,off,kx,kz)=>{ const u=clamp((kx+4)/8*TILE_RES,0,TILE_RES-1e-4), v=clamp((kz+4)/8*TILE_RES,0,TILE_RES-1e-4), i=u|0, j=v|0, fu=u-i, fv=v-j, A=q=>arr[q*stride+off];
-    return (A(j*R+i)*(1-fu)+A(j*R+i+1)*fu)*(1-fv)+(A((j+1)*R+i)*(1-fu)+A((j+1)*R+i+1)*fu)*fv; };
-  for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, kx=-IN_KM/2+IN_KM*ii/TILE_RES, kz=-IN_KM/2+IN_KM*jj/TILE_RES;
-    let w=clamp((Math.hypot(kx,kz)-PAD_R)/PAD_FALL,0,1); w=w*w*(3-2*w);
-    const d=bil(outer.delta,1,0,kx,kz)*w; inner.positions[k*3+1]+=d; inner.terrain[k*4]+=d; inner.terrain[k*4+3]=bil(outer.terrain,4,3,kx,kz)*w; }
+  const cub=(a,b,c,d,t)=>b+0.5*t*(c-a+t*(2*a-5*b+4*c-d+t*(3*(b-c)+d-a)));
+  const bicubic=(arr,stride,off,kx,kz)=>{ const u=clamp((kx+4)/8*TILE_RES,0,TILE_RES), v=clamp((kz+4)/8*TILE_RES,0,TILE_RES), i=Math.min(TILE_RES-1,u|0), j=Math.min(TILE_RES-1,v|0), fu=u-i, fv=v-j;
+    const A=(ii,jj)=>arr[(clamp(jj,0,TILE_RES)*R+clamp(ii,0,TILE_RES))*stride+off], row=jj=>cub(A(i-1,jj),A(i,jj),A(i+1,jj),A(i+2,jj),fu);
+    return cub(row(j-1),row(j),row(j+1),row(j+2),fv); };
+  const bil=bicubic;
+  const inner={res:TILE_RES,positions:new Float32Array(R*R*3),normals:new Float32Array(R*R*3),terrain:new Float32Array(R*R*4)};
+  for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, kx=-IN_KM/2+IN_KM*ii/TILE_RES, kz=-IN_KM/2+IN_KM*jj/TILE_RES, h=bicubic(outer.terrain,4,0,kx,kz);
+    inner.positions[k*3]=c.x+kx; inner.positions[k*3+1]=h; inner.positions[k*3+2]=c.z+kz;
+    inner.terrain[k*4]=h; inner.terrain[k*4+1]=bicubic(outer.terrain,4,1,kx,kz); inner.terrain[k*4+2]=bicubic(outer.terrain,4,2,kx,kz); inner.terrain[k*4+3]=clamp(bicubic(outer.terrain,4,3,kx,kz),0,1); }
   // roads: grown over this terrain, then cut/filled into the fine patch so streets sit level
   TER={cx:c.x,cz:c.z,outer,inner};
   NET=generateRoadNetwork((x,z)=>H(x,z),{seed,townRadius:TOWN,bound:MASK_E-1}); RIDX=new RoadIndex(NET);
