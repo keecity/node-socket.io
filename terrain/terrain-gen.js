@@ -31,6 +31,7 @@ export const DEFAULT_TERRAIN = {
   gullySlope: 3.0,        // how strongly slope steers the channels
   gullyOctaves: 5,
   pads: null,             // [{x,y,z,r,fall,h,rough}] flattened settlement areas (same units)
+  continents: null,       // {scale, coast, depth, uplift}: oceans + land masses (planet); off for single tiles
 };
 
 // ---------------------------------------------------------------- noise
@@ -160,6 +161,10 @@ export function createTerrain(opts={}){
       h+=gully*P.gullyStrength*0.06*mh*sm*(0.35+0.65*rg[0]);
       gully*=sm;
     }
+    // continents: very large-scale noise decides land vs ocean; mountains only on land, shelves slope into the deep
+    if(P.continents){ const C=P.continents; fbm(px+101.3,py-57.1,pz+33.7,C.scale,5,t4); const c=t4[0]-C.coast;
+      let land=Math.min(1,Math.max(0,(c+0.03)/0.12)); land=land*land*(3-2*land);
+      h=h*land+(c>0?c*C.uplift:c*C.depth); gully*=land; mt*=land; }
     // 5. settlement pads: flatten an area (towns, arenas) and blend it into the surroundings
     if(P.pads) for(let i=0;i<P.pads.length;i++){ const pd=P.pads[i], d=Math.hypot(px-pd.x,py-(pd.y||0),pz-pd.z);
       if(d<pd.r+pd.fall){ let w=Math.min(1,Math.max(0,1-(d-pd.r)/pd.fall)); w=w*w*(3-2*w);

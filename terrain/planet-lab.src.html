@@ -1,0 +1,175 @@
+<title>Quadsphere Planet Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --ground:#05070a; --panel:rgba(12,16,20,.82); --line:rgba(200,215,225,.12); --line-2:rgba(200,215,225,.26);
+  --ink:#e4ebf0; --ink-2:#a3b0ba; --ink-3:#6f7c86; --accent:#8cc6e8; --warn:#e3a45a;
+  --ui:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:var(--ui);overflow:hidden}
+#view{position:fixed;inset:0}
+#view canvas{display:block;width:100%;height:100%;touch-action:none}
+.panel{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;width:280px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;flex-direction:column}
+.head{padding:12px 14px 8px;border-bottom:1px solid var(--line)}
+.head h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.02em}
+.hud{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.hud b{color:var(--ink);font-weight:500;text-align:right}
+.ctl{display:flex;flex-direction:column;gap:9px;padding:10px 14px 14px;border-top:1px solid var(--line)}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+label{font-size:12px;color:var(--ink-2)}
+input[type=number]{font:500 12px var(--mono);color:var(--ink);background:rgba(0,0,0,.35);border:1px solid var(--line-2);padding:5px 7px;width:84px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button{font:500 13px var(--ui);color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--ink-2)} button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:12px;color:var(--ink-3);line-height:1.45;margin:0}
+@media (max-width:640px){ .panel{width:auto;right:12px} .ctl .hint{display:none} }
+</style>
+
+<div id="view"></div>
+<aside class="panel" aria-label="Planet controls">
+  <div class="head"><h1>Quadsphere planet lab</h1></div>
+  <div class="hud" id="hud" aria-live="off"></div>
+  <div class="ctl">
+    <div class="inline"><label for="seed">Seed</label><input type="number" id="seed" value="7" min="1"><button type="button" id="newp">New planet</button></div>
+    <label for="lod">Detail distance <span id="lodv"></span></label><input type="range" id="lod" min="1.2" max="4" step="0.1" value="2.2">
+    <div class="inline"><button type="button" id="wire" aria-pressed="false">Tile wireframe</button><button type="button" id="home">Back to orbit</button></div>
+    <p class="hint">Scroll or pinch to zoom from orbit to the ground. Drag to travel, right-drag (or Q/E, R/F) to turn and tilt, WASD to move.</p>
+  </div>
+</aside>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {createTerrain, buildTile, gridIndex, DEFAULT_TERRAIN} from './terrain-gen.js';   //@INLINE_GEN
+import {createTerrainMaterial} from './terrain-material.js';                             //@INLINE_MAT
+import {FACES, faceDir, dirFace, tileKey} from './cube-sphere.js';                         //@INLINE_CUBE
+import {createPlanetTiles, PLANET_WORKER} from './planet-tiles.js';                        //@INLINE_PLANET
+const GEN_SRC=null, CUBE_SRC=null;   //@SRC
+
+const R=120;   // planet radius, km
+const $=id=>document.getElementById(id);
+const planetParams=seed=>({...DEFAULT_TERRAIN,seed,continents:{scale:0.018,coast:0.04,depth:3.2,uplift:0.55}});
+
+// ------------------------------------------------------------ renderer + scene
+const host=$('view');
+const renderer=new THREE.WebGLRenderer({antialias:true,logarithmicDepthBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=0.95; host.append(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x000000); scene.fog=new THREE.FogExp2(0x9fbad2,0);
+const camera=new THREE.PerspectiveCamera(50,1,0.0005,R*8);
+const SUN=new THREE.Vector3(0.55,0.35,0.76).normalize();
+const sun=new THREE.DirectionalLight(0xfff1dd,3.0); sun.position.copy(SUN).multiplyScalar(R*4); scene.add(sun);
+scene.add(new THREE.AmbientLight(0x9fb3c8,0.32));
+
+// atmosphere rim (seen from space) and stars
+const atmo=new THREE.Mesh(new THREE.SphereGeometry(R*1.03,96,64),new THREE.ShaderMaterial({transparent:true,depthWrite:false,side:THREE.BackSide,blending:THREE.AdditiveBlending,
+  uniforms:{uSun:{value:SUN},uAlpha:{value:1}},
+  vertexShader:`#include <common>
+    #include <logdepthbuf_pars_vertex>
+    varying vec3 vN; varying vec3 vV; void main(){ vec4 wp=modelMatrix*vec4(position,1.); vN=normalize(wp.xyz); vV=normalize(wp.xyz-cameraPosition); gl_Position=projectionMatrix*viewMatrix*wp;
+    #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader:`#include <common>
+    #include <logdepthbuf_pars_fragment>
+    uniform vec3 uSun; uniform float uAlpha; varying vec3 vN; varying vec3 vV; void main(){
+    #include <logdepthbuf_fragment>
+    float rim=pow(1.-abs(dot(vN,-vV)),2.2); float day=smoothstep(-0.25,0.35,dot(vN,uSun));
+    gl_FragColor=vec4(vec3(0.35,0.6,1.0)*rim*(0.15+1.1*day)*uAlpha,1.); }`}));
+scene.add(atmo);
+const stars=(()=>{ const n=2500, p=new Float32Array(n*3); for(let i=0;i<n;i++){ const u=Math.random()*2-1, a=Math.random()*6.283, s=Math.sqrt(1-u*u); p.set([s*Math.cos(a)*R*6,u*R*6,s*Math.sin(a)*R*6],i*3); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(p,3));
+  const m=new THREE.PointsMaterial({color:0xffffff,size:1.5,sizeAttenuation:false,fog:false,transparent:true}); const pts=new THREE.Points(g,m); scene.add(pts); return pts; })();
+
+// ------------------------------------------------------------ materials
+const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0});
+const oceanMat=new THREE.MeshStandardMaterial({color:0x0b3040,roughness:0.14,metalness:0,transparent:true,opacity:0.9});
+const OU={uTime:{value:0}};
+oceanMat.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,OU);
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP;').replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvWP=(modelMatrix*vec4(transformed,1.)).xyz;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+    varying vec3 vWP; uniform float uTime;
+    float oH(vec3 p){ return sin(p.x*1.7+uTime*1.1)*0.5+sin(p.y*2.3-uTime*0.9)*0.5+sin(p.z*2.9+uTime*1.3)*0.4+sin((p.x+p.z)*5.3-uTime*2.1)*0.15; }`)
+  .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+    { vec3 p=vWP*40.; float e=0.05, h0=oH(p); vec3 g=vec3(oH(p+vec3(e,0,0))-h0,oH(p+vec3(0,e,0))-h0,oH(p+vec3(0,0,e))-h0)/e;
+      vec3 up=normalize(vWP); g-=up*dot(g,up); float fade=1.-smoothstep(2.,30.,length(cameraPosition)-${R.toFixed(1)});
+      normal=normalize(normal-(viewMatrix*vec4(g*0.03*fade,0.)).xyz); }`); };
+
+// ------------------------------------------------------------ tiles
+const strip=s=>s.replace(/^export /gm,'');
+async function workerSource(){
+  const gen=GEN_SRC||strip(await (await fetch('./terrain-gen.js')).text()), cube=CUBE_SRC||strip(await (await fetch('./cube-sphere.js')).text());
+  return gen+'\n'+cube+'\n'+PLANET_WORKER;
+}
+let tilesys=null, groundT=createTerrain(planetParams(7));
+workerSource().then(src=>{
+  tilesys=createPlanetTiles({THREE,gridIndex,faceDir,dirFace,tileKey},{scene,radius:R,res:48,maxLevel:9,workerSrc:src,params:planetParams(+$('seed').value),terrainMaterial:terrainMat,oceanMaterial:oceanMat});
+});
+
+// ------------------------------------------------------------ camera: continuous orbit → ground
+const cam={lat:0.35,lon:0.6,alt:R*1.6,heading:0,tiltOff:0};
+const tmp={}, up=new THREE.Vector3(), east=new THREE.Vector3(), north=new THREE.Vector3(), fwd=new THREE.Vector3();
+const dirOf=(lat,lon,out)=>out.set(Math.cos(lat)*Math.cos(lon),Math.sin(lat),Math.cos(lat)*Math.sin(lon));
+function groundAt(d){ groundT.sample(d.x*R,d.y*R,d.z*R,d.x,d.y,d.z,tmp); return Math.max(tmp.h,0); }
+function placeCamera(){
+  dirOf(cam.lat,cam.lon,up); const g=groundAt(up); cam.alt=Math.max(cam.alt,0.03);
+  camera.position.copy(up).multiplyScalar(R+g+cam.alt);
+  east.set(-Math.sin(cam.lon),0,Math.cos(cam.lon)); north.crossVectors(up,east).normalize();
+  // high up: look at the planet; low down: tilt toward the horizon
+  const low=1-THREE.MathUtils.smoothstep(cam.alt,1.5,80), pitch=THREE.MathUtils.clamp(-Math.PI/2+low*(Math.PI/2-0.22)+cam.tiltOff,-Math.PI/2,0.35);
+  const h=new THREE.Vector3().copy(north).multiplyScalar(Math.cos(cam.heading)).addScaledVector(east,Math.sin(cam.heading));
+  fwd.copy(h).multiplyScalar(Math.cos(pitch)).addScaledVector(up,Math.sin(pitch));
+  camera.up.copy(pitch<-1.5?h:up); camera.lookAt(camera.position.clone().add(fwd));
+  // atmosphere / sky by altitude
+  const inAir=1-THREE.MathUtils.smoothstep(cam.alt,4,90);
+  scene.background.setRGB(0.56*inAir,0.72*inAir,0.86*inAir); scene.fog.color.copy(scene.background); scene.fog.density=0.02*inAir*inAir;
+  stars.material.opacity=THREE.MathUtils.smoothstep(cam.alt,15,120); atmo.material.uniforms.uAlpha.value=1-inAir*0.85;
+  camera.near=Math.max(0.0005,cam.alt*0.001); camera.far=R*8; camera.updateProjectionMatrix();
+}
+{ const el=renderer.domElement; let drag=null; const pts=new Map(); let pinch=0;
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  el.addEventListener('pointerdown',e=>{ el.setPointerCapture(e.pointerId); pts.set(e.pointerId,[e.clientX,e.clientY]); drag={x:e.clientX,y:e.clientY,b:e.button}; });
+  el.addEventListener('pointermove',e=>{ if(!drag) return; if(pts.has(e.pointerId)) pts.set(e.pointerId,[e.clientX,e.clientY]);
+    if(pts.size===2){ const [a,b]=[...pts.values()], d=Math.hypot(a[0]-b[0],a[1]-b[1]); if(pinch) cam.alt*=pinch/d; pinch=d; return; }
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
+    if(drag.b===2||e.shiftKey){ cam.heading+=dx*0.005; cam.tiltOff=THREE.MathUtils.clamp(cam.tiltOff-dy*0.004,-1.2,1.2); return; }
+    move(-dy,dx,0.0022); });
+  const end=e=>{ pts.delete(e.pointerId); if(pts.size<2) pinch=0; if(!pts.size) drag=null; };
+  el.addEventListener('pointerup',end); el.addEventListener('pointercancel',end);
+  el.addEventListener('wheel',e=>{ e.preventDefault(); cam.alt=THREE.MathUtils.clamp(cam.alt*Math.exp(THREE.MathUtils.clamp(e.deltaY,-150,150)*0.0018),0.03,R*3); },{passive:false});
+}
+function move(fw,rt,k){ const s=Math.min(cam.alt,R)*k/R;   // angular step scales with altitude
+  const ch=Math.cos(cam.heading), sh=Math.sin(cam.heading);
+  cam.lat=THREE.MathUtils.clamp(cam.lat+(fw*ch-rt*sh)*s,-1.5,1.5); cam.lon+=(fw*sh+rt*ch)*s/Math.max(0.2,Math.cos(cam.lat)); }
+const keys=new Set(); addEventListener('keydown',e=>{ if(e.target.closest&&e.target.closest('input')) return; keys.add(e.key.toLowerCase()); }); addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+
+// ------------------------------------------------------------ UI
+$('lod').addEventListener('input',()=>{ $('lodv').textContent=(+$('lod').value).toFixed(1)+'×'; });
+$('lodv').textContent='2.2×';
+$('newp').addEventListener('click',()=>{ const s=Math.max(1,parseInt($('seed').value)||1); groundT=createTerrain(planetParams(s)); tilesys&&tilesys.setParams(planetParams(s)); });
+$('wire').addEventListener('click',e=>{ terrainMat.wireframe=!terrainMat.wireframe; e.currentTarget.setAttribute('aria-pressed',terrainMat.wireframe); });
+$('home').addEventListener('click',()=>{ cam.alt=R*1.6; cam.tiltOff=0; });
+function hud(){ const st=tilesys?tilesys.stats:{};
+  const a=cam.alt<1?(cam.alt*1000).toFixed(0)+' m':cam.alt.toFixed(cam.alt<10?2:0)+' km';
+  $('hud').innerHTML=`<span>Altitude</span><b>${a}</b><span>Lat / lon</span><b>${(cam.lat*57.3).toFixed(2)}° / ${((cam.lon*57.3)%360).toFixed(2)}°</b>
+    <span>Tiles drawn</span><b>${st.drawn??'–'}</b><span>Tiles loaded</span><b>${st.loaded??'–'}</b><span>Building / queued</span><b>${st.building??0} / ${st.queued??0}</b><span>Awaiting upload</span><b>${st.waiting??0}</b>
+    <span>Deepest level</span><b>${st.level??0}</b><span>Recomputes</span><b>${st.recomputes??0}</b>`; }
+
+// ------------------------------------------------------------ loop
+window.__planet={cam,get tiles(){ return tilesys; }};   // debugging handle
+function resize(){ const w=host.clientWidth,h=host.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
+let last=performance.now(), hudT=0;
+renderer.setAnimationLoop(t=>{ const dt=Math.min(0.05,(t-last)/1000); last=t;
+  if(keys.has('w')) move(1,0,dt*300); if(keys.has('s')) move(-1,0,dt*300); if(keys.has('a')) move(0,-1,dt*300); if(keys.has('d')) move(0,1,dt*300);
+  if(keys.has('q')) cam.heading-=dt*1.2; if(keys.has('e')) cam.heading+=dt*1.2; if(keys.has('r')) cam.tiltOff=Math.min(1.2,cam.tiltOff+dt); if(keys.has('f')) cam.tiltOff=Math.max(-1.2,cam.tiltOff-dt);
+  placeCamera(); OU.uTime.value=t/1000; terrainMat.userData.uniforms.uTime.value=t/1000;
+  if(tilesys){ tilesys.setSplitK(+$('lod').value); tilesys.update(camera); }
+  if((hudT+=dt)>0.2){ hudT=0; hud(); }
+  renderer.render(scene,camera); });
+</script>

@@ -1,0 +1,782 @@
+<title>Quadsphere Planet Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --ground:#05070a; --panel:rgba(12,16,20,.82); --line:rgba(200,215,225,.12); --line-2:rgba(200,215,225,.26);
+  --ink:#e4ebf0; --ink-2:#a3b0ba; --ink-3:#6f7c86; --accent:#8cc6e8; --warn:#e3a45a;
+  --ui:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:var(--ui);overflow:hidden}
+#view{position:fixed;inset:0}
+#view canvas{display:block;width:100%;height:100%;touch-action:none}
+.panel{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;width:280px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;flex-direction:column}
+.head{padding:12px 14px 8px;border-bottom:1px solid var(--line)}
+.head h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.02em}
+.hud{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.hud b{color:var(--ink);font-weight:500;text-align:right}
+.ctl{display:flex;flex-direction:column;gap:9px;padding:10px 14px 14px;border-top:1px solid var(--line)}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+label{font-size:12px;color:var(--ink-2)}
+input[type=number]{font:500 12px var(--mono);color:var(--ink);background:rgba(0,0,0,.35);border:1px solid var(--line-2);padding:5px 7px;width:84px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button{font:500 13px var(--ui);color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--ink-2)} button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:12px;color:var(--ink-3);line-height:1.45;margin:0}
+@media (max-width:640px){ .panel{width:auto;right:12px} .ctl .hint{display:none} }
+</style>
+
+<div id="view"></div>
+<aside class="panel" aria-label="Planet controls">
+  <div class="head"><h1>Quadsphere planet lab</h1></div>
+  <div class="hud" id="hud" aria-live="off"></div>
+  <div class="ctl">
+    <div class="inline"><label for="seed">Seed</label><input type="number" id="seed" value="7" min="1"><button type="button" id="newp">New planet</button></div>
+    <label for="lod">Detail distance <span id="lodv"></span></label><input type="range" id="lod" min="1.2" max="4" step="0.1" value="2.2">
+    <div class="inline"><button type="button" id="wire" aria-pressed="false">Tile wireframe</button><button type="button" id="home">Back to orbit</button></div>
+    <p class="hint">Scroll or pinch to zoom from orbit to the ground. Drag to travel, right-drag (or Q/E, R/F) to turn and tilt, WASD to move.</p>
+  </div>
+</aside>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+const {createTerrain, buildTile, gridIndex, DEFAULT_TERRAIN}=(()=>{
+// Terrain generator — pure JS, no dependencies, safe to run in a Web Worker.
+//
+// Height is a function of a 3D point and its local "up" direction, so the same code drives
+// a flat test tile now (up = +Y) and quad-sphere planet tiles later (up = normalize(p)).
+// Everything is seeded and deterministic: a tile rebuilt from the same address is identical.
+//
+// Layers:
+//   1. region mask   — where mountain ranges vs. flat valley floors are
+//   2. domain warp   — bends ridgelines so they branch instead of lining up on a grid
+//   3. ridged multifractal with derivative damping — sharp crests, eroded-looking flanks
+//   4. gully filter  — slope-aligned channels running downhill (triplanar, seamless on a sphere)
+//   5. droplet erosion (optional, per grid) — hydraulic carving + sediment fans
+//
+// Units are arbitrary; the lab uses kilometres.
+
+const DEFAULT_TERRAIN = {
+  seed: 7,
+  mountainHeight: 1.35,   // peak height above the valley floor
+  valleyHeight: 0.05,     // relief of the flat areas
+  coverage: 0.52,         // 0..1, how much of the land is mountains
+  maskScale: 0.11,        // frequency of the mountain/valley regions
+  ridgeScale: 0.32,       // base frequency of the ridges
+  octaves: 9,
+  sharpness: 2.1,         // ridge crest sharpness (1 = rounded, 3 = knife edges)
+  ridgeGain: 1.9,         // how much detail follows existing ridges
+  erosionDamping: 0.55,   // derivative damping: smooth slopes, detail stays on crests and flats
+  warp: 0.75,             // domain warp amount
+  warpScale: 0.18,
+  gullyStrength: 0.9,     // slope-aligned channel depth
+  gullyScale: 3.2,        // channel frequency
+  gullySlope: 3.0,        // how strongly slope steers the channels
+  gullyOctaves: 5,
+  pads: null,             // [{x,y,z,r,fall,h,rough}] flattened settlement areas (same units)
+  continents: null,       // {scale, coast, depth, uplift}: oceans + land masses (planet); off for single tiles
+};
+
+// ---------------------------------------------------------------- noise
+function mulberry(a){ return ()=>{ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+function makeNoise(seed){
+  const r=mulberry(seed*9973+17), perm=new Uint8Array(512), val=new Float32Array(256);
+  for(let i=0;i<256;i++){ perm[i]=i; val[i]=r()*2-1; }
+  for(let i=255;i>0;i--){ const j=(r()*(i+1))|0; const t=perm[i]; perm[i]=perm[j]; perm[j]=t; }
+  for(let i=0;i<256;i++) perm[i+256]=perm[i];
+  const H=(x,y,z)=>val[perm[perm[perm[x&255]+(y&255)]+(z&255)]];
+
+  // value noise with analytic derivatives (quintic). out = [value, dx, dy, dz], value in ~[-1,1]
+  function noised(x,y,z,out){
+    const ix=Math.floor(x), iy=Math.floor(y), iz=Math.floor(z), fx=x-ix, fy=y-iy, fz=z-iz;
+    const ux=fx*fx*fx*(fx*(fx*6-15)+10), uy=fy*fy*fy*(fy*(fy*6-15)+10), uz=fz*fz*fz*(fz*(fz*6-15)+10);
+    const dux=30*fx*fx*(fx*(fx-2)+1), duy=30*fy*fy*(fy*(fy-2)+1), duz=30*fz*fz*(fz*(fz-2)+1);
+    const a=H(ix,iy,iz), b=H(ix+1,iy,iz), c=H(ix,iy+1,iz), d=H(ix+1,iy+1,iz);
+    const e=H(ix,iy,iz+1), f=H(ix+1,iy,iz+1), g=H(ix,iy+1,iz+1), h=H(ix+1,iy+1,iz+1);
+    const k1=b-a, k2=c-a, k3=e-a, k4=a-b-c+d, k5=a-c-e+g, k6=a-b-e+f, k7=-a+b+c-d+e-f-g+h;
+    out[0]=a+k1*ux+k2*uy+k3*uz+k4*ux*uy+k5*uy*uz+k6*uz*ux+k7*ux*uy*uz;
+    out[1]=dux*(k1+k4*uy+k6*uz+k7*uy*uz);
+    out[2]=duy*(k2+k5*uz+k4*ux+k7*uz*ux);
+    out[3]=duz*(k3+k6*ux+k5*uy+k7*ux*uy);
+    return out;
+  }
+  // 2D cell hash for the gully filter
+  const hash2=(x,y,o)=>{ const i=perm[perm[x&255]+(y&255)]; o[0]=val[i]*0.5+0.5; o[1]=val[perm[i+37]]*0.5+0.5; return o; };
+  return {noised,hash2};
+}
+
+// octave rotation (breaks grid alignment between octaves)
+const RM=[0.00,0.80,0.60, -0.80,0.36,-0.48, -0.60,-0.48,0.64];
+
+// ---------------------------------------------------------------- terrain
+function createTerrain(opts={}){
+  const P={...DEFAULT_TERRAIN,...opts};
+  const N=makeNoise(P.seed), nd=[0,0,0,0], hc=[0,0];
+
+  // fbm value + world-space gradient. out=[v,gx,gy,gz]
+  function fbm(x,y,z,freq,oct,out){
+    let m0=freq,m1=0,m2=0,m3=0,m4=freq,m5=0,m6=0,m7=0,m8=freq;   // accumulated matrix M (q = M p)
+    let v=0,gx=0,gy=0,gz=0,a=0.5,norm=0;
+    for(let i=0;i<oct;i++){
+      N.noised(m0*x+m1*y+m2*z, m3*x+m4*y+m5*z, m6*x+m7*y+m8*z, nd);
+      v+=a*nd[0]; norm+=a;
+      gx+=a*(m0*nd[1]+m3*nd[2]+m6*nd[3]); gy+=a*(m1*nd[1]+m4*nd[2]+m7*nd[3]); gz+=a*(m2*nd[1]+m5*nd[2]+m8*nd[3]);
+      const n0=2*(RM[0]*m0+RM[1]*m3+RM[2]*m6), n1=2*(RM[0]*m1+RM[1]*m4+RM[2]*m7), n2=2*(RM[0]*m2+RM[1]*m5+RM[2]*m8);
+      const n3=2*(RM[3]*m0+RM[4]*m3+RM[5]*m6), n4=2*(RM[3]*m1+RM[4]*m4+RM[5]*m7), n5=2*(RM[3]*m2+RM[4]*m5+RM[5]*m8);
+      const n6=2*(RM[6]*m0+RM[7]*m3+RM[8]*m6), n7=2*(RM[6]*m1+RM[7]*m4+RM[8]*m7), n8=2*(RM[6]*m2+RM[7]*m5+RM[8]*m8);
+      m0=n0;m1=n1;m2=n2;m3=n3;m4=n4;m5=n5;m6=n6;m7=n7;m8=n8; a*=0.5;
+    }
+    out[0]=v/norm; out[1]=gx/norm; out[2]=gy/norm; out[3]=gz/norm; return out;
+  }
+
+  // ridged multifractal with derivative damping. returns [h 0..~1, gx, gy, gz]
+  function ridged(x,y,z,out){
+    let m0=P.ridgeScale,m1=0,m2=0,m3=0,m4=P.ridgeScale,m5=0,m6=0,m7=0,m8=P.ridgeScale;
+    let sum=0,a=1,w=1,dx=0,dy=0,dz=0,gx=0,gy=0,gz=0,norm=0;
+    for(let i=0;i<P.octaves;i++){
+      N.noised(m0*x+m1*y+m2*z, m3*x+m4*y+m5*z, m6*x+m7*y+m8*z, nd);
+      const wx=m0*nd[1]+m3*nd[2]+m6*nd[3], wy=m1*nd[1]+m4*nd[2]+m7*nd[3], wz=m2*nd[1]+m5*nd[2]+m8*nd[3];
+      const s=nd[0]<0?-1:1, r0=1-Math.abs(nd[0]), r=Math.pow(Math.max(r0,0),P.sharpness);
+      const k=-s*P.sharpness*Math.pow(Math.max(r0,1e-4),P.sharpness-1);   // d(ridge)/d(noise)
+      const rx=k*wx, ry=k*wy, rz=k*wz;
+      // damping: detail is suppressed where the accumulated slope is steep (flanks stay clean, crests stay busy)
+      const damp=1/(1+P.erosionDamping*(dx*dx+dy*dy+dz*dz));
+      const c=a*w*r*damp; sum+=c; norm+=a;
+      gx+=a*w*damp*rx; gy+=a*w*damp*ry; gz+=a*w*damp*rz;
+      dx+=a*rx*w; dy+=a*ry*w; dz+=a*rz*w;
+      w=Math.min(1,Math.max(0,r*P.ridgeGain));
+      const n0=2*(RM[0]*m0+RM[1]*m3+RM[2]*m6), n1=2*(RM[0]*m1+RM[1]*m4+RM[2]*m7), n2=2*(RM[0]*m2+RM[1]*m5+RM[2]*m8);
+      const n3=2*(RM[3]*m0+RM[4]*m3+RM[5]*m6), n4=2*(RM[3]*m1+RM[4]*m4+RM[5]*m7), n5=2*(RM[3]*m2+RM[4]*m5+RM[5]*m8);
+      const n6=2*(RM[6]*m0+RM[7]*m3+RM[8]*m6), n7=2*(RM[6]*m1+RM[7]*m4+RM[8]*m7), n8=2*(RM[6]*m2+RM[7]*m5+RM[8]*m8);
+      m0=n0;m1=n1;m2=n2;m3=n3;m4=n4;m5=n5;m6=n6;m7=n7;m8=n8; a*=0.5;
+    }
+    out[0]=sum/norm; out[1]=gx/norm; out[2]=gy/norm; out[3]=gz/norm; return out;
+  }
+
+  // gully filter (after clayjohn's "eroded terrain noise"): slope-aligned cosine stripes in a
+  // jittered cell grid. (u,v) are plane coords, (ga,gb) the height gradient in that plane.
+  const TAU=Math.PI*2;
+  function erosionCell(u,v,dirx,diry,o){
+    const iu=Math.floor(u), iv=Math.floor(v), fu=u-iu, fv=v-iv; let va=0,vb=0,vc=0,wt=0;
+    for(let i=-2;i<=1;i++) for(let j=-2;j<=1;j++){
+      N.hash2(iu-i,iv-j,hc); const pu=fu+i-hc[0]*0.5, pv=fv+j-hc[1]*0.5;
+      const w=Math.exp(-(pu*pu+pv*pv)*2); wt+=w; const mag=(pu*dirx+pv*diry)*TAU;
+      va+=Math.cos(mag)*w; const sn=-Math.sin(mag)*w; vb+=sn*dirx; vc+=sn*diry;
+    }
+    o[0]=va/wt; o[1]=vb/wt; o[2]=vc/wt; return o;
+  }
+  const eo=[0,0,0];
+  function gullyPlane(u,v,ga,gb){
+    let hx=0,hy=0,hz=0,a=0.5,f=1;
+    const bx=gb*P.gullySlope, by=-ga*P.gullySlope;      // gradient rotated 90° → stripes run downhill
+    for(let i=0;i<P.gullyOctaves;i++){
+      erosionCell(u*P.gullyScale*f, v*P.gullyScale*f, bx+hz, by-hy, eo);
+      hx+=eo[0]*a; hy+=eo[1]*a*f; hz+=eo[2]*a*f; a*=0.4; f*=2;
+    }
+    return hx;   // ~[-1,1]: negative = channel, positive = spur
+  }
+
+  const t4=[0,0,0,0], w1=[0,0,0,0], w2=[0,0,0,0], w3=[0,0,0,0], rg=[0,0,0,0], vl=[0,0,0,0];
+  // Height at 3D point p with local up u. out = {h, gully, mountain}
+  function sample(px,py,pz,ux,uy,uz,out){
+    // 1. regions
+    fbm(px+31.7,py-12.3,pz+5.1,P.maskScale,4,t4);
+    const m0=t4[0]*0.5+0.5, lo=P.coverage-0.12, hi=P.coverage+0.12;
+    let mt=Math.min(1,Math.max(0,(m0-(1-hi))/((1-lo)-(1-hi)))); mt=mt*mt*(3-2*mt);
+    // 2. warp
+    fbm(px,py,pz,P.warpScale,3,w1); fbm(px+17.1,py+3.3,pz-9.2,P.warpScale,3,w2); fbm(px-5.7,py+11.9,pz+23.4,P.warpScale,3,w3);
+    const qx=px+P.warp*w1[0], qy=py+P.warp*w2[0], qz=pz+P.warp*w3[0];
+    // 3. ridges (+ gentle valley floor)
+    ridged(qx,qy,qz,rg); fbm(px-40,py+2,pz+11,0.9,4,vl);
+    let mh=P.mountainHeight*mt; const vh=P.valleyHeight;
+    let h=vh*(vl[0]*0.5+0.5)+mh*rg[0]*rg[0]*1.6;        // squaring keeps valley floors flat, lifts peaks
+    const gs=mh*rg[0]*3.2, gx=gs*rg[1]+vh*0.5*vl[1], gy=gs*rg[2]+vh*0.5*vl[2], gz=gs*rg[3]+vh*0.5*vl[3];
+    // 4. gullies — gradient projected onto the tangent plane, triplanar-blended by up (seamless on a sphere)
+    const gd=gx*ux+gy*uy+gz*uz, tx=gx-ux*gd, ty=gy-uy*gd, tz=gz-uz*gd, slope=Math.hypot(tx,ty,tz);
+    let gully=0;
+    if(P.gullyStrength>0&&mh>1e-4){
+      let ax=ux*ux*ux*ux, ay=uy*uy*uy*uy, az=uz*uz*uz*uz; const s=ax+ay+az; ax/=s; ay/=s; az/=s;
+      if(ay>0.01) gully+=ay*gullyPlane(px,pz,tx,tz);
+      if(ax>0.01) gully+=ax*gullyPlane(pz,py,tz,ty);
+      if(az>0.01) gully+=az*gullyPlane(px,py,tx,ty);
+      const sm=Math.min(1,slope/0.9);                 // only on slopes
+      h+=gully*P.gullyStrength*0.06*mh*sm*(0.35+0.65*rg[0]);
+      gully*=sm;
+    }
+    // continents: very large-scale noise decides land vs ocean; mountains only on land, shelves slope into the deep
+    if(P.continents){ const C=P.continents; fbm(px+101.3,py-57.1,pz+33.7,C.scale,5,t4); const c=t4[0]-C.coast;
+      let land=Math.min(1,Math.max(0,(c+0.03)/0.12)); land=land*land*(3-2*land);
+      h=h*land+(c>0?c*C.uplift:c*C.depth); gully*=land; mt*=land; }
+    // 5. settlement pads: flatten an area (towns, arenas) and blend it into the surroundings
+    if(P.pads) for(let i=0;i<P.pads.length;i++){ const pd=P.pads[i], d=Math.hypot(px-pd.x,py-(pd.y||0),pz-pd.z);
+      if(d<pd.r+pd.fall){ let w=Math.min(1,Math.max(0,1-(d-pd.r)/pd.fall)); w=w*w*(3-2*w);
+        h+=(pd.h+(pd.rough||0)*vl[0]-h)*w; gully*=1-w; mt*=1-w; } }
+    out.h=h; out.gully=gully; out.mountain=mt; return out;
+  }
+  return {params:P, sample};
+}
+
+// ---------------------------------------------------------------- tile grid
+// Builds one tile. pointAt(u,v,out) maps tile coords (0..1, margin may go outside) to a base
+// point {x,y,z} and unit up {ux,uy,uz}; the surface point is base + up*h.
+// Flat tile:  base = (x0+u*size, 0, z0+v*size), up = +Y.
+// Planet tile: base = cubeToSphere(face,u,v)*R, up = normalize(base).
+function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1, cellSize=1}){
+  const M=4, W=res+1+2*M, n=W*W;                         // margin for normals, cavity, erosion
+  const bx=new Float32Array(n), by=new Float32Array(n), bz=new Float32Array(n), ux=new Float32Array(n), uy=new Float32Array(n), uz=new Float32Array(n);
+  const h=new Float32Array(n), gully=new Float32Array(n), mount=new Float32Array(n), pt={x:0,y:0,z:0,ux:0,uy:1,uz:0}, s={};
+  for(let j=0;j<W;j++) for(let i=0;i<W;i++){
+    const k=j*W+i; pointAt((i-M)/res,(j-M)/res,pt);
+    bx[k]=pt.x; by[k]=pt.y; bz[k]=pt.z; ux[k]=pt.ux; uy[k]=pt.uy; uz[k]=pt.uz;
+    terrain.sample(pt.x,pt.y,pt.z,pt.ux,pt.uy,pt.uz,s); h[k]=s.h; gully[k]=s.gully; mount[k]=s.mountain;
+  }
+  let flow=new Float32Array(n), dep=new Float32Array(n); const h0=droplets>0?h.slice():null;
+  if(droplets>0) ({flow,dep}=erodeDroplets(h,W,{droplets,seed:dropletSeed,cellSize,margin:M}));
+
+  // outputs (interior only)
+  const V=(res+1)*(res+1), pos=new Float32Array(V*3), nor=new Float32Array(V*3), terr=new Float32Array(V*4), delta=h0?new Float32Array(V):null;
+  const X=k=>bx[k]+ux[k]*h[k], Y=k=>by[k]+uy[k]*h[k], Z=k=>bz[k]+uz[k]*h[k];
+  let hmin=1e9,hmax=-1e9;
+  for(let j=0;j<=res;j++) for(let i=0;i<=res;i++){
+    const k=(j+M)*W+(i+M), o=j*(res+1)+i;
+    pos[o*3]=X(k); pos[o*3+1]=Y(k); pos[o*3+2]=Z(k);
+    // normal from neighbours (works for flat and curved tiles)
+    const l=k-1, r=k+1, d=k-W, u=k+W;
+    const ax=X(r)-X(l), ay=Y(r)-Y(l), az=Z(r)-Z(l), cx=X(u)-X(d), cy=Y(u)-Y(d), cz=Z(u)-Z(d);
+    let nx=cy*az-cz*ay, ny=cz*ax-cx*az, nz=cx*ay-cy*ax; const L=Math.hypot(nx,ny,nz)||1;
+    if(nx*ux[k]+ny*uy[k]+nz*uz[k]<0) { nx=-nx; ny=-ny; nz=-nz; }
+    nor[o*3]=nx/L; nor[o*3+1]=ny/L; nor[o*3+2]=nz/L;
+    // cavity: + in creases/valleys, - on crests (in height units per cell)
+    const cav=(h[l]+h[r]+h[d]+h[u]+0.5*(h[d-1]+h[d+1]+h[u-1]+h[u+1]))/6-h[k];
+    terr[o*4]=h[k]; terr[o*4+1]=gully[k]; terr[o*4+2]=cav/cellSize; terr[o*4+3]=Math.min(1,flow[k]*0.05+dep[k]*15)*(droplets>0?1:0);
+    if(delta) delta[o]=h[k]-h0[k];
+    if(h[k]<hmin) hmin=h[k]; if(h[k]>hmax) hmax=h[k];
+  }
+  // delta: erosion change per vertex (null without droplets) — lets a finer patch inherit the same carving
+  return {res,positions:pos,normals:nor,terrain:terr,hmin,hmax,mountain:mount,delta};
+}
+
+function flatPointAt(x0,z0,size){ return (u,v,o)=>{ o.x=x0+u*size; o.y=0; o.z=z0+v*size; o.ux=0; o.uy=1; o.uz=0; return o; }; }
+
+// shared index buffer for a (res+1)^2 grid
+function gridIndex(res){
+  const idx=new Uint32Array(res*res*6); let t=0;
+  for(let j=0;j<res;j++) for(let i=0;i<res;i++){ const a=j*(res+1)+i, b=a+1, c=a+res+1, d=c+1;
+    if((i+j)&1){ idx[t++]=a; idx[t++]=c; idx[t++]=b; idx[t++]=b; idx[t++]=c; idx[t++]=d; }
+    else { idx[t++]=a; idx[t++]=c; idx[t++]=d; idx[t++]=a; idx[t++]=d; idx[t++]=b; } }
+  return idx;
+}
+
+// ---------------------------------------------------------------- hydraulic droplet erosion
+// Particle erosion on a square height grid (after Hans Beyer / Sebastian Lague). Modifies h in place.
+// Returns per-cell flow (how much water passed) and deposition, which the material uses.
+// For the planet this runs on regions larger than a tile (margins) so seams stay hidden.
+function erodeDroplets(h,W,{droplets=50000,seed=1,cellSize=1,margin=0,
+  inertia=0.05,capacity=5,minCapacity=0.01,erodeRate=0.35,depositRate=0.25,evaporate=0.015,gravity=4,life=40,radius=3}={}){
+  const r=mulberry(seed*131+7), n=W*W, flow=new Float32Array(n), dep=new Float32Array(n);
+  let hmax=0; for(let i=0;i<n;i++) hmax=Math.max(hmax,Math.abs(h[i]));
+  const S=(1/cellSize)/(W*0.004+1);   // height → "cell units" so slopes are in a sane range at any scale
+  const hs=new Float32Array(n); for(let i=0;i<n;i++) hs[i]=h[i]*S;
+  // erosion brush
+  const bo=[], bw=[]; let bs=0;
+  for(let y=-radius;y<=radius;y++) for(let x=-radius;x<=radius;x++){ const d=Math.hypot(x,y); if(d<radius){ bo.push([x,y]); const w=1-d/radius; bw.push(w); bs+=w; } }
+  for(let i=0;i<bw.length;i++) bw[i]/=bs;
+  const grad=(x,y)=>{ const ix=x|0, iy=y|0, fx=x-ix, fy=y-iy, k=iy*W+ix;
+    const a=hs[k], b=hs[k+1], c=hs[k+W], d=hs[k+W+1];
+    return [(b-a)*(1-fy)+(d-c)*fy, (c-a)*(1-fx)+(d-b)*fx, a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy]; };
+  const lo=1, hi=W-2-1e-3;
+  for(let q=0;q<droplets;q++){
+    let x=lo+r()*(hi-lo), y=lo+r()*(hi-lo), dx=0, dy=0, sp=1, wat=1, sed=0;
+    for(let t=0;t<life;t++){
+      const ix=x|0, iy=y|0, fx=x-ix, fy=y-iy, k=iy*W+ix; const [gx,gy,hh]=grad(x,y);
+      dx=dx*inertia-gx*(1-inertia); dy=dy*inertia-gy*(1-inertia); const L=Math.hypot(dx,dy); if(L<1e-9) break; dx/=L; dy/=L;
+      x+=dx; y+=dy; if(x<lo||y<lo||x>hi||y>hi) break;
+      flow[k]+=wat*0.02;
+      const nh=grad(x,y)[2], dh=nh-hh;
+      const cap=Math.max(-dh*sp*wat*capacity,minCapacity);
+      if(sed>cap||dh>0){   // deposit
+        const amt=dh>0?Math.min(dh,sed):(sed-cap)*depositRate; sed-=amt;
+        hs[k]+=amt*(1-fx)*(1-fy); hs[k+1]+=amt*fx*(1-fy); hs[k+W]+=amt*(1-fx)*fy; hs[k+W+1]+=amt*fx*fy; dep[k]+=amt;
+      } else {             // erode with brush
+        const amt=Math.min((cap-sed)*erodeRate,-dh);
+        for(let b=0;b<bo.length;b++){ const cx=ix+bo[b][0], cy=iy+bo[b][1]; if(cx<0||cy<0||cx>=W||cy>=W) continue;
+          const kk=cy*W+cx, e=Math.min(hs[kk],amt*bw[b]); hs[kk]-=e; sed+=e; }
+      }
+      sp=Math.sqrt(Math.max(0,sp*sp+dh*gravity)); wat*=1-evaporate;
+    }
+  }
+  for(let i=0;i<n;i++) h[i]=hs[i]/S;
+  // blur flow a little for shading
+  const f2=new Float32Array(n); for(let y=1;y<W-1;y++) for(let x=1;x<W-1;x++){ const k=y*W+x; f2[k]=(flow[k]*4+flow[k-1]+flow[k+1]+flow[k-W]+flow[k+W])/8; }
+  return {flow:f2,dep};
+}
+
+// ---------------------------------------------------------------- baked sun visibility
+// Soft terrain self-shadowing for a flat tile: for each vertex, march toward the sun over the height
+// grid and measure how far the terrain rises above the ray. Returns 0 (shadowed) .. 1 (lit).
+// heights: (res+1)^2 grid over `size` (same units as heights); sun: unit vector toward the sun (x,y,z).
+function bakeSunVisibility(heights,res,size,sun,{maxDist=size*0.6,softness=0.04}={}){
+  const R=res+1, cell=size/res, out=new Float32Array(R*R), hl=Math.hypot(sun[0],sun[2])||1e-6;
+  const dx=sun[0]/hl, dz=sun[2]/hl, rise=sun[1]/hl, steps=Math.ceil(maxDist/cell);
+  const Hs=(x,z)=>{ if(x<0||z<0||x>res||z>res) return -1e9; const i=Math.min(res-1,x|0), j=Math.min(res-1,z|0), fx=x-i, fz=z-j;
+    return (heights[j*R+i]*(1-fx)+heights[j*R+i+1]*fx)*(1-fz)+(heights[(j+1)*R+i]*(1-fx)+heights[(j+1)*R+i+1]*fx)*fz; };
+  for(let j=0;j<R;j++) for(let i=0;i<R;i++){ const h0=heights[j*R+i]; let vis=1;
+    for(let s=1;s<=steps;s++){ const t=s*cell*(1+s*0.01), x=i+dx*t/cell, z=j+dz*t/cell, ht=Hs(x,z); if(ht<-1e8) break;
+      const clear=h0+t*rise-ht; if(clear<0){ vis=0; break; } vis=Math.min(vis,clear/(t*softness)); if(h0+t*rise>1e3) break; }
+    out[j*R+i]=Math.max(0,Math.min(1,vis)); }
+  return out;
+}
+
+return {createTerrain, buildTile, gridIndex, DEFAULT_TERRAIN};
+})();
+const {createTerrainMaterial}=(()=>{
+// Terrain material — MeshStandardMaterial extended with slope/height/erosion-driven layers.
+// Texture-free (all surface detail is procedural) so it works anywhere; lit, shadowed and
+// fogged by three.js as usual. Needs the per-vertex `aTerr` attribute from buildTile():
+//   x = height, y = gully (-channel/+spur), z = cavity (+crease/-crest), w = water flow/deposition
+//
+// upMode 0 = flat tile (up is +Y), 1 = planet (up = normalize(worldPos - planetCenter)).
+
+const DEFAULT_MATERIAL = {
+  snowLine: 1.05, snowFade: 0.18, rockSlope: 0.52, rockSoftness: 0.16, waterLevel: 0.035,
+  detail: 1.0, strata: 0.35, wetBand: 0.0015, beach: 0.004,   // km above water: real beaches are only a few metres high caustics: 1.0,
+  sand: [0.55,0.49,0.37],
+  grass: [0.27,0.33,0.10], grassDry: [0.52,0.52,0.22], dirt: [0.33,0.28,0.20], rock: [0.19,0.19,0.20], rockLight: [0.42,0.40,0.37], snow: [0.93,0.95,0.98],
+};
+
+// opts.km: world units per km (1 in the lab, 100 in the game). opts.hole: [x0,z0,x1,z1] world rect to discard
+// (where a finer patch is drawn). opts.overlay: {mask, extent, asphalt, stone} road/plaza mask (R=road G=plaza B=dirt).
+// opts.detailTex: close-range grass detail texture, opts.detailScale: its repeat per world unit.
+function createTerrainMaterial(THREE, opts={}){
+  const P={...DEFAULT_MATERIAL,...opts};
+  const U={
+    uSnowLine:{value:P.snowLine}, uSnowFade:{value:P.snowFade}, uRockSlope:{value:P.rockSlope}, uRockSoft:{value:P.rockSoftness},
+    uWater:{value:P.waterLevel}, uDetail:{value:P.detail}, uStrata:{value:P.strata}, uUpMode:{value:opts.upMode||0}, uTime:{value:0}, uWetBand:{value:P.wetBand}, uBeach:{value:P.beach}, uCaustics:{value:P.caustics}, uSand:{value:new THREE.Color(...P.sand)}, uCenter:{value:new THREE.Vector3()},
+    uGrass:{value:new THREE.Color(...P.grass)}, uGrassDry:{value:new THREE.Color(...P.grassDry)}, uDirt:{value:new THREE.Color(...P.dirt)},
+    uRock:{value:new THREE.Color(...P.rock)}, uRockLight:{value:new THREE.Color(...P.rockLight)}, uSnow:{value:new THREE.Color(...P.snow)},
+  };
+  U.uKm={value:opts.km||1};
+  const defines={};
+  if(opts.hole){ defines.TERRAIN_HOLE=''; U.uHole={value:new THREE.Vector4(...opts.hole)}; }
+  if(opts.overlay){ defines.TERRAIN_OVERLAY=''; Object.assign(U,{tMask:{value:opts.overlay.mask},uMaskE:{value:opts.overlay.extent},tAsph:{value:opts.overlay.asphalt},tStone:{value:opts.overlay.stone}}); }
+  if(opts.sunVis){ defines.TERRAIN_SUNVIS=''; }   // needs per-vertex `aSun` (bakeSunVisibility)
+  if(opts.detailTex){ defines.TERRAIN_DETAILTEX=''; Object.assign(U,{tDetail:{value:opts.detailTex},uDetailScale:{value:opts.detailScale||0.9}}); }
+  const m=new THREE.MeshStandardMaterial({roughness:0.9,metalness:0});
+  m.defines=defines;
+  if(opts.polygonOffset){ m.polygonOffset=true; m.polygonOffsetFactor=1; m.polygonOffsetUnits=2; }
+  m.userData.uniforms=U;
+  m.onBeforeCompile=sh=>{
+    Object.assign(sh.uniforms,U);
+    sh.vertexShader=sh.vertexShader
+      .replace('#include <common>',`#include <common>
+        attribute vec4 aTerr; varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
+        #ifdef TERRAIN_SUNVIS
+        attribute float aSun; varying float vSun;
+        #endif`)
+      .replace('#include <worldpos_vertex>',`#include <worldpos_vertex>
+        vTerr=aTerr; vWPos=(modelMatrix*vec4(transformed,1.)).xyz; vWNorm=normalize(mat3(modelMatrix)*objectNormal);
+        #ifdef TERRAIN_SUNVIS
+        vSun=aSun;
+        #endif`);
+    sh.fragmentShader=sh.fragmentShader
+      .replace('#include <common>',`#include <common>
+        varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
+        uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata,uTime,uWetBand,uBeach,uCaustics; uniform vec3 uSand; uniform int uUpMode; uniform vec3 uCenter; uniform float uKm;
+        #ifdef TERRAIN_SUNVIS
+        varying float vSun;
+        #endif
+        #ifdef TERRAIN_HOLE
+        uniform vec4 uHole;
+        #endif
+        #ifdef TERRAIN_OVERLAY
+        uniform sampler2D tMask,tAsph,tStone; uniform float uMaskE;
+        #endif
+        #ifdef TERRAIN_DETAILTEX
+        uniform sampler2D tDetail; uniform float uDetailScale;
+        #endif
+        uniform vec3 uGrass,uGrassDry,uDirt,uRock,uRockLight,uSnow;
+        float tHash(vec3 p){ p=fract(p*0.3183099+.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+        float tNoise(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+          return mix(mix(mix(tHash(i),tHash(i+vec3(1,0,0)),f.x),mix(tHash(i+vec3(0,1,0)),tHash(i+vec3(1,1,0)),f.x),f.y),
+                     mix(mix(tHash(i+vec3(0,0,1)),tHash(i+vec3(1,0,1)),f.x),mix(tHash(i+vec3(0,1,1)),tHash(i+vec3(1,1,1)),f.x),f.y),f.z); }
+        float tFbm(vec3 p){ float s=0.,a=.5; for(int i=0;i<4;i++){ s+=a*tNoise(p); p=p*2.03+17.1; a*=.5; } return s; }
+        // triplanar rock: projections weighted by the surface normal so cliffs don't smear
+        float tRock(vec3 p, vec3 n){ vec3 w=pow(abs(n),vec3(4.)); w/=w.x+w.y+w.z;
+          return tFbm(p.yzx*vec3(1.,3.,1.))*w.x + tFbm(p.xzy)*w.y + tFbm(p*vec3(1.,3.,1.))*w.z; }
+        vec3 tUp(){ return uUpMode==1 ? normalize(vWPos-uCenter) : vec3(0.,1.,0.); }
+        float gLayer; float gRockW; float gSnowW; float gCav; float gWet;
+        float tCaustic(vec2 p,float t){ float a=tNoise(vec3(p,t)), b=tNoise(vec3(p*1.37+11.,t*1.3)); return pow(1.-abs(a-b),9.); }`)
+      .replace('#include <map_fragment>',`
+        #ifdef TERRAIN_HOLE
+        if(vWPos.x>uHole.x&&vWPos.z>uHole.y&&vWPos.x<uHole.z&&vWPos.z<uHole.w) discard;
+        #endif
+        vec3 KP=vWPos/uKm;                                 // position in km: all procedural detail is scale-independent
+        vec3 up=tUp(); vec3 wn=normalize(vWNorm); float h=vTerr.x, gully=vTerr.y, cav=clamp(vTerr.z*0.35,-1.,1.), flow=vTerr.w;
+        float slope=1.-clamp(dot(wn,up),0.,1.);          // 0 flat .. 1 vertical
+        vec3 P=KP*18.;                                  // detail space (tile units are km → ~55 m features)
+        float macro=tFbm(KP*1.3), fine=tNoise(P*3.);
+        // grass: lush in hollows, dry on exposed ground
+        vec3 grass=mix(uGrass,uGrassDry,clamp(macro*1.3-0.35+(-cav)*0.3,0.,1.))*(0.85+0.3*fine);
+        #ifdef TERRAIN_DETAILTEX
+        { vec2 duv=vWPos.xz*uDetailScale; vec3 dt=texture2D(tDetail,duv).rgb, da=textureLod(tDetail,duv,12.).rgb;
+          float near=1.-smoothstep(25.*uKm/100.,120.*uKm/100.,distance(cameraPosition,vWPos));
+          grass*=mix(vec3(1.),clamp(dt/max(da,vec3(0.02)),0.,3.),near); }
+        #endif
+        // rock: triplanar grain + height strata, lighter on crests, dark in channels
+        float rn=tRock(P*0.6,wn);
+        vec3 rock=mix(uRock,uRockLight,clamp(rn*1.4-0.45+(-cav)*0.35+gully*0.25,0.,1.));
+        rock*=1.+uStrata*0.25*sin(h*90.+rn*6.);
+        // blend weights
+        float rs=uRockSlope-gully*0.06+(macro-0.5)*0.12;
+        gRockW=smoothstep(rs-uRockSoft,rs+uRockSoft,slope);
+        float dirtW=clamp(smoothstep(rs-uRockSoft*2.2,rs-uRockSoft*0.4,slope)*(1.-gRockW)*0.8+flow*0.6+max(cav,0.)*0.25,0.,1.);
+        vec3 col=mix(grass,uDirt*(0.8+0.4*fine),dirtW);
+        col=mix(col,rock,gRockW);
+        // moss/grass creeping into rock creases on gentler rock
+        col=mix(col,grass*0.8,gRockW*smoothstep(0.1,0.6,cav)*(1.-smoothstep(0.55,0.85,slope))*0.7);
+        // snow: above the line, sliding off steep faces, sticking in creases
+        float sl=uSnowLine+(macro-0.5)*uSnowFade*1.5;
+        gSnowW=smoothstep(sl-uSnowFade*0.5,sl+uSnowFade*0.5,h)*(1.-smoothstep(0.55,0.78,slope-max(cav,0.)*0.2));
+        col=mix(col,uSnow*(0.9+0.1*fine),gSnowW);
+        // cavity darkening (ambient occlusion from the height field)
+        gCav=cav; col*=mix(1.,0.62,smoothstep(0.,0.9,cav))*mix(1.,1.08,smoothstep(0.,0.8,-cav));
+        #ifdef TERRAIN_OVERLAY
+        { vec2 muv=vWPos.xz/(2.*uMaskE)+.5; vec4 mk=texture2D(tMask,muv)*step(0.,muv.x)*step(muv.x,1.)*step(0.,muv.y)*step(muv.y,1.);
+          vec3 asph=texture2D(tAsph,vWPos.xz*1.6).rgb*0.9, stone=texture2D(tStone,vWPos.xz*2.2).rgb*vec3(.6,.57,.53);
+          float paint=step(.9,mk.r)*step(.9,mk.g)*step(.9,mk.b);
+          col=mix(col,uDirt*(0.8+0.4*fine),mk.b*0.75); col=mix(col,asph,mk.r); col=mix(col,stone,mk.g*(1.-mk.r)); col=mix(col,vec3(.9,.8,.45),paint); }
+        #endif
+        // shore: sandy banks on gentle slopes near the waterline, then a dark wet band just above it
+        float above=h-uWater, depth=max(-above,0.);
+        float beachW=(1.-smoothstep(uBeach*0.4,uBeach,above))*(1.-smoothstep(0.18,0.4,slope))*(1.-gSnowW);
+        col=mix(col,uSand*(0.85+0.3*fine),beachW*smoothstep(-0.01,0.,above+0.01));
+        gWet=(1.-smoothstep(0.,uWetBand,above))*step(-0.0005,above);
+        col*=mix(1.,0.58,gWet);
+        // underwater: sand-toned bed, absorbed by depth (red first), with moving caustics in the shallows
+        if(depth>0.){ col=mix(col,uSand*0.8,0.35*(1.-gRockW));
+          col*=exp(-depth*vec3(42.,17.,13.));
+          col+=vec3(0.75,0.9,0.85)*tCaustic(KP.xz*260.,uTime*0.9)*uCaustics*0.35*exp(-depth*70.)*smoothstep(0.,0.002,depth); }
+        #ifdef TERRAIN_SUNVIS
+        col*=mix(0.42,1.,vSun);   // baked terrain shadow (mountains shading valleys)
+        #endif
+        diffuseColor.rgb*=col;`)
+      .replace('#include <roughnessmap_fragment>',`float roughnessFactor=roughness*mix(mix(mix(0.95,0.8,gRockW),0.55,gSnowW),0.3,gWet);`)
+      .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+        { // procedural detail normal: gradient of rock noise, stronger on rock
+          vec3 dp=vWPos/uKm*42.; float e=0.35, n0=tFbm(dp);
+          vec3 g=vec3(tFbm(dp+vec3(e,0,0))-n0, tFbm(dp+vec3(0,e,0))-n0, tFbm(dp+vec3(0,0,e))-n0)/e;
+          vec3 wn2=normalize(vWNorm); g-=wn2*dot(g,wn2);
+          float k=uDetail*mix(0.25,0.9,gRockW)*(1.-gSnowW*0.7);
+          normal=normalize(normal-(viewMatrix*vec4(g*k,0.)).xyz);
+        }`);
+  };
+  m.customProgramCacheKey=()=>'terrain-v3'+Object.keys(defines).join();
+  return m;
+}
+
+return {createTerrainMaterial};
+})();
+const {FACES, faceDir, dirFace, tileKey}=(()=>{
+// Cube-sphere math for planet tiles — pure JS, safe in workers.
+// Tile address: face 0..5, level L (0 = whole face), x,y in [0, 2^L). Face coords a,b ∈ [-1,1].
+// Faces are set up so that U×V = −N: the shared grid index (terrain-gen gridIndex) then winds
+// counter-clockwise seen from outside on every face.
+const FACES=[
+  {n:[ 1,0,0],u:[0,0, 1],v:[0,1,0]}, {n:[-1,0,0],u:[0,0,-1],v:[0,1,0]},
+  {n:[0, 1,0],u:[1,0,0],v:[0,0, 1]}, {n:[0,-1,0],u:[1,0,0],v:[0,0,-1]},
+  {n:[0,0, 1],u:[-1,0,0],v:[0,1,0]}, {n:[0,0,-1],u:[1,0,0],v:[0,1,0]},
+];
+// face coords → unit direction (spherified cube: near-uniform tile sizes, no pole pinching)
+function faceDir(f,a,b,out){
+  const F=FACES[f], x=F.n[0]+a*F.u[0]+b*F.v[0], y=F.n[1]+a*F.u[1]+b*F.v[1], z=F.n[2]+a*F.u[2]+b*F.v[2];
+  const x2=x*x, y2=y*y, z2=z*z;
+  let sx=x*Math.sqrt(Math.max(0,1-y2/2-z2/2+y2*z2/3)), sy=y*Math.sqrt(Math.max(0,1-z2/2-x2/2+z2*x2/3)), sz=z*Math.sqrt(Math.max(0,1-x2/2-y2/2+x2*y2/3));
+  const L=Math.hypot(sx,sy,sz); out[0]=sx/L; out[1]=sy/L; out[2]=sz/L; return out;
+}
+// unit direction → {f,a,b} (inverse of the plain cube projection; used for anchors/keys)
+function dirFace(d){
+  const ax=Math.abs(d[0]), ay=Math.abs(d[1]), az=Math.abs(d[2]); let f;
+  if(ax>=ay&&ax>=az) f=d[0]>0?0:1; else if(ay>=az) f=d[1]>0?2:3; else f=d[2]>0?4:5;
+  const F=FACES[f], k=1/(d[0]*F.n[0]+d[1]*F.n[1]+d[2]*F.n[2]);
+  return {f,a:(d[0]*F.u[0]+d[1]*F.u[1]+d[2]*F.u[2])*k, b:(d[0]*F.v[0]+d[1]*F.v[1]+d[2]*F.v[2])*k};
+}
+const tileKey=(f,L,x,y)=>f+'/'+L+'/'+x+'/'+y;
+// tile's (u,v)∈[0,1] → face coords
+const tileAB=(L,x,y,u,v)=>{ const n=1<<L; return [-1+2*(x+u)/n, -1+2*(y+v)/n]; };
+
+return {FACES, faceDir, dirFace, tileKey};
+})();
+const {createPlanetTiles, PLANET_WORKER}=(()=>{
+// Planet tile system — quad-sphere LOD with worker-built tiles.
+//
+//  • Recompute only on change: every frame computes a cheap key (anchor tile under the view ray,
+//    altitude band, view-direction buckets, horizon flag). The tile selection is rebuilt only when
+//    that key changes or a tile finishes building.
+//  • Selection: quadtree from the 6 faces with horizon + frustum culling; a tile splits when the
+//    camera is close, but only once all 4 children are ready — the parent stays drawn until then,
+//    so there are never holes.
+//  • Registry: one entry per address. A tile is built once and reused: queued/building tiles are
+//    never requested twice, tiles leaving view go idle (instant to show again), and only the least
+//    recently used idle tiles are freed when over budget.
+//  • Workers build tiles in the background; the main thread uploads a few per frame.
+//  • Skirts on every tile hide cracks between levels; ocean patches come from the same tiles.
+//
+// Dependencies are injected so the module stays bundle-agnostic:
+//   deps = {THREE, gridIndex, faceDir, dirFace, tileKey}
+function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, splitK=2.2, workerSrc, params,
+    terrainMaterial, oceanMaterial, workers=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)-1)), budget=1200, uploadMs=3}){
+  const {THREE,gridIndex,faceDir,dirFace,tileKey}=deps, R=radius, FACE_KM=Math.PI/2*R;
+  const tiles=new Map(), group=new THREE.Group(); scene.add(group);
+  const stats={drawn:0,loaded:0,building:0,waiting:0,queued:0,recomputes:0,level:0};
+  let gen=0;   // bumps on new params: stale worker results are dropped
+
+  // ---- shared index: grid + skirt ring (both windings so skirts show from either side)
+  const Rr=res+1, ring=[]; for(let i=0;i<Rr;i++) ring.push(i); for(let j=1;j<Rr;j++) ring.push(j*Rr+Rr-1); for(let i=Rr-2;i>=0;i--) ring.push((Rr-1)*Rr+i); for(let j=Rr-2;j>0;j--) ring.push(j*Rr);
+  const base=gridIndex(res), index=new Uint32Array(base.length+ring.length*12); index.set(base);
+  { let t=base.length, n=Rr*Rr, m=ring.length; for(let q=0;q<m;q++){ const a=ring[q], b=ring[(q+1)%m], c=n+q, d=n+(q+1)%m; index.set([a,b,c,b,d,c,a,c,b,b,c,d],t); t+=12; } }
+  const indexAttr=new THREE.BufferAttribute(index,1);
+
+  // ---- workers
+  const pool=[], queue=[]; let wid=0;
+  for(let i=0;i<workers;i++){ const w=new Worker(URL.createObjectURL(new Blob([workerSrc],{type:'text/javascript'}))); w.busy=false;
+    w.onmessage=e=>{ w.busy=false; onBuilt(e.data); pump(); }; w.postMessage({type:'params',params,R,res,ring}); pool.push(w); }
+  function pump(){ queue.sort((a,b)=>a.prio-b.prio);
+    for(const w of pool){ if(w.busy) continue; const t=queue.shift(); if(!t) break; if(t.state!=='queued'){ continue; }
+      t.state='building'; w.busy=true; w.postMessage({type:'tile',key:t.key,gen,f:t.f,L:t.L,x:t.x,y:t.y}); } }
+  const uploads=[];
+  function onBuilt(m){ if(m.gen!==gen) return; const t=tiles.get(m.key); if(!t||t.state!=='building') return; t.state='arrived'; uploads.push([t,m]); }
+  function upload(t,m){
+    const g=new THREE.BufferGeometry(); g.setIndex(indexAttr);
+    g.setAttribute('position',new THREE.BufferAttribute(m.positions,3)); g.setAttribute('normal',new THREE.BufferAttribute(m.normals,3)); g.setAttribute('aTerr',new THREE.BufferAttribute(m.terrain,4));
+    g.boundingSphere=new THREE.Sphere(new THREE.Vector3(),m.radius);
+    const mesh=new THREE.Mesh(g,terrainMaterial); mesh.position.fromArray(m.center); mesh.matrixAutoUpdate=false; mesh.updateMatrix(); mesh.visible=false; mesh.userData.level=t.L;
+    group.add(mesh); t.mesh=mesh;
+    if(m.ocean){ const og=new THREE.BufferGeometry(); og.setIndex(indexAttr); og.setAttribute('position',new THREE.BufferAttribute(m.ocean,3)); og.setAttribute('normal',new THREE.BufferAttribute(m.oceanNormals,3));
+      og.boundingSphere=g.boundingSphere; const om=new THREE.Mesh(og,oceanMaterial); om.position.copy(mesh.position); om.matrixAutoUpdate=false; om.updateMatrix(); om.visible=false; om.renderOrder=1; group.add(om); t.ocean=om; }
+    t.hmin=m.hmin; t.hmax=m.hmax; t.state='ready';
+  }
+
+  // ---- registry
+  const dirTmp=[0,0,0];
+  function get(f,L,x,y){ const k=tileKey(f,L,x,y); let t=tiles.get(k);
+    if(!t){ const [a,b]=[-1+2*(x+0.5)/(1<<L),-1+2*(y+0.5)/(1<<L)]; faceDir(f,a,b,dirTmp);
+      t={key:k,f,L,x,y,state:'none',mesh:null,ocean:null,dir:new THREE.Vector3(...dirTmp),size:FACE_KM/(1<<L)*1.15,ang:(Math.PI/2)/(1<<L)*0.8,last:0,hmin:-3,hmax:2}; tiles.set(k,t); }
+    return t; }
+  function request(t,prio){ if(t.state==='none'){ t.state='queued'; t.prio=prio; queue.push(t); } else if(t.state==='queued') t.prio=Math.min(t.prio,prio); }
+  const children=t=>[[0,0],[1,0],[0,1],[1,1]].map(([i,j])=>get(t.f,t.L+1,t.x*2+i,t.y*2+j));
+
+  // ---- selection (runs only when the key changes or tiles arrive)
+  const frustum=new THREE.Frustum(), pm=new THREE.Matrix4(), sph=new THREE.Sphere(), camPos=new THREE.Vector3(), tp=new THREE.Vector3();
+  let draw=new Set();
+  function select(camera){
+    stats.recomputes++; camera.updateMatrixWorld(); pm.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse); frustum.setFromProjectionMatrix(pm);
+    camPos.copy(camera.position); const D=camPos.length(), cd=camPos.clone().divideScalar(D);
+    const horizon=Math.acos(Math.min(1,(R-2)/Math.max(D,R-1)))+Math.acos(Math.min(1,(R-2)/(R+3)));
+    for(const q of queue) q.prio=1e9;   // anything not requested again this pass drops to the back
+    const next=new Set(); let maxL=0;
+    const visit=t=>{
+      // horizon + frustum culling (inflated so small camera moves never expose a gap before the next recompute)
+      if(Math.acos(Math.max(-1,Math.min(1,t.dir.dot(cd))))-t.ang*1.4>horizon) return;
+      tp.copy(t.dir).multiplyScalar(R); sph.set(tp,t.size*0.85+3); if(!frustum.intersectsSphere(sph)) return;
+      const dist=Math.max(0,tp.distanceTo(camPos)-t.size*0.5);
+      const want=t.L<maxLevel&&dist<t.size*splitK;
+      if(want){ const ch=children(t); if(ch.every(c=>c.state==='ready')){ ch.forEach(visit); return; }
+        ch.forEach(c=>request(c,c.dir.clone().multiplyScalar(R).distanceTo(camPos))); }
+      if(t.state==='ready'){ next.add(t); maxL=Math.max(maxL,t.L); } else request(t,dist-1e6);   // uncovered: most urgent
+    };
+    for(let f=0;f<6;f++) visit(get(f,0,0,0));
+    for(const t of draw) if(!next.has(t)){ if(t.mesh) t.mesh.visible=false; if(t.ocean) t.ocean.visible=false; t.last=performance.now(); }
+    for(const t of next){ if(t.mesh) t.mesh.visible=true; if(t.ocean) t.ocean.visible=true; }
+    draw=next; stats.level=maxL; pump(); evict();
+  }
+  function evict(){
+    if(tiles.size<=budget) return;
+    const idle=[...tiles.values()].filter(t=>t.state==='ready'&&!draw.has(t)&&t.L>0).sort((a,b)=>a.last-b.last);
+    for(const t of idle.slice(0,tiles.size-budget)){ for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); } tiles.delete(t.key); }
+  }
+
+  // ---- change key: recompute only when this differs from last frame's
+  const ray=new THREE.Ray(), fwd=new THREE.Vector3(), planet=new THREE.Sphere(new THREE.Vector3(),R); let lastKey='';
+  function viewKey(camera){
+    camera.getWorldDirection(fwd); ray.set(camera.position,fwd); const D=camera.position.length(), alt=Math.max(0.01,D-R);
+    const hit=ray.intersectSphere(planet,tp), horizonFlag=!hit;
+    const p=(hit?tp:camera.position).clone().normalize(), af=dirFace([p.x,p.y,p.z]);
+    const L=Math.max(0,Math.min(maxLevel,Math.floor(Math.log2(FACE_KM/(alt*2)))));
+    const n=1<<L, ax=Math.min(n-1,Math.floor((af.a+1)/2*n)), ay=Math.min(n-1,Math.floor((af.b+1)/2*n));
+    const up=camera.position.clone().normalize(), tilt=Math.round(Math.acos(Math.max(-1,Math.min(1,-fwd.dot(up))))/(8*Math.PI/180));
+    const east=new THREE.Vector3(0,1,0).cross(up).normalize(), north=up.clone().cross(east), heading=Math.round(Math.atan2(fwd.dot(east),fwd.dot(north))/(12*Math.PI/180));
+    return [af.f,L,ax,ay,Math.floor(Math.log(alt)/Math.log(1.25)),tilt,heading,horizonFlag?1:0].join(',');
+  }
+  let dirty=true;
+  function update(camera){
+    const t0=performance.now(); while(uploads.length&&performance.now()-t0<uploadMs){ const [t,m]=uploads.shift(); upload(t,m); dirty=true; }   // time budget per frame
+    const k=viewKey(camera); if(k!==lastKey){ lastKey=k; dirty=true; }
+    if(dirty){ dirty=false; select(camera); }
+    stats.drawn=draw.size; stats.loaded=[...tiles.values()].filter(t=>t.state==='ready').length; stats.building=[...tiles.values()].filter(t=>t.state==='building').length; stats.waiting=uploads.length; stats.queued=queue.length;
+  }
+  function setParams(p){ gen++; params=p; queue.length=0; uploads.length=0;
+    for(const t of tiles.values()) for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); }
+    tiles.clear(); draw=new Set(); lastKey=''; dirty=true; for(const w of pool){ w.busy=false; w.postMessage({type:'params',params,R,res,ring}); } }
+  const setSplitK=v=>{ if(v!==splitK){ splitK=v; dirty=true; } };
+  return {update,setParams,setSplitK,stats,group};
+}
+
+// Worker body (appended to the terrain-gen + cube-sphere sources): builds one tile per message.
+const PLANET_WORKER=`
+let T=null, R=100, RES=48, RING=[];
+const o3=[0,0,0], c3=[0,0,0];
+self.onmessage=e=>{ const m=e.data;
+  if(m.type==='params'){ T=createTerrain(m.params); R=m.R; RES=m.res; RING=m.ring; return; }
+  const {f,L,x,y}=m, n=1<<L, FACE=Math.PI/2*R;
+  const pointAt=(u,v,o)=>{ faceDir(f,-1+2*(x+u)/n,-1+2*(y+v)/n,o3); o.x=o3[0]*R; o.y=o3[1]*R; o.z=o3[2]*R; o.ux=o3[0]; o.uy=o3[1]; o.uz=o3[2]; return o; };
+  const r=buildTile(T,{res:RES,pointAt,cellSize:FACE/n/RES});
+  faceDir(f,-1+2*(x+0.5)/n,-1+2*(y+0.5)/n,c3); const cx=c3[0]*R, cy=c3[1]*R, cz=c3[2]*R;
+  const V=(RES+1)*(RES+1), M=RING.length, pos=new Float32Array((V+M)*3), nor=new Float32Array((V+M)*3), ter=new Float32Array((V+M)*4);
+  let rad=0;
+  for(let i=0;i<V;i++){ const X=r.positions[i*3]-cx, Y=r.positions[i*3+1]-cy, Z=r.positions[i*3+2]-cz; pos[i*3]=X; pos[i*3+1]=Y; pos[i*3+2]=Z; rad=Math.max(rad,Math.hypot(X,Y,Z)); }
+  nor.set(r.normals); ter.set(r.terrain);
+  const drop=FACE/n*0.03+0.05;   // skirt depth (km)
+  RING.forEach((k,q)=>{ const o=V+q, ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
+    pos[o*3]=ax-ax/L*drop-cx; pos[o*3+1]=ay-ay/L*drop-cy; pos[o*3+2]=az-az/L*drop-cz;
+    nor[o*3]=r.normals[k*3]; nor[o*3+1]=r.normals[k*3+1]; nor[o*3+2]=r.normals[k*3+2]; for(let c=0;c<4;c++) ter[o*4+c]=r.terrain[k*4+c]; });
+  let ocean=null, oceanNormals=null;
+  if(r.hmin<0.01){ ocean=new Float32Array((V+M)*3); oceanNormals=new Float32Array((V+M)*3);
+    const put=(o,k)=>{ const ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
+      ocean[o*3]=ax/L*R-cx; ocean[o*3+1]=ay/L*R-cy; ocean[o*3+2]=az/L*R-cz; oceanNormals[o*3]=ax/L; oceanNormals[o*3+1]=ay/L; oceanNormals[o*3+2]=az/L; };
+    for(let i=0;i<V;i++) put(i,i); RING.forEach((k,q)=>put(V+q,k)); }
+  const tr=[pos.buffer,nor.buffer,ter.buffer]; if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
+  self.postMessage({key:m.key,gen:m.gen,positions:pos,normals:nor,terrain:ter,ocean,oceanNormals,center:[cx,cy,cz],radius:rad+drop,hmin:r.hmin,hmax:r.hmax},tr);
+};`;
+
+return {createPlanetTiles, PLANET_WORKER};
+})();
+const GEN_SRC="// Terrain generator \u2014 pure JS, no dependencies, safe to run in a Web Worker.\n//\n// Height is a function of a 3D point and its local \"up\" direction, so the same code drives\n// a flat test tile now (up = +Y) and quad-sphere planet tiles later (up = normalize(p)).\n// Everything is seeded and deterministic: a tile rebuilt from the same address is identical.\n//\n// Layers:\n//   1. region mask   \u2014 where mountain ranges vs. flat valley floors are\n//   2. domain warp   \u2014 bends ridgelines so they branch instead of lining up on a grid\n//   3. ridged multifractal with derivative damping \u2014 sharp crests, eroded-looking flanks\n//   4. gully filter  \u2014 slope-aligned channels running downhill (triplanar, seamless on a sphere)\n//   5. droplet erosion (optional, per grid) \u2014 hydraulic carving + sediment fans\n//\n// Units are arbitrary; the lab uses kilometres.\n\nconst DEFAULT_TERRAIN = {\n  seed: 7,\n  mountainHeight: 1.35,   // peak height above the valley floor\n  valleyHeight: 0.05,     // relief of the flat areas\n  coverage: 0.52,         // 0..1, how much of the land is mountains\n  maskScale: 0.11,        // frequency of the mountain/valley regions\n  ridgeScale: 0.32,       // base frequency of the ridges\n  octaves: 9,\n  sharpness: 2.1,         // ridge crest sharpness (1 = rounded, 3 = knife edges)\n  ridgeGain: 1.9,         // how much detail follows existing ridges\n  erosionDamping: 0.55,   // derivative damping: smooth slopes, detail stays on crests and flats\n  warp: 0.75,             // domain warp amount\n  warpScale: 0.18,\n  gullyStrength: 0.9,     // slope-aligned channel depth\n  gullyScale: 3.2,        // channel frequency\n  gullySlope: 3.0,        // how strongly slope steers the channels\n  gullyOctaves: 5,\n  pads: null,             // [{x,y,z,r,fall,h,rough}] flattened settlement areas (same units)\n  continents: null,       // {scale, coast, depth, uplift}: oceans + land masses (planet); off for single tiles\n};\n\n// ---------------------------------------------------------------- noise\nfunction mulberry(a){ return ()=>{ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }\n\nfunction makeNoise(seed){\n  const r=mulberry(seed*9973+17), perm=new Uint8Array(512), val=new Float32Array(256);\n  for(let i=0;i<256;i++){ perm[i]=i; val[i]=r()*2-1; }\n  for(let i=255;i>0;i--){ const j=(r()*(i+1))|0; const t=perm[i]; perm[i]=perm[j]; perm[j]=t; }\n  for(let i=0;i<256;i++) perm[i+256]=perm[i];\n  const H=(x,y,z)=>val[perm[perm[perm[x&255]+(y&255)]+(z&255)]];\n\n  // value noise with analytic derivatives (quintic). out = [value, dx, dy, dz], value in ~[-1,1]\n  function noised(x,y,z,out){\n    const ix=Math.floor(x), iy=Math.floor(y), iz=Math.floor(z), fx=x-ix, fy=y-iy, fz=z-iz;\n    const ux=fx*fx*fx*(fx*(fx*6-15)+10), uy=fy*fy*fy*(fy*(fy*6-15)+10), uz=fz*fz*fz*(fz*(fz*6-15)+10);\n    const dux=30*fx*fx*(fx*(fx-2)+1), duy=30*fy*fy*(fy*(fy-2)+1), duz=30*fz*fz*(fz*(fz-2)+1);\n    const a=H(ix,iy,iz), b=H(ix+1,iy,iz), c=H(ix,iy+1,iz), d=H(ix+1,iy+1,iz);\n    const e=H(ix,iy,iz+1), f=H(ix+1,iy,iz+1), g=H(ix,iy+1,iz+1), h=H(ix+1,iy+1,iz+1);\n    const k1=b-a, k2=c-a, k3=e-a, k4=a-b-c+d, k5=a-c-e+g, k6=a-b-e+f, k7=-a+b+c-d+e-f-g+h;\n    out[0]=a+k1*ux+k2*uy+k3*uz+k4*ux*uy+k5*uy*uz+k6*uz*ux+k7*ux*uy*uz;\n    out[1]=dux*(k1+k4*uy+k6*uz+k7*uy*uz);\n    out[2]=duy*(k2+k5*uz+k4*ux+k7*uz*ux);\n    out[3]=duz*(k3+k6*ux+k5*uy+k7*ux*uy);\n    return out;\n  }\n  // 2D cell hash for the gully filter\n  const hash2=(x,y,o)=>{ const i=perm[perm[x&255]+(y&255)]; o[0]=val[i]*0.5+0.5; o[1]=val[perm[i+37]]*0.5+0.5; return o; };\n  return {noised,hash2};\n}\n\n// octave rotation (breaks grid alignment between octaves)\nconst RM=[0.00,0.80,0.60, -0.80,0.36,-0.48, -0.60,-0.48,0.64];\n\n// ---------------------------------------------------------------- terrain\nfunction createTerrain(opts={}){\n  const P={...DEFAULT_TERRAIN,...opts};\n  const N=makeNoise(P.seed), nd=[0,0,0,0], hc=[0,0];\n\n  // fbm value + world-space gradient. out=[v,gx,gy,gz]\n  function fbm(x,y,z,freq,oct,out){\n    let m0=freq,m1=0,m2=0,m3=0,m4=freq,m5=0,m6=0,m7=0,m8=freq;   // accumulated matrix M (q = M p)\n    let v=0,gx=0,gy=0,gz=0,a=0.5,norm=0;\n    for(let i=0;i<oct;i++){\n      N.noised(m0*x+m1*y+m2*z, m3*x+m4*y+m5*z, m6*x+m7*y+m8*z, nd);\n      v+=a*nd[0]; norm+=a;\n      gx+=a*(m0*nd[1]+m3*nd[2]+m6*nd[3]); gy+=a*(m1*nd[1]+m4*nd[2]+m7*nd[3]); gz+=a*(m2*nd[1]+m5*nd[2]+m8*nd[3]);\n      const n0=2*(RM[0]*m0+RM[1]*m3+RM[2]*m6), n1=2*(RM[0]*m1+RM[1]*m4+RM[2]*m7), n2=2*(RM[0]*m2+RM[1]*m5+RM[2]*m8);\n      const n3=2*(RM[3]*m0+RM[4]*m3+RM[5]*m6), n4=2*(RM[3]*m1+RM[4]*m4+RM[5]*m7), n5=2*(RM[3]*m2+RM[4]*m5+RM[5]*m8);\n      const n6=2*(RM[6]*m0+RM[7]*m3+RM[8]*m6), n7=2*(RM[6]*m1+RM[7]*m4+RM[8]*m7), n8=2*(RM[6]*m2+RM[7]*m5+RM[8]*m8);\n      m0=n0;m1=n1;m2=n2;m3=n3;m4=n4;m5=n5;m6=n6;m7=n7;m8=n8; a*=0.5;\n    }\n    out[0]=v/norm; out[1]=gx/norm; out[2]=gy/norm; out[3]=gz/norm; return out;\n  }\n\n  // ridged multifractal with derivative damping. returns [h 0..~1, gx, gy, gz]\n  function ridged(x,y,z,out){\n    let m0=P.ridgeScale,m1=0,m2=0,m3=0,m4=P.ridgeScale,m5=0,m6=0,m7=0,m8=P.ridgeScale;\n    let sum=0,a=1,w=1,dx=0,dy=0,dz=0,gx=0,gy=0,gz=0,norm=0;\n    for(let i=0;i<P.octaves;i++){\n      N.noised(m0*x+m1*y+m2*z, m3*x+m4*y+m5*z, m6*x+m7*y+m8*z, nd);\n      const wx=m0*nd[1]+m3*nd[2]+m6*nd[3], wy=m1*nd[1]+m4*nd[2]+m7*nd[3], wz=m2*nd[1]+m5*nd[2]+m8*nd[3];\n      const s=nd[0]<0?-1:1, r0=1-Math.abs(nd[0]), r=Math.pow(Math.max(r0,0),P.sharpness);\n      const k=-s*P.sharpness*Math.pow(Math.max(r0,1e-4),P.sharpness-1);   // d(ridge)/d(noise)\n      const rx=k*wx, ry=k*wy, rz=k*wz;\n      // damping: detail is suppressed where the accumulated slope is steep (flanks stay clean, crests stay busy)\n      const damp=1/(1+P.erosionDamping*(dx*dx+dy*dy+dz*dz));\n      const c=a*w*r*damp; sum+=c; norm+=a;\n      gx+=a*w*damp*rx; gy+=a*w*damp*ry; gz+=a*w*damp*rz;\n      dx+=a*rx*w; dy+=a*ry*w; dz+=a*rz*w;\n      w=Math.min(1,Math.max(0,r*P.ridgeGain));\n      const n0=2*(RM[0]*m0+RM[1]*m3+RM[2]*m6), n1=2*(RM[0]*m1+RM[1]*m4+RM[2]*m7), n2=2*(RM[0]*m2+RM[1]*m5+RM[2]*m8);\n      const n3=2*(RM[3]*m0+RM[4]*m3+RM[5]*m6), n4=2*(RM[3]*m1+RM[4]*m4+RM[5]*m7), n5=2*(RM[3]*m2+RM[4]*m5+RM[5]*m8);\n      const n6=2*(RM[6]*m0+RM[7]*m3+RM[8]*m6), n7=2*(RM[6]*m1+RM[7]*m4+RM[8]*m7), n8=2*(RM[6]*m2+RM[7]*m5+RM[8]*m8);\n      m0=n0;m1=n1;m2=n2;m3=n3;m4=n4;m5=n5;m6=n6;m7=n7;m8=n8; a*=0.5;\n    }\n    out[0]=sum/norm; out[1]=gx/norm; out[2]=gy/norm; out[3]=gz/norm; return out;\n  }\n\n  // gully filter (after clayjohn's \"eroded terrain noise\"): slope-aligned cosine stripes in a\n  // jittered cell grid. (u,v) are plane coords, (ga,gb) the height gradient in that plane.\n  const TAU=Math.PI*2;\n  function erosionCell(u,v,dirx,diry,o){\n    const iu=Math.floor(u), iv=Math.floor(v), fu=u-iu, fv=v-iv; let va=0,vb=0,vc=0,wt=0;\n    for(let i=-2;i<=1;i++) for(let j=-2;j<=1;j++){\n      N.hash2(iu-i,iv-j,hc); const pu=fu+i-hc[0]*0.5, pv=fv+j-hc[1]*0.5;\n      const w=Math.exp(-(pu*pu+pv*pv)*2); wt+=w; const mag=(pu*dirx+pv*diry)*TAU;\n      va+=Math.cos(mag)*w; const sn=-Math.sin(mag)*w; vb+=sn*dirx; vc+=sn*diry;\n    }\n    o[0]=va/wt; o[1]=vb/wt; o[2]=vc/wt; return o;\n  }\n  const eo=[0,0,0];\n  function gullyPlane(u,v,ga,gb){\n    let hx=0,hy=0,hz=0,a=0.5,f=1;\n    const bx=gb*P.gullySlope, by=-ga*P.gullySlope;      // gradient rotated 90\u00b0 \u2192 stripes run downhill\n    for(let i=0;i<P.gullyOctaves;i++){\n      erosionCell(u*P.gullyScale*f, v*P.gullyScale*f, bx+hz, by-hy, eo);\n      hx+=eo[0]*a; hy+=eo[1]*a*f; hz+=eo[2]*a*f; a*=0.4; f*=2;\n    }\n    return hx;   // ~[-1,1]: negative = channel, positive = spur\n  }\n\n  const t4=[0,0,0,0], w1=[0,0,0,0], w2=[0,0,0,0], w3=[0,0,0,0], rg=[0,0,0,0], vl=[0,0,0,0];\n  // Height at 3D point p with local up u. out = {h, gully, mountain}\n  function sample(px,py,pz,ux,uy,uz,out){\n    // 1. regions\n    fbm(px+31.7,py-12.3,pz+5.1,P.maskScale,4,t4);\n    const m0=t4[0]*0.5+0.5, lo=P.coverage-0.12, hi=P.coverage+0.12;\n    let mt=Math.min(1,Math.max(0,(m0-(1-hi))/((1-lo)-(1-hi)))); mt=mt*mt*(3-2*mt);\n    // 2. warp\n    fbm(px,py,pz,P.warpScale,3,w1); fbm(px+17.1,py+3.3,pz-9.2,P.warpScale,3,w2); fbm(px-5.7,py+11.9,pz+23.4,P.warpScale,3,w3);\n    const qx=px+P.warp*w1[0], qy=py+P.warp*w2[0], qz=pz+P.warp*w3[0];\n    // 3. ridges (+ gentle valley floor)\n    ridged(qx,qy,qz,rg); fbm(px-40,py+2,pz+11,0.9,4,vl);\n    let mh=P.mountainHeight*mt; const vh=P.valleyHeight;\n    let h=vh*(vl[0]*0.5+0.5)+mh*rg[0]*rg[0]*1.6;        // squaring keeps valley floors flat, lifts peaks\n    const gs=mh*rg[0]*3.2, gx=gs*rg[1]+vh*0.5*vl[1], gy=gs*rg[2]+vh*0.5*vl[2], gz=gs*rg[3]+vh*0.5*vl[3];\n    // 4. gullies \u2014 gradient projected onto the tangent plane, triplanar-blended by up (seamless on a sphere)\n    const gd=gx*ux+gy*uy+gz*uz, tx=gx-ux*gd, ty=gy-uy*gd, tz=gz-uz*gd, slope=Math.hypot(tx,ty,tz);\n    let gully=0;\n    if(P.gullyStrength>0&&mh>1e-4){\n      let ax=ux*ux*ux*ux, ay=uy*uy*uy*uy, az=uz*uz*uz*uz; const s=ax+ay+az; ax/=s; ay/=s; az/=s;\n      if(ay>0.01) gully+=ay*gullyPlane(px,pz,tx,tz);\n      if(ax>0.01) gully+=ax*gullyPlane(pz,py,tz,ty);\n      if(az>0.01) gully+=az*gullyPlane(px,py,tx,ty);\n      const sm=Math.min(1,slope/0.9);                 // only on slopes\n      h+=gully*P.gullyStrength*0.06*mh*sm*(0.35+0.65*rg[0]);\n      gully*=sm;\n    }\n    // continents: very large-scale noise decides land vs ocean; mountains only on land, shelves slope into the deep\n    if(P.continents){ const C=P.continents; fbm(px+101.3,py-57.1,pz+33.7,C.scale,5,t4); const c=t4[0]-C.coast;\n      let land=Math.min(1,Math.max(0,(c+0.03)/0.12)); land=land*land*(3-2*land);\n      h=h*land+(c>0?c*C.uplift:c*C.depth); gully*=land; mt*=land; }\n    // 5. settlement pads: flatten an area (towns, arenas) and blend it into the surroundings\n    if(P.pads) for(let i=0;i<P.pads.length;i++){ const pd=P.pads[i], d=Math.hypot(px-pd.x,py-(pd.y||0),pz-pd.z);\n      if(d<pd.r+pd.fall){ let w=Math.min(1,Math.max(0,1-(d-pd.r)/pd.fall)); w=w*w*(3-2*w);\n        h+=(pd.h+(pd.rough||0)*vl[0]-h)*w; gully*=1-w; mt*=1-w; } }\n    out.h=h; out.gully=gully; out.mountain=mt; return out;\n  }\n  return {params:P, sample};\n}\n\n// ---------------------------------------------------------------- tile grid\n// Builds one tile. pointAt(u,v,out) maps tile coords (0..1, margin may go outside) to a base\n// point {x,y,z} and unit up {ux,uy,uz}; the surface point is base + up*h.\n// Flat tile:  base = (x0+u*size, 0, z0+v*size), up = +Y.\n// Planet tile: base = cubeToSphere(face,u,v)*R, up = normalize(base).\nfunction buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1, cellSize=1}){\n  const M=4, W=res+1+2*M, n=W*W;                         // margin for normals, cavity, erosion\n  const bx=new Float32Array(n), by=new Float32Array(n), bz=new Float32Array(n), ux=new Float32Array(n), uy=new Float32Array(n), uz=new Float32Array(n);\n  const h=new Float32Array(n), gully=new Float32Array(n), mount=new Float32Array(n), pt={x:0,y:0,z:0,ux:0,uy:1,uz:0}, s={};\n  for(let j=0;j<W;j++) for(let i=0;i<W;i++){\n    const k=j*W+i; pointAt((i-M)/res,(j-M)/res,pt);\n    bx[k]=pt.x; by[k]=pt.y; bz[k]=pt.z; ux[k]=pt.ux; uy[k]=pt.uy; uz[k]=pt.uz;\n    terrain.sample(pt.x,pt.y,pt.z,pt.ux,pt.uy,pt.uz,s); h[k]=s.h; gully[k]=s.gully; mount[k]=s.mountain;\n  }\n  let flow=new Float32Array(n), dep=new Float32Array(n); const h0=droplets>0?h.slice():null;\n  if(droplets>0) ({flow,dep}=erodeDroplets(h,W,{droplets,seed:dropletSeed,cellSize,margin:M}));\n\n  // outputs (interior only)\n  const V=(res+1)*(res+1), pos=new Float32Array(V*3), nor=new Float32Array(V*3), terr=new Float32Array(V*4), delta=h0?new Float32Array(V):null;\n  const X=k=>bx[k]+ux[k]*h[k], Y=k=>by[k]+uy[k]*h[k], Z=k=>bz[k]+uz[k]*h[k];\n  let hmin=1e9,hmax=-1e9;\n  for(let j=0;j<=res;j++) for(let i=0;i<=res;i++){\n    const k=(j+M)*W+(i+M), o=j*(res+1)+i;\n    pos[o*3]=X(k); pos[o*3+1]=Y(k); pos[o*3+2]=Z(k);\n    // normal from neighbours (works for flat and curved tiles)\n    const l=k-1, r=k+1, d=k-W, u=k+W;\n    const ax=X(r)-X(l), ay=Y(r)-Y(l), az=Z(r)-Z(l), cx=X(u)-X(d), cy=Y(u)-Y(d), cz=Z(u)-Z(d);\n    let nx=cy*az-cz*ay, ny=cz*ax-cx*az, nz=cx*ay-cy*ax; const L=Math.hypot(nx,ny,nz)||1;\n    if(nx*ux[k]+ny*uy[k]+nz*uz[k]<0) { nx=-nx; ny=-ny; nz=-nz; }\n    nor[o*3]=nx/L; nor[o*3+1]=ny/L; nor[o*3+2]=nz/L;\n    // cavity: + in creases/valleys, - on crests (in height units per cell)\n    const cav=(h[l]+h[r]+h[d]+h[u]+0.5*(h[d-1]+h[d+1]+h[u-1]+h[u+1]))/6-h[k];\n    terr[o*4]=h[k]; terr[o*4+1]=gully[k]; terr[o*4+2]=cav/cellSize; terr[o*4+3]=Math.min(1,flow[k]*0.05+dep[k]*15)*(droplets>0?1:0);\n    if(delta) delta[o]=h[k]-h0[k];\n    if(h[k]<hmin) hmin=h[k]; if(h[k]>hmax) hmax=h[k];\n  }\n  // delta: erosion change per vertex (null without droplets) \u2014 lets a finer patch inherit the same carving\n  return {res,positions:pos,normals:nor,terrain:terr,hmin,hmax,mountain:mount,delta};\n}\n\nfunction flatPointAt(x0,z0,size){ return (u,v,o)=>{ o.x=x0+u*size; o.y=0; o.z=z0+v*size; o.ux=0; o.uy=1; o.uz=0; return o; }; }\n\n// shared index buffer for a (res+1)^2 grid\nfunction gridIndex(res){\n  const idx=new Uint32Array(res*res*6); let t=0;\n  for(let j=0;j<res;j++) for(let i=0;i<res;i++){ const a=j*(res+1)+i, b=a+1, c=a+res+1, d=c+1;\n    if((i+j)&1){ idx[t++]=a; idx[t++]=c; idx[t++]=b; idx[t++]=b; idx[t++]=c; idx[t++]=d; }\n    else { idx[t++]=a; idx[t++]=c; idx[t++]=d; idx[t++]=a; idx[t++]=d; idx[t++]=b; } }\n  return idx;\n}\n\n// ---------------------------------------------------------------- hydraulic droplet erosion\n// Particle erosion on a square height grid (after Hans Beyer / Sebastian Lague). Modifies h in place.\n// Returns per-cell flow (how much water passed) and deposition, which the material uses.\n// For the planet this runs on regions larger than a tile (margins) so seams stay hidden.\nfunction erodeDroplets(h,W,{droplets=50000,seed=1,cellSize=1,margin=0,\n  inertia=0.05,capacity=5,minCapacity=0.01,erodeRate=0.35,depositRate=0.25,evaporate=0.015,gravity=4,life=40,radius=3}={}){\n  const r=mulberry(seed*131+7), n=W*W, flow=new Float32Array(n), dep=new Float32Array(n);\n  let hmax=0; for(let i=0;i<n;i++) hmax=Math.max(hmax,Math.abs(h[i]));\n  const S=(1/cellSize)/(W*0.004+1);   // height \u2192 \"cell units\" so slopes are in a sane range at any scale\n  const hs=new Float32Array(n); for(let i=0;i<n;i++) hs[i]=h[i]*S;\n  // erosion brush\n  const bo=[], bw=[]; let bs=0;\n  for(let y=-radius;y<=radius;y++) for(let x=-radius;x<=radius;x++){ const d=Math.hypot(x,y); if(d<radius){ bo.push([x,y]); const w=1-d/radius; bw.push(w); bs+=w; } }\n  for(let i=0;i<bw.length;i++) bw[i]/=bs;\n  const grad=(x,y)=>{ const ix=x|0, iy=y|0, fx=x-ix, fy=y-iy, k=iy*W+ix;\n    const a=hs[k], b=hs[k+1], c=hs[k+W], d=hs[k+W+1];\n    return [(b-a)*(1-fy)+(d-c)*fy, (c-a)*(1-fx)+(d-b)*fx, a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy]; };\n  const lo=1, hi=W-2-1e-3;\n  for(let q=0;q<droplets;q++){\n    let x=lo+r()*(hi-lo), y=lo+r()*(hi-lo), dx=0, dy=0, sp=1, wat=1, sed=0;\n    for(let t=0;t<life;t++){\n      const ix=x|0, iy=y|0, fx=x-ix, fy=y-iy, k=iy*W+ix; const [gx,gy,hh]=grad(x,y);\n      dx=dx*inertia-gx*(1-inertia); dy=dy*inertia-gy*(1-inertia); const L=Math.hypot(dx,dy); if(L<1e-9) break; dx/=L; dy/=L;\n      x+=dx; y+=dy; if(x<lo||y<lo||x>hi||y>hi) break;\n      flow[k]+=wat*0.02;\n      const nh=grad(x,y)[2], dh=nh-hh;\n      const cap=Math.max(-dh*sp*wat*capacity,minCapacity);\n      if(sed>cap||dh>0){   // deposit\n        const amt=dh>0?Math.min(dh,sed):(sed-cap)*depositRate; sed-=amt;\n        hs[k]+=amt*(1-fx)*(1-fy); hs[k+1]+=amt*fx*(1-fy); hs[k+W]+=amt*(1-fx)*fy; hs[k+W+1]+=amt*fx*fy; dep[k]+=amt;\n      } else {             // erode with brush\n        const amt=Math.min((cap-sed)*erodeRate,-dh);\n        for(let b=0;b<bo.length;b++){ const cx=ix+bo[b][0], cy=iy+bo[b][1]; if(cx<0||cy<0||cx>=W||cy>=W) continue;\n          const kk=cy*W+cx, e=Math.min(hs[kk],amt*bw[b]); hs[kk]-=e; sed+=e; }\n      }\n      sp=Math.sqrt(Math.max(0,sp*sp+dh*gravity)); wat*=1-evaporate;\n    }\n  }\n  for(let i=0;i<n;i++) h[i]=hs[i]/S;\n  // blur flow a little for shading\n  const f2=new Float32Array(n); for(let y=1;y<W-1;y++) for(let x=1;x<W-1;x++){ const k=y*W+x; f2[k]=(flow[k]*4+flow[k-1]+flow[k+1]+flow[k-W]+flow[k+W])/8; }\n  return {flow:f2,dep};\n}\n\n// ---------------------------------------------------------------- baked sun visibility\n// Soft terrain self-shadowing for a flat tile: for each vertex, march toward the sun over the height\n// grid and measure how far the terrain rises above the ray. Returns 0 (shadowed) .. 1 (lit).\n// heights: (res+1)^2 grid over `size` (same units as heights); sun: unit vector toward the sun (x,y,z).\nfunction bakeSunVisibility(heights,res,size,sun,{maxDist=size*0.6,softness=0.04}={}){\n  const R=res+1, cell=size/res, out=new Float32Array(R*R), hl=Math.hypot(sun[0],sun[2])||1e-6;\n  const dx=sun[0]/hl, dz=sun[2]/hl, rise=sun[1]/hl, steps=Math.ceil(maxDist/cell);\n  const Hs=(x,z)=>{ if(x<0||z<0||x>res||z>res) return -1e9; const i=Math.min(res-1,x|0), j=Math.min(res-1,z|0), fx=x-i, fz=z-j;\n    return (heights[j*R+i]*(1-fx)+heights[j*R+i+1]*fx)*(1-fz)+(heights[(j+1)*R+i]*(1-fx)+heights[(j+1)*R+i+1]*fx)*fz; };\n  for(let j=0;j<R;j++) for(let i=0;i<R;i++){ const h0=heights[j*R+i]; let vis=1;\n    for(let s=1;s<=steps;s++){ const t=s*cell*(1+s*0.01), x=i+dx*t/cell, z=j+dz*t/cell, ht=Hs(x,z); if(ht<-1e8) break;\n      const clear=h0+t*rise-ht; if(clear<0){ vis=0; break; } vis=Math.min(vis,clear/(t*softness)); if(h0+t*rise>1e3) break; }\n    out[j*R+i]=Math.max(0,Math.min(1,vis)); }\n  return out;\n}\n", CUBE_SRC="// Cube-sphere math for planet tiles \u2014 pure JS, safe in workers.\n// Tile address: face 0..5, level L (0 = whole face), x,y in [0, 2^L). Face coords a,b \u2208 [-1,1].\n// Faces are set up so that U\u00d7V = \u2212N: the shared grid index (terrain-gen gridIndex) then winds\n// counter-clockwise seen from outside on every face.\nconst FACES=[\n  {n:[ 1,0,0],u:[0,0, 1],v:[0,1,0]}, {n:[-1,0,0],u:[0,0,-1],v:[0,1,0]},\n  {n:[0, 1,0],u:[1,0,0],v:[0,0, 1]}, {n:[0,-1,0],u:[1,0,0],v:[0,0,-1]},\n  {n:[0,0, 1],u:[-1,0,0],v:[0,1,0]}, {n:[0,0,-1],u:[1,0,0],v:[0,1,0]},\n];\n// face coords \u2192 unit direction (spherified cube: near-uniform tile sizes, no pole pinching)\nfunction faceDir(f,a,b,out){\n  const F=FACES[f], x=F.n[0]+a*F.u[0]+b*F.v[0], y=F.n[1]+a*F.u[1]+b*F.v[1], z=F.n[2]+a*F.u[2]+b*F.v[2];\n  const x2=x*x, y2=y*y, z2=z*z;\n  let sx=x*Math.sqrt(Math.max(0,1-y2/2-z2/2+y2*z2/3)), sy=y*Math.sqrt(Math.max(0,1-z2/2-x2/2+z2*x2/3)), sz=z*Math.sqrt(Math.max(0,1-x2/2-y2/2+x2*y2/3));\n  const L=Math.hypot(sx,sy,sz); out[0]=sx/L; out[1]=sy/L; out[2]=sz/L; return out;\n}\n// unit direction \u2192 {f,a,b} (inverse of the plain cube projection; used for anchors/keys)\nfunction dirFace(d){\n  const ax=Math.abs(d[0]), ay=Math.abs(d[1]), az=Math.abs(d[2]); let f;\n  if(ax>=ay&&ax>=az) f=d[0]>0?0:1; else if(ay>=az) f=d[1]>0?2:3; else f=d[2]>0?4:5;\n  const F=FACES[f], k=1/(d[0]*F.n[0]+d[1]*F.n[1]+d[2]*F.n[2]);\n  return {f,a:(d[0]*F.u[0]+d[1]*F.u[1]+d[2]*F.u[2])*k, b:(d[0]*F.v[0]+d[1]*F.v[1]+d[2]*F.v[2])*k};\n}\nconst tileKey=(f,L,x,y)=>f+'/'+L+'/'+x+'/'+y;\n// tile's (u,v)\u2208[0,1] \u2192 face coords\nconst tileAB=(L,x,y,u,v)=>{ const n=1<<L; return [-1+2*(x+u)/n, -1+2*(y+v)/n]; };\n";
+
+const R=120;   // planet radius, km
+const $=id=>document.getElementById(id);
+const planetParams=seed=>({...DEFAULT_TERRAIN,seed,continents:{scale:0.018,coast:0.04,depth:3.2,uplift:0.55}});
+
+// ------------------------------------------------------------ renderer + scene
+const host=$('view');
+const renderer=new THREE.WebGLRenderer({antialias:true,logarithmicDepthBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=0.95; host.append(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x000000); scene.fog=new THREE.FogExp2(0x9fbad2,0);
+const camera=new THREE.PerspectiveCamera(50,1,0.0005,R*8);
+const SUN=new THREE.Vector3(0.55,0.35,0.76).normalize();
+const sun=new THREE.DirectionalLight(0xfff1dd,3.0); sun.position.copy(SUN).multiplyScalar(R*4); scene.add(sun);
+scene.add(new THREE.AmbientLight(0x9fb3c8,0.32));
+
+// atmosphere rim (seen from space) and stars
+const atmo=new THREE.Mesh(new THREE.SphereGeometry(R*1.03,96,64),new THREE.ShaderMaterial({transparent:true,depthWrite:false,side:THREE.BackSide,blending:THREE.AdditiveBlending,
+  uniforms:{uSun:{value:SUN},uAlpha:{value:1}},
+  vertexShader:`#include <common>
+    #include <logdepthbuf_pars_vertex>
+    varying vec3 vN; varying vec3 vV; void main(){ vec4 wp=modelMatrix*vec4(position,1.); vN=normalize(wp.xyz); vV=normalize(wp.xyz-cameraPosition); gl_Position=projectionMatrix*viewMatrix*wp;
+    #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader:`#include <common>
+    #include <logdepthbuf_pars_fragment>
+    uniform vec3 uSun; uniform float uAlpha; varying vec3 vN; varying vec3 vV; void main(){
+    #include <logdepthbuf_fragment>
+    float rim=pow(1.-abs(dot(vN,-vV)),2.2); float day=smoothstep(-0.25,0.35,dot(vN,uSun));
+    gl_FragColor=vec4(vec3(0.35,0.6,1.0)*rim*(0.15+1.1*day)*uAlpha,1.); }`}));
+scene.add(atmo);
+const stars=(()=>{ const n=2500, p=new Float32Array(n*3); for(let i=0;i<n;i++){ const u=Math.random()*2-1, a=Math.random()*6.283, s=Math.sqrt(1-u*u); p.set([s*Math.cos(a)*R*6,u*R*6,s*Math.sin(a)*R*6],i*3); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(p,3));
+  const m=new THREE.PointsMaterial({color:0xffffff,size:1.5,sizeAttenuation:false,fog:false,transparent:true}); const pts=new THREE.Points(g,m); scene.add(pts); return pts; })();
+
+// ------------------------------------------------------------ materials
+const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0});
+const oceanMat=new THREE.MeshStandardMaterial({color:0x0b3040,roughness:0.14,metalness:0,transparent:true,opacity:0.9});
+const OU={uTime:{value:0}};
+oceanMat.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,OU);
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP;').replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvWP=(modelMatrix*vec4(transformed,1.)).xyz;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+    varying vec3 vWP; uniform float uTime;
+    float oH(vec3 p){ return sin(p.x*1.7+uTime*1.1)*0.5+sin(p.y*2.3-uTime*0.9)*0.5+sin(p.z*2.9+uTime*1.3)*0.4+sin((p.x+p.z)*5.3-uTime*2.1)*0.15; }`)
+  .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+    { vec3 p=vWP*40.; float e=0.05, h0=oH(p); vec3 g=vec3(oH(p+vec3(e,0,0))-h0,oH(p+vec3(0,e,0))-h0,oH(p+vec3(0,0,e))-h0)/e;
+      vec3 up=normalize(vWP); g-=up*dot(g,up); float fade=1.-smoothstep(2.,30.,length(cameraPosition)-${R.toFixed(1)});
+      normal=normalize(normal-(viewMatrix*vec4(g*0.03*fade,0.)).xyz); }`); };
+
+// ------------------------------------------------------------ tiles
+const strip=s=>s.replace(/^export /gm,'');
+async function workerSource(){
+  const gen=GEN_SRC||strip(await (await fetch('./terrain-gen.js')).text()), cube=CUBE_SRC||strip(await (await fetch('./cube-sphere.js')).text());
+  return gen+'\n'+cube+'\n'+PLANET_WORKER;
+}
+let tilesys=null, groundT=createTerrain(planetParams(7));
+workerSource().then(src=>{
+  tilesys=createPlanetTiles({THREE,gridIndex,faceDir,dirFace,tileKey},{scene,radius:R,res:48,maxLevel:9,workerSrc:src,params:planetParams(+$('seed').value),terrainMaterial:terrainMat,oceanMaterial:oceanMat});
+});
+
+// ------------------------------------------------------------ camera: continuous orbit → ground
+const cam={lat:0.35,lon:0.6,alt:R*1.6,heading:0,tiltOff:0};
+const tmp={}, up=new THREE.Vector3(), east=new THREE.Vector3(), north=new THREE.Vector3(), fwd=new THREE.Vector3();
+const dirOf=(lat,lon,out)=>out.set(Math.cos(lat)*Math.cos(lon),Math.sin(lat),Math.cos(lat)*Math.sin(lon));
+function groundAt(d){ groundT.sample(d.x*R,d.y*R,d.z*R,d.x,d.y,d.z,tmp); return Math.max(tmp.h,0); }
+function placeCamera(){
+  dirOf(cam.lat,cam.lon,up); const g=groundAt(up); cam.alt=Math.max(cam.alt,0.03);
+  camera.position.copy(up).multiplyScalar(R+g+cam.alt);
+  east.set(-Math.sin(cam.lon),0,Math.cos(cam.lon)); north.crossVectors(up,east).normalize();
+  // high up: look at the planet; low down: tilt toward the horizon
+  const low=1-THREE.MathUtils.smoothstep(cam.alt,1.5,80), pitch=THREE.MathUtils.clamp(-Math.PI/2+low*(Math.PI/2-0.22)+cam.tiltOff,-Math.PI/2,0.35);
+  const h=new THREE.Vector3().copy(north).multiplyScalar(Math.cos(cam.heading)).addScaledVector(east,Math.sin(cam.heading));
+  fwd.copy(h).multiplyScalar(Math.cos(pitch)).addScaledVector(up,Math.sin(pitch));
+  camera.up.copy(pitch<-1.5?h:up); camera.lookAt(camera.position.clone().add(fwd));
+  // atmosphere / sky by altitude
+  const inAir=1-THREE.MathUtils.smoothstep(cam.alt,4,90);
+  scene.background.setRGB(0.56*inAir,0.72*inAir,0.86*inAir); scene.fog.color.copy(scene.background); scene.fog.density=0.02*inAir*inAir;
+  stars.material.opacity=THREE.MathUtils.smoothstep(cam.alt,15,120); atmo.material.uniforms.uAlpha.value=1-inAir*0.85;
+  camera.near=Math.max(0.0005,cam.alt*0.001); camera.far=R*8; camera.updateProjectionMatrix();
+}
+{ const el=renderer.domElement; let drag=null; const pts=new Map(); let pinch=0;
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  el.addEventListener('pointerdown',e=>{ el.setPointerCapture(e.pointerId); pts.set(e.pointerId,[e.clientX,e.clientY]); drag={x:e.clientX,y:e.clientY,b:e.button}; });
+  el.addEventListener('pointermove',e=>{ if(!drag) return; if(pts.has(e.pointerId)) pts.set(e.pointerId,[e.clientX,e.clientY]);
+    if(pts.size===2){ const [a,b]=[...pts.values()], d=Math.hypot(a[0]-b[0],a[1]-b[1]); if(pinch) cam.alt*=pinch/d; pinch=d; return; }
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
+    if(drag.b===2||e.shiftKey){ cam.heading+=dx*0.005; cam.tiltOff=THREE.MathUtils.clamp(cam.tiltOff-dy*0.004,-1.2,1.2); return; }
+    move(-dy,dx,0.0022); });
+  const end=e=>{ pts.delete(e.pointerId); if(pts.size<2) pinch=0; if(!pts.size) drag=null; };
+  el.addEventListener('pointerup',end); el.addEventListener('pointercancel',end);
+  el.addEventListener('wheel',e=>{ e.preventDefault(); cam.alt=THREE.MathUtils.clamp(cam.alt*Math.exp(THREE.MathUtils.clamp(e.deltaY,-150,150)*0.0018),0.03,R*3); },{passive:false});
+}
+function move(fw,rt,k){ const s=Math.min(cam.alt,R)*k/R;   // angular step scales with altitude
+  const ch=Math.cos(cam.heading), sh=Math.sin(cam.heading);
+  cam.lat=THREE.MathUtils.clamp(cam.lat+(fw*ch-rt*sh)*s,-1.5,1.5); cam.lon+=(fw*sh+rt*ch)*s/Math.max(0.2,Math.cos(cam.lat)); }
+const keys=new Set(); addEventListener('keydown',e=>{ if(e.target.closest&&e.target.closest('input')) return; keys.add(e.key.toLowerCase()); }); addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+
+// ------------------------------------------------------------ UI
+$('lod').addEventListener('input',()=>{ $('lodv').textContent=(+$('lod').value).toFixed(1)+'×'; });
+$('lodv').textContent='2.2×';
+$('newp').addEventListener('click',()=>{ const s=Math.max(1,parseInt($('seed').value)||1); groundT=createTerrain(planetParams(s)); tilesys&&tilesys.setParams(planetParams(s)); });
+$('wire').addEventListener('click',e=>{ terrainMat.wireframe=!terrainMat.wireframe; e.currentTarget.setAttribute('aria-pressed',terrainMat.wireframe); });
+$('home').addEventListener('click',()=>{ cam.alt=R*1.6; cam.tiltOff=0; });
+function hud(){ const st=tilesys?tilesys.stats:{};
+  const a=cam.alt<1?(cam.alt*1000).toFixed(0)+' m':cam.alt.toFixed(cam.alt<10?2:0)+' km';
+  $('hud').innerHTML=`<span>Altitude</span><b>${a}</b><span>Lat / lon</span><b>${(cam.lat*57.3).toFixed(2)}° / ${((cam.lon*57.3)%360).toFixed(2)}°</b>
+    <span>Tiles drawn</span><b>${st.drawn??'–'}</b><span>Tiles loaded</span><b>${st.loaded??'–'}</b><span>Building / queued</span><b>${st.building??0} / ${st.queued??0}</b><span>Awaiting upload</span><b>${st.waiting??0}</b>
+    <span>Deepest level</span><b>${st.level??0}</b><span>Recomputes</span><b>${st.recomputes??0}</b>`; }
+
+// ------------------------------------------------------------ loop
+window.__planet={cam,get tiles(){ return tilesys; }};   // debugging handle
+function resize(){ const w=host.clientWidth,h=host.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
+let last=performance.now(), hudT=0;
+renderer.setAnimationLoop(t=>{ const dt=Math.min(0.05,(t-last)/1000); last=t;
+  if(keys.has('w')) move(1,0,dt*300); if(keys.has('s')) move(-1,0,dt*300); if(keys.has('a')) move(0,-1,dt*300); if(keys.has('d')) move(0,1,dt*300);
+  if(keys.has('q')) cam.heading-=dt*1.2; if(keys.has('e')) cam.heading+=dt*1.2; if(keys.has('r')) cam.tiltOff=Math.min(1.2,cam.tiltOff+dt); if(keys.has('f')) cam.tiltOff=Math.max(-1.2,cam.tiltOff-dt);
+  placeCamera(); OU.uTime.value=t/1000; terrainMat.userData.uniforms.uTime.value=t/1000;
+  if(tilesys){ tilesys.setSplitK(+$('lod').value); tilesys.update(camera); }
+  if((hudT+=dt)>0.2){ hudT=0; hud(); }
+  renderer.render(scene,camera); });
+</script>
