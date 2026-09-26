@@ -36,7 +36,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   <div class="hud" id="hud" aria-live="off"></div>
   <div class="ctl">
     <div class="inline"><label for="seed">Seed</label><input type="number" id="seed" value="7" min="1"><button type="button" id="newp">New planet</button></div>
-    <label for="lod">Detail distance <span id="lodv"></span></label><input type="range" id="lod" min="1.2" max="4" step="0.1" value="2.2">
+    <label for="lod">Detail distance <span id="lodv"></span></label><input type="range" id="lod" min="1.2" max="4" step="0.1" value="1.8">
     <div class="inline"><button type="button" id="wire" aria-pressed="false">Tile wireframe</button><button type="button" id="home">Back to orbit</button></div>
     <p class="hint">Scroll or pinch to zoom from orbit to the ground. Drag to travel, right-drag (or Q/E, R/F) to turn and tilt, WASD to move.</p>
   </div>
@@ -150,7 +150,7 @@ const keys=new Set(); addEventListener('keydown',e=>{ if(e.target.closest&&e.tar
 
 // ------------------------------------------------------------ UI
 $('lod').addEventListener('input',()=>{ $('lodv').textContent=(+$('lod').value).toFixed(1)+'×'; });
-$('lodv').textContent='2.2×';
+$('lodv').textContent='1.8×';
 $('newp').addEventListener('click',()=>{ const s=Math.max(1,parseInt($('seed').value)||1); groundT=createTerrain(planetParams(s)); tilesys&&tilesys.setParams(planetParams(s)); });
 $('wire').addEventListener('click',e=>{ terrainMat.wireframe=!terrainMat.wireframe; e.currentTarget.setAttribute('aria-pressed',terrainMat.wireframe); });
 $('home').addEventListener('click',()=>{ cam.alt=R*1.6; cam.tiltOff=0; });

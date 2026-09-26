@@ -14,7 +14,7 @@
 //
 // Dependencies are injected so the module stays bundle-agnostic:
 //   deps = {THREE, gridIndex, faceDir, dirFace, tileKey}
-export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, splitK=2.2, workerSrc, params,
+export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, splitK=1.8, workerSrc, params,
     terrainMaterial, oceanMaterial, workers=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)-1)), budget=1600, uploadMs=3}){
   const {THREE,gridIndex,faceDir,dirFace,tileKey}=deps, R=radius, FACE_KM=Math.PI/2*R;
   const tiles=new Map(), group=new THREE.Group(); scene.add(group);
@@ -29,11 +29,18 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
 
   // ---- workers
   const pool=[], queue=[]; let wid=0;
-  for(let i=0;i<workers;i++){ const w=new Worker(URL.createObjectURL(new Blob([workerSrc],{type:'text/javascript'}))); w.busy=false;
-    w.onmessage=e=>{ w.busy=false; onBuilt(e.data); pump(); }; w.postMessage({type:'params',params,R,res,ring}); pool.push(w); }
+  const workerURL=URL.createObjectURL(new Blob([workerSrc],{type:'text/javascript'}));
+  // a worker that errors or goes silent is replaced and its tile re-queued, so the pipeline never stalls
+  function spawn(i){ const w=new Worker(workerURL); w.busy=null; w.since=0;
+    w.onmessage=e=>{ w.busy=null; onBuilt(e.data); pump(); };
+    w.onerror=e=>{ e.preventDefault&&e.preventDefault(); retire(w); };
+    w.postMessage({type:'params',params,R,res,ring}); pool[i]=w; }
+  function retire(w){ const i=pool.indexOf(w); if(i<0) return; const t=w.busy; w.terminate(); if(t&&t.state==='building'){ t.state='queued'; t.prio=-1e9; queue.push(t); } spawn(i); pump(); }
+  for(let i=0;i<workers;i++) spawn(i);
+  setInterval(()=>{ const now=performance.now(); for(const w of [...pool]) if(w.busy&&now-w.since>8000) retire(w); },2000);
   function pump(){ queue.sort((a,b)=>a.prio-b.prio);
-    for(const w of pool){ if(w.busy) continue; const t=queue.shift(); if(!t) break; if(t.state!=='queued'){ continue; }
-      t.state='building'; w.busy=true; w.postMessage({type:'tile',key:t.key,gen,f:t.f,L:t.L,x:t.x,y:t.y}); } }
+    for(const w of pool){ if(w.busy) continue; let t=queue.shift(); while(t&&t.state!=='queued') t=queue.shift(); if(!t) break;
+      t.state='building'; w.busy=t; w.since=performance.now(); w.postMessage({type:'tile',key:t.key,gen,f:t.f,L:t.L,x:t.x,y:t.y}); } }
   const uploads=[];
   function onBuilt(m){ if(m.gen!==gen) return; const t=tiles.get(m.key); if(!t||t.state!=='building') return; t.state='arrived'; uploads.push([t,m]); }
   function upload(t,m){
@@ -71,7 +78,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
       tp.copy(t.dir).multiplyScalar(R); sph.set(tp,t.size*0.85+3); if(!frustum.intersectsSphere(sph)) return;
       const dist=Math.max(0,tp.distanceTo(camPos)-t.size*0.5);
       // hysteresis: split at splitK, only merge back beyond 1.25×; prefetch children from 1.6× so they are ready in time
-      const want=t.L<maxLevel&&dist<t.size*splitK*(t.split?1.25:1), soon=t.L<maxLevel&&dist<t.size*splitK*1.6;
+      const want=t.L<maxLevel&&dist<t.size*splitK*(t.split?1.25:1), soon=t.L<maxLevel&&dist<t.size*splitK*1.3;
       t.split=false;
       if(want||soon){ const ch=children(t);
         if(want&&ch.every(c=>c.state==='ready')){ t.split=true; ch.forEach(visit); return; }
@@ -111,7 +118,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
   }
   function setParams(p){ gen++; params=p; queue.length=0; uploads.length=0;
     for(const t of tiles.values()) for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); }
-    tiles.clear(); draw=new Set(); lastKey=''; dirty=true; for(const w of pool){ w.busy=false; w.postMessage({type:'params',params,R,res,ring}); } }
+    tiles.clear(); draw=new Set(); lastKey=''; dirty=true; for(const w of pool){ w.busy=null; w.postMessage({type:'params',params,R,res,ring}); } }
   const setSplitK=v=>{ if(v!==splitK){ splitK=v; dirty=true; } if(terrainMaterial.userData.uniforms&&terrainMaterial.userData.uniforms.uSplitK) terrainMaterial.userData.uniforms.uSplitK.value=splitK; };
   return {update,setParams,setSplitK,stats,group};
 }
