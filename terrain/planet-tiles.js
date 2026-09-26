@@ -135,7 +135,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
 
 // Worker body (appended to the terrain-gen + cube-sphere sources): builds one tile per message.
 export const PLANET_WORKER=`
-let T=null, P0=null, TC=new Map(), R=100, RES=48, RING=[], TREE_LEVEL=8, TREE_H=[];
+let T=null, P0=null, TC=new Map(), R=100, RES=48, RING=[], TREE_LEVEL=9, TREE_H=[];
 const o3=[0,0,0], c3=[0,0,0];
 self.onmessage=e=>{ const m=e.data;
   if(m.type==='params'){ P0=m.params; TC.clear(); R=m.R; RES=m.res; RING=m.ring; if(m.treeLevel!==undefined) TREE_LEVEL=m.treeLevel; if(m.treeHeights) TREE_H=m.treeHeights; return; }
@@ -167,7 +167,7 @@ self.onmessage=e=>{ const m=e.data;
     for(let i=0;i<V;i++) put(i,i); RING.forEach((k,q)=>put(V+q,k)); }
   // trees: jittered grid anchored to the face (not the tile), so a tile and its children place identical trees
   let trees=null, treeVar=null;
-  if(L>=TREE_LEVEL&&TREE_H.length){ const vars=[]; const SP=0.03, NT=Math.round(FACE/SP), g0=Math.floor(x/n*NT), g1=Math.ceil((x+1)/n*NT), h0=Math.floor(y/n*NT), h1=Math.ceil((y+1)/n*NT), out=[];
+  if(L>=TREE_LEVEL&&TREE_H.length){ const vars=[]; const SP=0.04, NT=Math.round(FACE/SP), g0=Math.floor(x/n*NT), g1=Math.ceil((x+1)/n*NT), h0=Math.floor(y/n*NT), h1=Math.ceil((y+1)/n*NT), out=[];
     const hash=(a,b,c)=>{ let t=(a*73856093)^(b*19349663)^(c*83492791)^0x9e3779b9; t=Math.imul(t^(t>>>16),0x45d9f3b); t=Math.imul(t^(t>>>16),0x45d9f3b); return ((t^(t>>>16))>>>0)/4294967296; };
     const vn=(px,py,pz)=>{ const X=Math.floor(px),Y=Math.floor(py),Z=Math.floor(pz),fx=px-X,fy=py-Y,fz=pz-Z,s=t=>t*t*(3-2*t),ux=s(fx),uy=s(fy),uz=s(fz); let v=0;
       for(let c=0;c<8;c++){ const i=c&1,j=(c>>1)&1,k=c>>2; v+=hash(X+i,Y+j,Z+k)*(i?ux:1-ux)*(j?uy:1-uy)*(k?uz:1-uz); } return v; };
