@@ -1,0 +1,207 @@
+<title>Ridgeline Terrain Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --ground:#10140f; --panel:rgba(16,21,17,.86); --line:rgba(206,219,196,.12); --line-2:rgba(206,219,196,.26);
+  --ink:#e6ecdf; --ink-2:#a9b5a3; --ink-3:#77846f; --moss:#a6c26b; --snow:#dfe8ee; --warn:#e3a45a;
+  --ui:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:var(--ui);overflow:hidden}
+#view{position:fixed;inset:0}
+#view canvas{display:block;width:100%;height:100%}
+.panel{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);width:300px;
+  display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.head{padding:14px 16px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:4px}
+.head h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.02em;text-wrap:balance}
+.stat{font-family:var(--mono);font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums;min-height:1.4em}
+.stat.busy{color:var(--warn)}
+.body{overflow-y:auto;padding:4px 16px 16px;display:flex;flex-direction:column;gap:14px}
+fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+legend{padding:10px 0 2px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--moss)}
+.row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center}
+.row label{font-size:13px;color:var(--ink-2)}
+.row output{font-family:var(--mono);font-size:11px;color:var(--ink);font-variant-numeric:tabular-nums}
+.row input[type=range]{grid-column:1/-1;width:100%;margin:0;accent-color:var(--moss);height:18px}
+.inline{display:flex;gap:8px;align-items:center}
+select,input[type=number]{font:500 12px var(--mono);color:var(--ink);background:rgba(0,0,0,.35);border:1px solid var(--line-2);padding:5px 7px;min-width:0}
+input[type=number]{width:90px}
+button{font:500 13px var(--ui);color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--ink-2)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--moss);outline-offset:2px}
+.hint{font-size:12px;color:var(--ink-3);line-height:1.45}
+.toggle{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:12px;display:none}
+@media (max-width:640px){
+  .panel{top:auto;left:12px;right:12px;width:auto;height:46%}
+  .panel.closed{display:none}
+  .toggle{display:block;background:var(--panel)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div id="view"></div>
+<button class="toggle" id="toggle" type="button">Controls</button>
+<aside class="panel" id="panel" aria-label="Terrain controls">
+  <div class="head">
+    <h1>Ridgeline terrain lab</h1>
+    <div class="stat" id="stat" aria-live="polite">Generating…</div>
+  </div>
+  <div class="body" id="controls">
+    <fieldset>
+      <legend>Tile</legend>
+      <div class="inline">
+        <label for="seed" class="hint">Seed</label><input type="number" id="seed" value="7" min="1" step="1">
+        <button type="button" id="reseed">New seed</button>
+      </div>
+      <div class="inline">
+        <label for="res" class="hint">Grid</label>
+        <select id="res"><option value="128">129 × 129</option><option value="256" selected>257 × 257</option><option value="384">385 × 385</option><option value="512">513 × 513</option></select>
+      </div>
+    </fieldset>
+    <fieldset id="fs-shape"><legend>Shape</legend></fieldset>
+    <fieldset id="fs-erosion"><legend>Erosion</legend></fieldset>
+    <fieldset id="fs-surface"><legend>Surface</legend></fieldset>
+    <fieldset id="fs-light"><legend>Light and water</legend></fieldset>
+    <p class="hint">Tile is 8 × 8 km. Drag to orbit, right-drag to pan, scroll to zoom. Shape and erosion regenerate the tile; surface and light update live.</p>
+  </div>
+</aside>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {Sky} from 'three/addons/objects/Sky.js';
+import {createTerrain, buildTile, flatPointAt, gridIndex, DEFAULT_TERRAIN} from './terrain-gen.js';   //@INLINE_GEN
+import {createTerrainMaterial, DEFAULT_MATERIAL} from './terrain-material.js';                         //@INLINE_MAT
+const GEN_SRC=null;   //@GEN_SRC
+
+const SIZE=8, $=id=>document.getElementById(id);
+
+// ------------------------------------------------------------ scene
+const host=$('view');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=0.9;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap; host.append(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(42,1,0.01,400); camera.position.set(6.5,4.2,7.5);
+const controls=new OrbitControls(camera,renderer.domElement); controls.target.set(0,0.35,0); controls.enableDamping=true; controls.maxPolarAngle=Math.PI*0.49; controls.minDistance=0.15; controls.maxDistance=40;
+
+const sky=new Sky(); sky.scale.setScalar(300); scene.add(sky);
+Object.assign(sky.material.uniforms,{}); const SU=sky.material.uniforms;
+SU.turbidity.value=5.5; SU.rayleigh.value=1.6; SU.mieCoefficient.value=0.004; SU.mieDirectionalG.value=0.82;
+const pmrem=new THREE.PMREMGenerator(renderer); let envRT=null; const skyScene=new THREE.Scene(); const sky2=new Sky(); sky2.scale.setScalar(300); skyScene.add(sky2);
+scene.fog=new THREE.FogExp2(0xaab6bd,0.03);
+
+const sun=new THREE.DirectionalLight(0xfff1dd,3.2); sun.castShadow=true; sun.shadow.mapSize.set(4096,4096);
+Object.assign(sun.shadow.camera,{left:-6.5,right:6.5,top:6.5,bottom:-6.5,near:0.5,far:40}); sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.02;
+scene.add(sun,sun.target); const hemi=new THREE.HemisphereLight(0xbfd0e0,0x3a3a2c,0.35); scene.add(hemi);
+
+const terrainMat=createTerrainMaterial(THREE,{});
+const MU=terrainMat.userData.uniforms;
+let terrainMesh=null;
+
+// water: flat sheet at water level, env-reflective with animated micro-normals
+const waterMat=new THREE.MeshPhysicalMaterial({color:0x0f2f38,roughness:0.06,metalness:0,transparent:true,opacity:0.8,envMapIntensity:1.1});
+const WU={uTime:{value:0}};
+waterMat.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,WU);
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP;').replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvWP=(modelMatrix*vec4(transformed,1.)).xyz;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+    varying vec3 vWP; uniform float uTime;
+    float wH(vec2 p){ return sin(p.x*1.7+uTime*1.1)*0.5+sin(p.y*2.3-uTime*0.9)*0.5+sin((p.x+p.y)*3.1+uTime*1.7)*0.25+sin((p.x-p.y)*5.3-uTime*2.1)*0.12; }`)
+  .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+    { vec2 p=vWP.xz*40.; float e=0.05; float h0=wH(p); vec3 g=vec3(wH(p+vec2(e,0))-h0,0.,wH(p+vec2(0,e))-h0)/e;
+      normal=normalize(normal-(viewMatrix*vec4(g.x*0.02,0.,g.z*0.02,0.)).xyz); }`); };
+const water=new THREE.Mesh(new THREE.PlaneGeometry(SIZE,SIZE).rotateX(-Math.PI/2),waterMat); water.receiveShadow=true; scene.add(water);
+
+// ------------------------------------------------------------ controls
+const T={...DEFAULT_TERRAIN}, M={...DEFAULT_MATERIAL}, S={sunElev:24,sunAzim:215,fog:0.03,droplets:40000};
+const defs={
+  'fs-shape':[
+    ['coverage','Mountain coverage',0,1,0.01,T],['mountainHeight','Peak height (km)',0.2,2.5,0.01,T],['ridgeScale','Ridge frequency',0.1,0.8,0.01,T],
+    ['sharpness','Crest sharpness',1,3.5,0.05,T],['ridgeGain','Ridge detail',0.8,3,0.05,T],['warp','Warp',0,2,0.01,T],['maskScale','Range size',0.04,0.3,0.005,T]],
+  'fs-erosion':[
+    ['erosionDamping','Slope smoothing',0,2,0.01,T],['gullyStrength','Gully depth',0,2.5,0.01,T],['gullyScale','Gully frequency',1,8,0.1,T],
+    ['gullySlope','Gully steering',0.5,6,0.1,T],['droplets','Hydraulic droplets',0,150000,5000,S]],
+  'fs-surface':[
+    ['rockSlope','Rock starts at slope',0.2,0.9,0.01,M,'uRockSlope'],['rockSoftness','Rock blend width',0.02,0.4,0.01,M,'uRockSoft'],
+    ['snowLine','Snow line (km)',0.2,2.5,0.01,M,'uSnowLine'],['snowFade','Snow fade',0.02,0.6,0.01,M,'uSnowFade'],
+    ['detail','Surface detail',0,2,0.01,M,'uDetail'],['strata','Rock strata',0,1,0.01,M,'uStrata']],
+  'fs-light':[
+    ['sunElev','Sun elevation (°)',2,80,1,S],['sunAzim','Sun direction (°)',0,360,1,S],['waterLevel','Water level (km)',0,0.6,0.005,M,'uWater'],['fog','Haze',0,0.08,0.001,S]],
+};
+const REGEN=new Set(['fs-shape','fs-erosion']);
+const fmt=(v,st)=>st>=1?Math.round(v).toLocaleString():v.toFixed(st<0.01?3:2);
+for(const [fs,list] of Object.entries(defs)) for(const [key,label,min,max,step,obj,uni] of list){
+  const id='c-'+key, row=document.createElement('div'); row.className='row';
+  row.innerHTML=`<label for="${id}">${label}</label><output id="${id}-o"></output><input type="range" id="${id}" min="${min}" max="${max}" step="${step}">`;
+  $(fs).append(row); const inp=row.querySelector('input'), out=row.querySelector('output');
+  inp.value=obj[key]; out.textContent=fmt(+obj[key],step);
+  inp.addEventListener('input',()=>{ obj[key]=+inp.value; out.textContent=fmt(obj[key],step);
+    if(uni) MU[uni].value=obj[key];
+    if(REGEN.has(fs)) schedule(); else applyScene(); });
+}
+$('seed').addEventListener('change',()=>{ T.seed=Math.max(1,parseInt($('seed').value)||1); schedule(0); });
+$('reseed').addEventListener('click',()=>{ T.seed=1+Math.floor(Math.random()*99999); $('seed').value=T.seed; schedule(0); });
+$('res').addEventListener('change',()=>schedule(0));
+$('toggle').addEventListener('click',()=>$('panel').classList.toggle('closed'));
+
+function applyScene(){
+  const el=THREE.MathUtils.degToRad(S.sunElev), az=THREE.MathUtils.degToRad(S.sunAzim);
+  const d=new THREE.Vector3(Math.cos(el)*Math.sin(az),Math.sin(el),Math.cos(el)*Math.cos(az));
+  sun.position.copy(d).multiplyScalar(20); sun.target.position.set(0,0,0);
+  SU.sunPosition.value.copy(d); Object.assign(sky2.material.uniforms,{}); for(const k of ['turbidity','rayleigh','mieCoefficient','mieDirectionalG']) sky2.material.uniforms[k].value=SU[k].value;
+  sky2.material.uniforms.sunPosition.value.copy(d);
+  if(envRT) envRT.dispose(); envRT=pmrem.fromScene(skyScene,0.02); scene.environment=envRT.texture;
+  const warm=Math.min(1,S.sunElev/35); sun.color.setRGB(1,0.78+0.2*warm,0.6+0.35*warm); sun.intensity=1.2+2.2*Math.min(1,S.sunElev/20);
+  scene.fog.density=S.fog; scene.fog.color.setRGB(0.62+0.08*warm,0.68+0.04*warm,0.72);
+  water.position.y=M.waterLevel; water.visible=M.waterLevel>0.001;
+}
+
+// ------------------------------------------------------------ generation (worker, main-thread fallback)
+let worker=null, busy=false, pending=false, timer=0, idxCache={};
+async function makeWorker(){
+  try{
+    const src=(GEN_SRC||(await (await fetch('./terrain-gen.js')).text()).replace(/^export /gm,''))+`
+self.onmessage=e=>{ const {params,res,size,droplets}=e.data, t=performance.now();
+  const r=buildTile(createTerrain(params),{res,pointAt:flatPointAt(-size/2,-size/2,size),droplets,dropletSeed:params.seed,cellSize:size/res});
+  self.postMessage({positions:r.positions,normals:r.normals,terrain:r.terrain,hmin:r.hmin,hmax:r.hmax,res,ms:performance.now()-t},[r.positions.buffer,r.normals.buffer,r.terrain.buffer]); };`;
+    const w=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
+    w.onmessage=e=>done(e.data); w.onerror=()=>{ worker=null; if(busy){ busy=false; generate(); } };
+    return w;
+  }catch(e){ return null; }
+}
+function schedule(delay=260){ clearTimeout(timer); timer=setTimeout(generate,delay); }
+function generate(){
+  if(busy){ pending=true; return; } busy=true; pending=false;
+  const res=+$('res').value; $('stat').textContent=`Generating ${res+1} × ${res+1}…`; $('stat').classList.add('busy');
+  const msg={params:{...T},res,size:SIZE,droplets:S.droplets};
+  if(worker) worker.postMessage(msg);
+  else setTimeout(()=>{ const t=performance.now(); const r=buildTile(createTerrain(msg.params),{res,pointAt:flatPointAt(-SIZE/2,-SIZE/2,SIZE),droplets:msg.droplets,dropletSeed:msg.params.seed,cellSize:SIZE/res});
+    done({...r,res,ms:performance.now()-t}); },20);
+}
+function done(r){
+  const g=new THREE.BufferGeometry();
+  g.setIndex(new THREE.BufferAttribute(idxCache[r.res]||(idxCache[r.res]=gridIndex(r.res)),1));
+  g.setAttribute('position',new THREE.BufferAttribute(r.positions,3));
+  g.setAttribute('normal',new THREE.BufferAttribute(r.normals,3));
+  g.setAttribute('aTerr',new THREE.BufferAttribute(r.terrain,4));
+  g.computeBoundingSphere();
+  if(terrainMesh){ terrainMesh.geometry.dispose(); terrainMesh.geometry=g; }
+  else { terrainMesh=new THREE.Mesh(g,terrainMat); terrainMesh.castShadow=terrainMesh.receiveShadow=true; scene.add(terrainMesh); }
+  const v=(r.res+1)**2;
+  $('stat').textContent=`${r.res+1} × ${r.res+1} · ${v.toLocaleString()} vertices · ${Math.round(r.ms)} ms · peak ${r.hmax.toFixed(2)} km`;
+  $('stat').classList.remove('busy'); busy=false; if(pending) generate();
+}
+
+// ------------------------------------------------------------ loop
+function resize(){ const w=host.clientWidth,h=host.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize(); applyScene();
+makeWorker().then(w=>{ worker=w; generate(); });
+renderer.setAnimationLoop(t=>{ WU.uTime.value=t/1000; controls.update(); renderer.render(scene,camera); });
+</script>
