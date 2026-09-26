@@ -635,11 +635,13 @@ function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, splitK=1.8,
     const east=new THREE.Vector3(0,1,0).cross(up).normalize(), north=up.clone().cross(east), heading=Math.round(Math.atan2(fwd.dot(east),fwd.dot(north))/(12*Math.PI/180));
     return [af.f,L,ax,ay,Math.floor(Math.log(alt)/Math.log(1.25)),tilt,heading,horizonFlag?1:0].join(',');
   }
-  let dirty=true;
+  let dirty=true; const lastSel=new THREE.Vector3(1e9,0,0);
   function update(camera){
     const t0=performance.now(); while(uploads.length&&performance.now()-t0<uploadMs){ const [t,m]=uploads.shift(); upload(t,m); dirty=true; }   // time budget per frame
     const k=viewKey(camera); if(k!==lastKey){ lastKey=k; dirty=true; }
-    if(dirty){ dirty=false; select(camera); }
+    // also after real movement: lateral travel within the same anchor/altitude band still changes which tiles must split
+    const alt=Math.max(0.01,camera.position.length()-R); if(camera.position.distanceTo(lastSel)>Math.max(0.025,alt*0.2)) dirty=true;
+    if(dirty){ dirty=false; lastSel.copy(camera.position); select(camera); }
     stats.drawn=draw.size; stats.loaded=[...tiles.values()].filter(t=>t.state==='ready').length; stats.building=[...tiles.values()].filter(t=>t.state==='building').length; stats.waiting=uploads.length; stats.queued=queue.length;
   }
   function setParams(p){ gen++; params=p; queue.length=0; uploads.length=0;
