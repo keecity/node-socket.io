@@ -686,6 +686,153 @@ function sitesToPads(sites,{r=0.08,fall=0.3,water=0,clearance=0.012,rough=0.0006
 
 return {findSettlementSites, sitesToPads};
 })();
+const {generateRoadNetwork, RoadIndex, gradeGrid}=(()=>{
+// Terrain-following road networks — pure JS, no dependencies.
+// Works in a local 2D frame (x,z) with a height callback, so the same code lays out towns on a flat
+// tile now and in a planet tile's tangent frame later.
+//
+//   generateRoadNetwork(heightAt, opts) → { roads:[{type,width,main,pts:[{x,z,y,tx,tz,s}], fade}], plaza }
+//     • main roads grow from the plaza outward, steering toward gentle grades (greedy look-ahead)
+//     • side streets branch off main roads; a street that meets another road joins it
+//     • every paved road that ends unconnected continues as a dirt track that narrows and fades out
+//     • all roads are smoothed into Catmull-Rom splines and given a graded height profile
+//   RoadIndex(net)          → fast nearest-road queries (distance, road height, tangent)
+//   gradeGrid(net, grid)    → cuts/fills a height grid so roads sit level across and smooth along
+
+function mulberry(a){ return ()=>{ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const rr=(r,a,b)=>a+r()*(b-a);
+
+const DEFAULT_ROADS = {
+  seed: 1, townRadius: 13, bound: 24,      // paved roads stay within townRadius; dirt tracks may reach bound
+  mainCount: [2,4], width: 0.46, dirtWidth: 0.3, step: 0.45, maxGrade: 0.22,
+  steepStop: 3.5,   // a road gives up when the best heading is steeper than maxGrade*steepStop
+  sideEvery: [2.0,3.2], sideChance: 0.7, sideLen: [3,7], dirtLen: [4,10], joinDist: 1.0, plazaR: 1.35,
+};
+
+// ---------------------------------------------------------------- spline helpers
+function catmull(pts, spacing){
+  if(pts.length<2) return pts.slice();
+  const out=[]; const P=i=>pts[Math.max(0,Math.min(pts.length-1,i))];
+  for(let i=0;i<pts.length-1;i++){
+    const p0=P(i-1), p1=P(i), p2=P(i+1), p3=P(i+2), L=Math.hypot(p2.x-p1.x,p2.z-p1.z), n=Math.max(1,Math.round(L/spacing));
+    for(let k=0;k<n;k++){ const t=k/n, t2=t*t, t3=t2*t;
+      const f=(a,b,c,d)=>0.5*((2*b)+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
+      out.push({x:f(p0.x,p1.x,p2.x,p3.x), z:f(p0.z,p1.z,p2.z,p3.z)}); }
+  }
+  out.push({x:pts[pts.length-1].x,z:pts[pts.length-1].z});
+  return out;
+}
+function finish(pts, heightAt, maxGrade){   // tangents, arc length, graded height profile
+  let s=0;
+  for(let i=0;i<pts.length;i++){ const a=pts[Math.max(0,i-1)], b=pts[Math.min(pts.length-1,i+1)], L=Math.hypot(b.x-a.x,b.z-a.z)||1;
+    pts[i].tx=(b.x-a.x)/L; pts[i].tz=(b.z-a.z)/L; if(i) s+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].z-pts[i-1].z); pts[i].s=s; pts[i].y=heightAt(pts[i].x,pts[i].z); }
+  // smooth along the road (moving average ≈ 2.5 units) then limit grade both ways
+  const raw=pts.map(p=>p.y), win=2.5;
+  for(let i=0;i<pts.length;i++){ let sum=0,w=0; for(let j=i;j>=0&&pts[i].s-pts[j].s<win;j--){ const k=1-(pts[i].s-pts[j].s)/win; sum+=raw[j]*k; w+=k; }
+    for(let j=i+1;j<pts.length&&pts[j].s-pts[i].s<win;j++){ const k=1-(pts[j].s-pts[i].s)/win; sum+=raw[j]*k; w+=k; } pts[i].y=sum/w; }
+  for(let pass=0;pass<2;pass++){
+    for(let i=1;i<pts.length;i++){ const d=pts[i].s-pts[i-1].s, m=maxGrade*d; pts[i].y=Math.min(pts[i-1].y+m,Math.max(pts[i-1].y-m,pts[i].y)); }
+    for(let i=pts.length-2;i>=0;i--){ const d=pts[i+1].s-pts[i].s, m=maxGrade*d; pts[i].y=Math.min(pts[i+1].y+m,Math.max(pts[i+1].y-m,pts[i].y)); }
+  }
+  return pts;
+}
+
+// ---------------------------------------------------------------- index for nearest-road queries
+class RoadIndex{
+  constructor(net,cell=1){ this.cell=cell; this.map=new Map(); this.net=net;
+    net.roads.forEach((rd,ri)=>rd.pts.forEach((p,pi)=>{ const k=this.key(p.x,p.z); if(!this.map.has(k)) this.map.set(k,[]); this.map.get(k).push([ri,pi]); })); }
+  key(x,z){ return Math.floor(x/this.cell)+','+Math.floor(z/this.cell); }
+  // nearest road point within `range`: {d (to centreline), road, p, half (half width), fade}
+  nearest(x,z,range=2,filter=null){
+    let best=null, bd=range, n=Math.ceil(range/this.cell);
+    const cx=Math.floor(x/this.cell), cz=Math.floor(z/this.cell);
+    for(let i=-n;i<=n;i++) for(let j=-n;j<=n;j++){ const L=this.map.get((cx+i)+','+(cz+j)); if(!L) continue;
+      for(const [ri,pi] of L){ const rd=this.net.roads[ri]; if(filter&&!filter(rd)) continue;
+        // distance to the segment pi→pi+1 (and pi-1→pi)
+        for(const q of [pi-1,pi]){ if(q<0||q+1>=rd.pts.length) continue; const a=rd.pts[q], b=rd.pts[q+1];
+          const vx=b.x-a.x, vz=b.z-a.z, L2=vx*vx+vz*vz||1, t=Math.max(0,Math.min(1,((x-a.x)*vx+(z-a.z)*vz)/L2));
+          const px=a.x+vx*t, pz=a.z+vz*t, d=Math.hypot(x-px,z-pz);
+          if(d<bd){ bd=d; const f=rd.fade?rd.fade(a.s+(b.s-a.s)*t):1;
+            best={d,road:rd,y:a.y+(b.y-a.y)*t,tx:vx/Math.sqrt(L2),tz:vz/Math.sqrt(L2),half:rd.width*0.5*(rd.type==='dirt'?(0.45+0.55*f):1),fade:f}; } } } }
+    return best;
+  }
+}
+
+// ---------------------------------------------------------------- generation
+function generateRoadNetwork(heightAt, opts={}){
+  // rough ground: retry with more tolerance so every town gets streets
+  for(let tries=0;tries<3;tries++){ const net=generateOnce(heightAt,{...opts,steepStop:(opts.steepStop||DEFAULT_ROADS.steepStop)*(1+tries)});
+    if(net.roads.some(r=>r.main)||tries===2) return net; }
+}
+function generateOnce(heightAt, opts){
+  const O={...DEFAULT_ROADS,...opts}, r=mulberry(O.seed*977+13), roads=[];
+  const index={cells:new Map()}, C=1.2, ck=(x,z)=>Math.floor(x/C)+','+Math.floor(z/C);
+  const addToIndex=(pts,id)=>pts.forEach(p=>{ const k=ck(p.x,p.z); if(!index.cells.has(k)) index.cells.set(k,[]); index.cells.get(k).push({x:p.x,z:p.z,id}); });
+  const nearOther=(x,z,id,dist)=>{ const cx=Math.floor(x/C), cz=Math.floor(z/C), n=Math.ceil(dist/C); let best=null, bd=dist;
+    for(let i=-n;i<=n;i++) for(let j=-n;j<=n;j++){ const L=index.cells.get((cx+i)+','+(cz+j)); if(!L) continue;
+      for(const q of L){ if(q.id===id) continue; const d=Math.hypot(q.x-x,q.z-z); if(d<bd){ bd=d; best=q; } } } return best; };
+  const grade=(x,z,nx,nz)=>Math.abs(heightAt(nx,nz)-heightAt(x,z))/Math.hypot(nx-x,nz-z);
+
+  // greedy terrain-following growth: look a few steps ahead over a fan of headings
+  function grow(x,z,dir,len,id,{limit=O.townRadius,join=true,wander=0.25}={}){
+    const pts=[{x,z}]; let a=dir, joined=null, stopped='length';
+    for(let t=0;t<len/O.step;t++){
+      let best=null, bs=1e9;
+      for(let k=-3;k<=3;k++){ const na=a+k*0.18; let px=x, pz=z, cost=0;
+        for(let l=1;l<=3;l++){ const qx=px+Math.cos(na)*O.step, qz=pz+Math.sin(na)*O.step; cost+=grade(px,pz,qx,qz)*(4-l); px=qx; pz=qz; }
+        cost+=Math.abs(k)*0.05+(r()-0.5)*wander*0.1; if(cost<bs){ bs=cost; best=na; } }
+      a=best; const nx=x+Math.cos(a)*O.step, nz=z+Math.sin(a)*O.step;
+      if(Math.hypot(nx,nz)>limit){ stopped='limit'; break; }
+      if(grade(x,z,nx,nz)>O.maxGrade*O.steepStop){ stopped='steep'; break; }
+      x=nx; z=nz; pts.push({x,z});
+      if(join&&pts.length>3){ const q=nearOther(x,z,id,O.joinDist); if(q){ pts.push({x:q.x,z:q.z}); joined=q.id; stopped='joined'; break; } }
+    }
+    return {pts,dir:a,joined,stopped};
+  }
+  const addRoad=(ctrl,type,main,extra={})=>{ const pts=finish(catmull(ctrl,0.25),heightAt,O.maxGrade); const rd={type,main,width:type==='dirt'?O.dirtWidth:O.width,pts,...extra};
+    roads.push(rd); addToIndex(pts,roads.length-1); return rd; };
+  // dirt continuation: narrows and fades over its length so roads never end abruptly
+  const dirtFrom=(end,dir,len,parent)=>{ const g=grow(end.x,end.z,dir,len,-1,{limit:O.bound,join:false,wander:1});
+    if(g.pts.length<3) return; const total=(g.pts.length-1)*O.step;
+    addRoad(g.pts,'dirt',false,{parent,fade:s=>Math.max(0,1-Math.pow(s/Math.max(total,1e-3),1.6))}); };
+
+  // plaza + main roads
+  const plaza={x:0,z:0,r:O.plazaR,y:heightAt(0,0)};
+  const nMain=Math.round(rr(r,O.mainCount[0],O.mainCount[1]+0.49)), a0=r()*6.283;
+  const mains=[];
+  for(let i=0;i<nMain;i++){ const dir=a0+i*6.283/nMain+rr(r,-0.35,0.35), id=roads.length;
+    const g=grow(Math.cos(dir)*O.plazaR*0.6,Math.sin(dir)*O.plazaR*0.6,dir,O.townRadius*1.4,id,{join:false});
+    if(g.pts.length<3) continue; const rd=addRoad([{x:0,z:0},...g.pts],'paved',true); mains.push(rd);
+    const e=g.pts[g.pts.length-1]; dirtFrom(e,g.dir,rr(r,O.dirtLen[0],O.dirtLen[1])*1.6,rd); }
+  // side streets
+  for(const m of mains){ let s=rr(r,O.sideEvery[0],O.sideEvery[1])+O.plazaR;
+    while(s<m.pts[m.pts.length-1].s-1){ const p=m.pts.find(q=>q.s>=s)||m.pts[m.pts.length-1];
+      for(const side of [-1,1]){ if(r()>O.sideChance*0.6) continue;
+        const dir=Math.atan2(p.tz,p.tx)+side*(Math.PI/2+rr(r,-0.35,0.35)), id=roads.length;
+        const sx=p.x+Math.cos(dir)*O.width*0.5, sz=p.z+Math.sin(dir)*O.width*0.5;
+        const g=grow(sx,sz,dir,rr(r,O.sideLen[0],O.sideLen[1]),id,{join:true});
+        if(g.pts.length<4) continue; const rd=addRoad([{x:p.x,z:p.z},...g.pts],'paved',false);
+        if(g.stopped!=='joined'){ const e=g.pts[g.pts.length-1]; dirtFrom(e,g.dir,rr(r,O.dirtLen[0],O.dirtLen[1]),rd); } }
+      s+=rr(r,O.sideEvery[0],O.sideEvery[1]); } }
+  return {roads,plaza,opts:O};
+}
+
+// Cut/fill a height grid to the road profiles. grid: {res, x0, z0, size, get(i,j), set(i,j,h)} in the
+// same units as the network. Roads are level across their width with a soft shoulder; the plaza is flat.
+function gradeGrid(net, grid, {shoulder=0.6}={}){
+  const {res,x0,z0,size}=grid, cell=size/res, R=res+1, bd=new Float32Array(R*R).fill(1e9), by=new Float32Array(R*R), bw=new Float32Array(R*R);
+  const touch=(x,z,y,half,strength)=>{ const reach=half+shoulder, i0=Math.max(0,Math.floor((x-reach-x0)/cell)), i1=Math.min(res,Math.ceil((x+reach-x0)/cell)),
+      j0=Math.max(0,Math.floor((z-reach-z0)/cell)), j1=Math.min(res,Math.ceil((z+reach-z0)/cell));
+    for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){ const px=x0+i*cell, pz=z0+j*cell, d=Math.hypot(px-x,pz-z); if(d>reach) continue;
+      const k=j*R+i, w=(d<=half?1:1-(d-half)/shoulder)*strength, ws=w*w*(3-2*w); if(ws>bw[k]||(ws===bw[k]&&d<bd[k])){ bw[k]=ws; bd[k]=d; by[k]=y; } } };
+  for(const rd of net.roads){ for(let i=0;i<rd.pts.length;i++){ const p=rd.pts[i]; const f=rd.fade?rd.fade(p.s):1; if(f<=0.02) continue;
+    touch(p.x,p.z,p.y,rd.width*0.5*(rd.type==='dirt'?(0.45+0.55*f):1),rd.type==='dirt'?0.7*f:1); } }
+  const P=net.plaza; if(P) touch(P.x,P.z,P.y,P.r,1);
+  for(let j=0;j<R;j++) for(let i=0;i<R;i++){ const k=j*R+i; if(bw[k]>0) grid.set(i,j,grid.get(i,j)+(by[k]-grid.get(i,j))*bw[k]); }
+}
+
+return {generateRoadNetwork, RoadIndex, gradeGrid};
+})();
 
 const BASE=window.__ASSET_BASE||'';
 // surface failures on screen instead of hanging silently
@@ -761,7 +908,8 @@ const T_SOFT=canvasTex(64,(g,S)=>{ const gr=g.createRadialGradient(32,32,0,32,32
 const T_MARK=canvasTex(64,(g,S)=>{ g.clearRect(0,0,S,S); const gr=g.createLinearGradient(0,0,S,0); gr.addColorStop(0,'rgba(255,255,255,0)'); gr.addColorStop(0.25,'rgba(255,255,255,.9)'); gr.addColorStop(0.75,'rgba(255,255,255,.9)'); gr.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle=gr; g.fillRect(0,4,S,S-8); },false);
 
 // ===================================================== terrain heightfield
-const TOWN=6.4, ARENA_R=5.4, ROAD_W=0.46, PLAZA_R=1.35, WORLD=36; let ROADS=[0,-3.2,3.2];   // ROADS re-laid out per world
+const TOWN=13, ARENA_R=5.4, ROAD_W=0.46, PLAZA_R=1.35, WORLD=36, MASK_E=25;   // town radius; road mask covers ±MASK_E
+let NET=null, RIDX=null;   // this world's road network (terrain/roads.js) and its nearest-road index
 function hash2(x,y){ const s=Math.sin(x*127.1+y*311.7)*43758.5453; return s-Math.floor(s); }
 function vnoise(x,y){ const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi; const u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
   const a=hash2(xi,yi), b=hash2(xi+1,yi), c=hash2(xi,yi+1), d=hash2(xi+1,yi+1); return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v; }
@@ -777,16 +925,22 @@ function H(x,z){ if(!TER) return 0; const kx=x/KM, kz=z/KM;   // fine town patch
   return KM*(Math.abs(kx)<INH&&Math.abs(kz)<INH?sampleGrid(TER.inner.terrain,IN_KM/2,TILE_RES,kx,kz):sampleGrid(TER.outer.terrain,4,TILE_RES,kx,kz)); }
 function HN(x,z,out){ const e=0.05; return out.set(H(x-e,z)-H(x+e,z),2*e,H(x,z-e)-H(x,z+e)).normalize(); }
 let maskSeed=21;
-function drawMask(g,S){   // R=road G=plaza B=dirt  (covers [-TOWN-1, TOWN+1])
-  const E=TOWN+1, u=S/(E*2), X=v=>(v+E)*u; const r=mulberry(maskSeed);
-  g.globalCompositeOperation='source-over'; g.setLineDash([]); g.globalAlpha=1;
+function drawMask(g,S){   // R=asphalt G=plaza B=dirt/shoulder  (covers [-MASK_E, MASK_E])
+  const u=S/(MASK_E*2), X=v=>(v+MASK_E)*u; const r=mulberry(maskSeed);
+  g.globalCompositeOperation='source-over'; g.setLineDash([]); g.globalAlpha=1; g.lineCap='round'; g.lineJoin='round';
   g.fillStyle='#000'; g.fillRect(0,0,S,S);
-  g.fillStyle='rgb(0,0,255)'; for(let i=0;i<140;i++){ g.globalAlpha=0.25+r()*0.5; g.beginPath(); g.arc(r()*S,r()*S,(0.1+r()*0.45)*u,0,7); g.fill(); } g.globalAlpha=1;
-  g.fillStyle='rgb(0,0,255)'; ROADS.forEach(k=>{ g.fillRect(0,X(k-ROAD_W/2-0.12),S,(ROAD_W+0.24)*u); g.fillRect(X(k-ROAD_W/2-0.12),0,(ROAD_W+0.24)*u,S); });
-  g.fillStyle='rgb(255,0,0)'; ROADS.forEach(k=>{ g.fillRect(0,X(k-ROAD_W/2),S,ROAD_W*u); g.fillRect(X(k-ROAD_W/2),0,ROAD_W*u,S); });
-  g.fillStyle='rgb(0,255,0)'; g.beginPath(); g.arc(X(0),X(0),PLAZA_R*u,0,7); g.fill();
-  g.globalCompositeOperation='lighter'; g.strokeStyle='rgb(255,255,255)'; g.lineWidth=3; g.setLineDash([24,22]);  // paint marks show as white (R+G+B)
-  ROADS.forEach(k=>{ [[0,X(k),S,X(k)],[X(k),0,X(k),S]].forEach(([a,b,c,d])=>{ g.beginPath(); g.moveTo(a,b); g.lineTo(c,d); g.stroke(); }); });
+  g.fillStyle='rgb(0,0,255)'; for(let i=0;i<220;i++){ const a=r()*6.283, d=r()*TOWN; g.globalAlpha=0.2+r()*0.4; g.beginPath(); g.arc(X(Math.cos(a)*d),X(Math.sin(a)*d),(0.1+r()*0.4)*u,0,7); g.fill(); } g.globalAlpha=1;
+  if(!NET) return;
+  const stroke=(pts,w,style,fade)=>{ g.strokeStyle=style; for(let i=1;i<pts.length;i++){ const f=fade?fade(pts[i].s):1; if(f<=0.01) break;
+    g.globalAlpha=Math.min(1,f*1.3); g.lineWidth=Math.max(1,w*(fade?0.45+0.55*f:1)*u); g.beginPath(); g.moveTo(X(pts[i-1].x),X(pts[i-1].z)); g.lineTo(X(pts[i].x),X(pts[i].z)); g.stroke(); } g.globalAlpha=1; };
+  // dirt tracks, then shoulders of paved roads (so asphalt ends blend into dirt), then asphalt
+  for(const rd of NET.roads) if(rd.type==='dirt') stroke(rd.pts,rd.width,'rgb(0,0,255)',rd.fade);
+  for(const rd of NET.roads) if(rd.type==='paved') stroke(rd.pts,rd.width+0.3,'rgb(0,0,255)');
+  for(const rd of NET.roads) if(rd.type==='paved') stroke(rd.pts,rd.width,'rgb(255,0,0)');
+  g.fillStyle='rgb(0,255,0)'; g.beginPath(); g.arc(X(NET.plaza.x),X(NET.plaza.z),NET.plaza.r*u,0,7); g.fill();
+  g.globalCompositeOperation='lighter'; g.lineWidth=3; g.setLineDash([24,22]); g.strokeStyle='rgb(255,255,255)';   // centre lines show as white (R+G+B)
+  for(const rd of NET.roads) if(rd.main){ g.beginPath(); rd.pts.forEach((p,i)=>{ if(Math.hypot(p.x,p.z)<NET.plaza.r+0.2) return; i?g.lineTo(X(p.x),X(p.z)):g.moveTo(X(p.x),X(p.z)); }); g.stroke(); }
+  g.setLineDash([]); g.globalCompositeOperation='source-over';
 }
 const maskTex=canvasTex(2048,drawMask,false);
 maskTex.wrapS=maskTex.wrapT=THREE.ClampToEdgeWrapping;
@@ -804,19 +958,19 @@ function tileMesh(r,mat,index){ const g=new THREE.BufferGeometry(); g.setIndex(n
   g.computeBoundingSphere(); const m=new THREE.Mesh(g,mat); m.scale.setScalar(KM); m.position.set(-TER.cx*KM,0,-TER.cz*KM); m.receiveShadow=true; scene.add(m); return m; }
 const HOLE=(IN_KM/2-0.004)*KM;
 const terrOuterMat=createTerrainMaterial(THREE,{km:KM,hole:[-HOLE,-HOLE,HOLE,HOLE],polygonOffset:true,sunVis:true});
-const terrInnerMat=createTerrainMaterial(THREE,{km:KM,sunVis:true,overlay:{mask:maskTex,extent:TOWN+1,asphalt:T_ASPH,stone:T_STONE},detailTex:T_GRASS,detailScale:0.9});
+const terrInnerMat=createTerrainMaterial(THREE,{km:KM,sunVis:true,overlay:{mask:maskTex,extent:MASK_E,asphalt:T_ASPH,stone:T_STONE},detailTex:T_GRASS,detailScale:0.9});
 const water=createWater(THREE,Reflector,{size:8,origin:[-4,-4],res:TILE_RES,km:KM,reflectRes:768});
 { const U=water.userData.uniforms; U.uSunDir.value.copy(SUN_DIR); U.uSunColor.value.set(0xffc9a0); U.uSky.value.set(FOG); scene.add(water); }
 const worldMeshes=[];
 function buildWorld(seed){
   const r=mulberry(seed*31+5);
   // town layout for this world
-  const sp=2.6+r()*1.2; ROADS=r()<0.35?[-sp/2,sp/2]:[0,-sp,sp]; maskSeed=seed;
+  maskSeed=seed;
   // terrain: the lab's generator settings; only the seed changes, so every world has full-quality mountains
   const params={...DEFAULT_TERRAIN,seed};
   // town site: any dry, buildable spot (benches, slopes, plateaus, shores), not just the lowest flattest one
   const sites=findSettlementSites(createTerrain(params),{radius:2.6,count:1,water:WATER_KM,seed,pick:'random',maxSlope:0.03});
-  const PAD_R=(TOWN+2)/KM, PAD_FALL=0.14;
+  const PAD_R=(PLAZA_R+0.6)/KM, PAD_FALL=0.04;   // only the plaza is levelled; streets are graded into the terrain below
   const pads=sitesToPads(sites,{r:PAD_R,fall:PAD_FALL,water:WATER_KM});
   const T=createTerrain({...params,pads}), c=sites[0];
   const outer=buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-4,c.z-4,8),cellSize:8/TILE_RES,droplets:45000,dropletSeed:seed});
@@ -828,14 +982,18 @@ function buildWorld(seed){
   for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, kx=-IN_KM/2+IN_KM*ii/TILE_RES, kz=-IN_KM/2+IN_KM*jj/TILE_RES;
     let w=clamp((Math.hypot(kx,kz)-PAD_R)/PAD_FALL,0,1); w=w*w*(3-2*w);
     const d=bil(outer.delta,1,0,kx,kz)*w; inner.positions[k*3+1]+=d; inner.terrain[k*4]+=d; inner.terrain[k*4+3]=bil(outer.terrain,4,3,kx,kz)*w; }
-  { const P=inner.positions, N=inner.normals, cs=IN_KM/TILE_RES;   // normals after adding erosion
+  // roads: grown over this terrain, then cut/filled into the fine patch so streets sit level
+  TER={cx:c.x,cz:c.z,outer,inner};
+  NET=generateRoadNetwork((x,z)=>H(x,z),{seed,townRadius:TOWN,bound:MASK_E-1}); RIDX=new RoadIndex(NET);
+  gradeGrid(NET,{res:TILE_RES,x0:-IN_KM/2*KM,z0:-IN_KM/2*KM,size:IN_KM*KM,get:(i,j)=>inner.terrain[(j*R+i)*4]*KM,
+    set:(i,j,h)=>{ const k=j*R+i; inner.terrain[k*4]=h/KM; inner.positions[k*3+1]=h/KM; }});
+  { const P=inner.positions, N=inner.normals, cs=IN_KM/TILE_RES;   // normals after erosion + road grading
     for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, l=jj*R+Math.max(0,ii-1), rr=jj*R+Math.min(TILE_RES,ii+1), d=Math.max(0,jj-1)*R+ii, u=Math.min(TILE_RES,jj+1)*R+ii;
       const nx=-(P[rr*3+1]-P[l*3+1])/(cs*((ii>0)+(ii<TILE_RES))), nz=-(P[u*3+1]-P[d*3+1])/(cs*((jj>0)+(jj<TILE_RES))), L=Math.hypot(nx,1,nz); N[k*3]=nx/L; N[k*3+1]=1/L; N[k*3+2]=nz/L; } }
   // baked mountain shadows: traced over the coarse tile, sampled by both meshes
   const sunV=bakeSunVisibility(oh,TILE_RES,8,[SUN_DIR.x,SUN_DIR.y,SUN_DIR.z]);
   const innerSun=new Float32Array(R*R); for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++) innerSun[jj*R+ii]=bil(sunV,1,0,-IN_KM/2+IN_KM*ii/TILE_RES,-IN_KM/2+IN_KM*jj/TILE_RES);
   outer.sun=sunV; inner.sun=innerSun;
-  TER={cx:c.x,cz:c.z,outer,inner};
   worldMeshes.splice(0).forEach(m=>{ scene.remove(m); m.geometry.dispose(); });
   const om=tileMesh(outer,terrOuterMat); om.geometry.setAttribute('aSun',new THREE.BufferAttribute(sunV,1)); worldMeshes.push(om);
   const sk=withSkirt(inner,0.03), im=tileMesh(sk,terrInnerMat,sk.index); im.castShadow=true; worldMeshes.push(im);
@@ -851,7 +1009,7 @@ function buildGrass(seed){
   const blade=new THREE.ConeGeometry(0.006,0.035,3); blade.translate(0,0.0175,0);
   const N=9000, im=new THREE.InstancedMesh(blade,new THREE.MeshStandardMaterial({color:0xffffff,roughness:1}),N); const m=new THREE.Matrix4(), q=new THREE.Quaternion(), c=new THREE.Color(); const r=mulberry(seed+77); let k=0, tries=0;
   while(k<N&&tries++<N*6){ const x=(r()-.5)*WORLD*0.8, z=(r()-.5)*WORLD*0.8; const rr=Math.hypot(x,z); if(rr<PLAZA_R+0.1) continue;
-    if(Math.abs(x)<TOWN+0.5&&Math.abs(z)<TOWN+0.5&&ROADS.some(R=>Math.abs(x-R)<ROAD_W/2+0.14||Math.abs(z-R)<ROAD_W/2+0.14)) continue;
+    if(onRoad(x,z,0.14)) continue;
     const y=H(x,z); if(y<WATER_KM*KM+0.05) continue;   // no grass underwater
     q.setFromEuler(new THREE.Euler((r()-.5)*0.5,r()*6.3,(r()-.5)*0.5)); const s=0.6+r()*1.1; m.compose(new THREE.Vector3(x,y-0.003,z),q,new THREE.Vector3(s,s*(0.7+r()*0.8),s));
     im.setMatrixAt(k,m); c.setHSL(0.2+r()*0.08,0.45+r()*0.2,0.2+r()*0.14); im.setColorAt(k,c); k++; }
@@ -1055,35 +1213,43 @@ function buildTower(x,z){ const y=H(x,z), p=newProp('tower',x,z,0,0.12,y+0.66,{h
   addChunk('winLit',new THREE.Vector3(x,y+0.4,z+0.081),q,new THREE.Vector3(0.06,0.06,0.004),0xffffff,p,{glass:true});
   for(let k=0;k<3;k++) addChunk('roof',new THREE.Vector3(x,y+0.53+k*0.045,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(0,Math.PI/4,0)),new THREE.Vector3(0.16-k*0.05,0.045,0.16-k*0.05),0xa0a8c0,p,{roof:true});
   p.total=p.chunks.length; registerProp(p); }
-const onRoad=(v,m=0)=>ROADS.some(k=>Math.abs(v-k)<ROAD_W/2+m);
+function onRoad(x,z,m=0){ if(Math.hypot(x-(NET?NET.plaza.x:0),z-(NET?NET.plaza.z:0))<PLAZA_R+m) return true; const q=RIDX&&RIDX.nearest(x,z,1.5+m); return !!q&&q.d<q.half+m; }
 function clearTown(){
   for(const k in G){ G[k].n=0; G[k].im.count=0; }
   CH.length=0; props.length=0; propGrid=new Map(); debris.length=0; destroyedProps=0; fires.length=0;
   skidMarks.clear(); footprints.clear(); scorchMarks.clear();
 }
-function buildTown(seed){
-  clearTown(); const r=mulberry(seed); const STEP=0.5;
-  for(let x=-TOWN+0.3;x<=TOWN-0.3;x+=STEP) for(let z=-TOWN+0.3;z<=TOWN-0.3;z+=STEP){
-    const jx=x+(r()-.5)*0.08, jz=z+(r()-.5)*0.08, rr=Math.hypot(jx,jz);
-    if(rr<PLAZA_R+0.35||onRoad(jx,0.25)||onRoad(jz,0.25)||rr>TOWN) continue;
-    const nearX=ROADS.some(k=>Math.abs(jz-k)<0.8), nearZ=ROADS.some(k=>Math.abs(jx-k)<0.8);
-    if(r()<((nearX||nearZ)?0.62:0.3)){
-      const nearestZ=ROADS.reduce((a,k)=>Math.abs(jz-k)<Math.abs(jz-a)?k:a,99), nearestX=ROADS.reduce((a,k)=>Math.abs(jx-k)<Math.abs(jx-a)?k:a,99);
-      const rot=nearX?(jz>nearestZ?Math.PI:0):(jx>nearestX?-Math.PI/2:Math.PI/2);
-      buildHouse(jx,jz,rot+(r()-.5)*0.08,r);
-      if(r()<0.3) buildFence(jx+(r()-.5)*0.1,jz+(r()<.5?0.2:-0.2),rot,0.16+r()*0.1);
-    } else if(r()<0.55) buildTree(jx+(r()-.5)*0.2,jz+(r()-.5)*0.2,r);
-  }
-  for(const k of ROADS) for(let s=-TOWN+0.6;s<TOWN-0.6;s+=0.9){
-    if(Math.hypot(s,k)>PLAZA_R+0.2&&!onRoad(s,0.3)){ buildLamp(s,k+ROAD_W/2+0.05); buildLamp(k-ROAD_W/2-0.05,s); }
-    if(r()<0.3&&!onRoad(s,0.3)) buildCar(s+0.2,k+(r()<.5?0.1:-0.1),Math.PI/2,r);
-    if(r()<0.3&&!onRoad(s,0.3)) buildCar(k+(r()<.5?0.1:-0.1),s+0.2,0,r);
-  }
-  buildTower(0,-PLAZA_R+0.2);
-  for(let a=0;a<10;a++){ const an=a/10*Math.PI*2+0.3; if(Math.abs(Math.sin(an)+1)<0.3) continue; buildTree(Math.cos(an)*(PLAZA_R-0.12),Math.sin(an)*(PLAZA_R-0.12),r); }
-  for(let i=0;i<230;i++){ const a=r()*6.283, dd=TOWN+0.3+r()*7; const x=Math.cos(a)*dd, z=Math.sin(a)*dd; if(!onRoad(x,0.3)&&!onRoad(z,0.3)) buildTree(x,z,r,1+r()*0.6); }
+function buildTown(seed){   // houses, lamps and cars follow this world's streets; trees fill the gaps
+  clearTown(); const r=mulberry(seed); if(!NET) return; const rr=(a,b)=>a+r()*(b-a);
+  const occ=new Map(), OC=0.5, ok=(x,z,rad)=>{ const cx=Math.floor(x/OC), cz=Math.floor(z/OC);
+    for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++) for(const o of occ.get((cx+i)+','+(cz+j))||[]) if(Math.hypot(o[0]-x,o[1]-z)<o[2]+rad) return false; return true; };
+  const take=(x,z,rad)=>{ const k=Math.floor(x/OC)+','+Math.floor(z/OC); if(!occ.has(k)) occ.set(k,[]); occ.get(k).push([x,z,rad]); };
+  const slopeOk=(x,z,e,lim)=>{ const hs=[H(x-e,z-e),H(x+e,z-e),H(x-e,z+e),H(x+e,z+e)]; return Math.max(...hs)-Math.min(...hs)<lim; };
+  const water=WATER_KM*KM+0.3; let houses=0;
+  // plaza: tower on its edge, a ring of trees
+  buildTower(NET.plaza.x,NET.plaza.z-PLAZA_R+0.2); take(NET.plaza.x,NET.plaza.z,PLAZA_R+0.2);
+  for(let a=0;a<10;a++){ const an=a/10*Math.PI*2+0.3; if(Math.abs(Math.sin(an)+1)<0.3) continue; const x=NET.plaza.x+Math.cos(an)*(PLAZA_R-0.12), z=NET.plaza.z+Math.sin(an)*(PLAZA_R-0.12); if(!onRoad(x,z,0.05)) buildTree(x,z,r); }
+  for(const rd of NET.roads){ if(rd.type!=='paved') continue;
+    let nextLamp=r()*0.9, nextCar=rr(1.5,4);
+    for(let i=0;i<rd.pts.length;i++){ const p=rd.pts[i];
+      if(Math.hypot(p.x-NET.plaza.x,p.z-NET.plaza.z)<PLAZA_R+0.3) continue;
+      const nx=-p.tz, nz=p.tx;   // left normal
+      if(p.s>=nextLamp){ nextLamp=p.s+0.9; const side=(i&1)?1:-1, x=p.x+nx*side*(rd.width/2+0.06), z=p.z+nz*side*(rd.width/2+0.06); if(!onRoad(x,z,0.02)&&ok(x,z,0.05)){ buildLamp(x,z); take(x,z,0.05); } }
+      if(p.s>=nextCar){ nextCar=p.s+rr(1.2,4); if(r()<0.5){ const side=r()<.5?1:-1, x=p.x+nx*side*(rd.width/2-0.11), z=p.z+nz*side*(rd.width/2-0.11); buildCar(x,z,Math.atan2(p.tx,p.tz),r); } }
+      // houses: both sides, facing the street
+      if(houses<110) for(const side of [-1,1]){ if(r()<0.15) continue;
+        const setback=rd.width/2+0.1+0.14+r()*0.12, x=p.x+nx*side*setback, z=p.z+nz*side*setback;
+        if(Math.hypot(x,z)>TOWN||H(x,z)<water||onRoad(x,z,0.2)||!ok(x,z,0.21)||!slopeOk(x,z,0.15,0.28)) continue;   // stone foundations take up the slope
+        const rot=Math.atan2(-nx*side,-nz*side)+(r()-.5)*0.06;
+        buildHouse(x,z,rot,r); take(x,z,0.21); houses++;
+        if(r()<0.25){ const bx=x-nx*side*0.22, bz=z-nz*side*0.22; if(!onRoad(bx,bz,0.1)&&ok(bx,bz,0.1)){ buildFence(bx,bz,rot,0.16+r()*0.1); take(bx,bz,0.1); } }
+      } } }
+  // trees: scattered through town gaps and denser in the countryside
+  for(let i=0;i<520;i++){ const a=r()*6.283, dd=Math.sqrt(r())*MASK_E, x=Math.cos(a)*dd, z=Math.sin(a)*dd;
+    if(H(x,z)<water||onRoad(x,z,0.25)||!ok(x,z,0.1)) continue; if(dd<TOWN&&r()<0.55) continue;
+    buildTree(x,z,r,dd>TOWN?1+r()*0.6:1); take(x,z,0.1); }
   for(const k in G){ G[k].im.instanceMatrix.needsUpdate=true; if(G[k].im.instanceColor) G[k].im.instanceColor.needsUpdate=true; }
-  townTotal=props.filter(p=>Math.hypot(p.x,p.z)<TOWN+0.5).length;
+  townTotal=Math.max(1,props.filter(p=>Math.hypot(p.x,p.z)<TOWN+0.5).length);
 }
 
 // ----------------------------------------------------- destruction
@@ -1491,7 +1657,8 @@ let generating=false;
 function newMatch(){ if(generating) return; generating=true; round=1; matchSeed=Math.floor(Math.random()*1e6); F.forEach(f=>f.wins=0);
   phase='gen'; showBanner('New world','Generating terrain');
   setTimeout(()=>{ try{ buildWorld(matchSeed); }catch(e){ showErr('World generation failed: '+(e.stack||e)); generating=false; return; } generating=false; startRound(); $('feed').innerHTML=''; log(null,`Match start: <b>Violet</b> vs <b>Cobalt</b>, world #${matchSeed}`); },60); }
-function startRound(){ buildTown(matchSeed+round); resetFighters(); clearGuns(); HELIS.forEach(placeHeli); hRounds.forEach(b=>{b.alive=false;b.m.visible=false;}); missiles.forEach(m=>{m.alive=false;m.m.visible=false;}); spawnPickup(); spawnPickup(); phase='intro'; phaseT=0; timeLeft=75; showBanner(`Round ${round}`,'Systems online'); $('roundLbl').textContent='Round '+round; }
+function startRound(){ buildTown(matchSeed);   // same town every round of a match (destruction resets)
+  resetFighters(); clearGuns(); HELIS.forEach(placeHeli); hRounds.forEach(b=>{b.alive=false;b.m.visible=false;}); missiles.forEach(m=>{m.alive=false;m.m.visible=false;}); spawnPickup(); spawnPickup(); phase='intro'; phaseT=0; timeLeft=75; showBanner(`Round ${round}`,'Systems online'); $('roundLbl').textContent='Round '+round; }
 function endRound(winner,reason){ phase='ko'; phaseT=0; const loser=winner?other(winner):null;
   if(winner){ winner.wins++; setState(winner,'win','Victory_Pose',0.2); }
   if(loser) setState(loser,'ko','Defeat_Shutdown',0.1); if(!winner) F.forEach(f=>setState(f,'win','Battle_Idle',0.2));

@@ -9,7 +9,7 @@ def inline_module(line, src):
     names=re.search(r'import\s*\{([^}]*)\}',line).group(1)
     body=re.sub(r'^export ', '', src, flags=re.M)
     return 'const {'+names+'}=(()=>{\n'+body+'\nreturn {'+names+'};\n})();'
-mods={'//@INLINE_GEN':(t/'terrain-gen.js').read_text(),'//@INLINE_MAT':(t/'terrain-material.js').read_text(),'//@INLINE_WAT':(t/'water-material.js').read_text(),'//@INLINE_SET':(t/'settlements.js').read_text()}
+mods={'//@INLINE_GEN':(t/'terrain-gen.js').read_text(),'//@INLINE_MAT':(t/'terrain-material.js').read_text(),'//@INLINE_WAT':(t/'water-material.js').read_text(),'//@INLINE_SET':(t/'settlements.js').read_text(),'//@INLINE_ROADS':(t/'roads.js').read_text()}
 out=[]
 for line in (d/'valley-duel.src.html').read_text().split('\n'):
     k=next((k for k in mods if k in line),None); out.append(inline_module(line,mods[k]) if k else line)
