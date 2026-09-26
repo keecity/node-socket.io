@@ -52,7 +52,7 @@ import {createTerrain, buildTile, gridIndex, DEFAULT_TERRAIN} from './terrain-ge
 import {createTerrainMaterial} from './terrain-material.js';                             //@INLINE_MAT
 import {FACES, faceDir, dirFace, tileKey} from './cube-sphere.js';                         //@INLINE_CUBE
 import {createPlanetTiles, PLANET_WORKER} from './planet-tiles.js';                        //@INLINE_PLANET
-const GEN_SRC=null, CUBE_SRC=null, TREE_B64=null;   //@SRC
+const GEN_SRC=null, CUBE_SRC=null, TREE_B64=null, GRASS_JPG=null, DIRT_JPG=null;   //@SRC
 
 const R=120;   // planet radius, km
 const $=id=>document.getElementById(id);
@@ -88,14 +88,21 @@ const stars=(()=>{ const n=2500, p=new Float32Array(n*3); for(let i=0;i<n;i++){ 
   const m=new THREE.PointsMaterial({color:0xffffff,size:1.5,sizeAttenuation:false,fog:false,transparent:true}); const pts=new THREE.Points(g,m); scene.add(pts); return pts; })();
 
 // ------------------------------------------------------------ materials
-const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0,morph:true,beach:0.02,wetBand:0.004,dirtPatches:0.6});
+const texLoad=(src)=>{ const t=new THREE.TextureLoader().load(src); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8; return t; };
+const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0,morph:true,beach:0.02,wetBand:0.004,dirtPatches:0.6,
+  grassTex:texLoad(GRASS_JPG||'./assets/grass.jpg'),dirtTex:texLoad(DIRT_JPG||'./assets/dirt.jpg'),texScale:125});
 // tree models: the 13 separated trees (terrain/assets/tree.b64.txt), each re-based to stand on its origin
 async function loadTrees(){
   const b64=TREE_B64||(await (await fetch('./assets/tree.b64.txt')).text());
   const bin=Uint8Array.from(atob(b64.trim()),c=>c.charCodeAt(0));
-  const gltf=await new Promise((res,rej)=>new GLTFLoader().parse(bin.buffer,'',res,rej)), out=[];
+  // decode embedded textures directly (the default path goes through blob image URLs, which the artifact viewer blocks)
+  const cspSafe=parser=>({name:'csp_safe_textures',loadTexture(i){ const js=parser.json, t=js.textures[i], img=js.images[t.source]; if(img.bufferView===undefined) return null;
+    return parser.getDependency('bufferView',img.bufferView).then(buf=>createImageBitmap(new Blob([buf],{type:img.mimeType||'image/jpeg'}),{imageOrientation:'none'}))
+      .then(bmp=>{ const tx=new THREE.Texture(bmp); tx.flipY=false; tx.colorSpace=THREE.SRGBColorSpace; tx.wrapS=tx.wrapT=THREE.RepeatWrapping; tx.anisotropy=4; tx.needsUpdate=true; return tx; }); }});
+  const loader=new GLTFLoader(); loader.register(cspSafe);
+  const gltf=await new Promise((res,rej)=>loader.parse(bin.buffer,'',res,rej)), out=[];
   gltf.scene.updateMatrixWorld(true); gltf.scene.traverse(o=>{ if(!o.isMesh) return; const g=o.geometry.clone(); g.computeBoundingBox(); const bb=g.boundingBox;
-    g.translate(-(bb.min.x+bb.max.x)/2,-bb.min.y,-(bb.min.z+bb.max.z)/2); g.computeBoundingBox(); const m=o.material; m.roughness=0.9; m.metalness=0;
+    g.translate(-(bb.min.x+bb.max.x)/2,-bb.min.y,-(bb.min.z+bb.max.z)/2); g.computeBoundingBox(); const m=o.material; m.roughness=0.9; m.metalness=0; m.side=THREE.DoubleSide;
     out.push({geometry:g,material:m,height:g.boundingBox.max.y}); });
   return out;
 }
@@ -179,7 +186,7 @@ function hud(){ const st=tilesys?tilesys.stats:{};
 
 // ------------------------------------------------------------ loop
 landSpot();
-window.__planet={cam,get tiles(){ return tilesys; }};   // debugging handle
+window.__planet={terrainMat,get treeMaps(){ return tilesys?tilesys.group.children.filter(o=>o.isInstancedMesh).map(o=>!!o.material.map):[]; },cam,get tiles(){ return tilesys; }};   // debugging handle
 function resize(){ const w=host.clientWidth,h=host.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
 addEventListener('resize',resize); resize();
 let last=performance.now(), hudT=0;

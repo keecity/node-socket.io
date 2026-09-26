@@ -28,6 +28,7 @@ export function createTerrainMaterial(THREE, opts={}){
   if(opts.hole){ defines.TERRAIN_HOLE=''; U.uHole={value:new THREE.Vector4(...opts.hole)}; }
   if(opts.overlay){ defines.TERRAIN_OVERLAY=''; Object.assign(U,{tMask:{value:opts.overlay.mask},uMaskE:{value:opts.overlay.extent},tAsph:{value:opts.overlay.asphalt},tStone:{value:opts.overlay.stone}}); }
   U.uDirtPatch={value:opts.dirtPatches||0};   // large-scale dirt/bare-earth patches (0 = off)
+  if(opts.grassTex&&opts.dirtTex){ defines.TERRAIN_TEX=''; Object.assign(U,{tGrassT:{value:opts.grassTex},tDirtT:{value:opts.dirtTex},uTexScale:{value:opts.texScale||125}}); }   // photo grass/dirt, triplanar, repeats per km
   if(opts.sunVis){ defines.TERRAIN_SUNVIS=''; }
   if(opts.morph){ defines.TERRAIN_MORPH=''; U.uSplitK={value:opts.splitK||2.2}; }   // planet LOD geomorphing (needs aMorph: parent delta, tile size)   // needs per-vertex `aSun` (bakeSunVisibility)
   if(opts.detailTex){ defines.TERRAIN_DETAILTEX=''; Object.assign(U,{tDetail:{value:opts.detailTex},uDetailScale:{value:opts.detailScale||0.9}}); }
@@ -60,6 +61,12 @@ export function createTerrainMaterial(THREE, opts={}){
       .replace('#include <common>',`#include <common>
         varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
         uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata,uTime,uWetBand,uBeach,uCaustics; uniform vec3 uSand; uniform int uUpMode; uniform vec3 uCenter; uniform float uKm; uniform float uDirtPatch;
+        #ifdef TERRAIN_TEX
+        uniform sampler2D tGrassT,tDirtT; uniform float uTexScale;
+        vec3 triTex(sampler2D t, vec3 p, vec3 n){ vec3 w=pow(abs(n),vec3(4.)); w/=w.x+w.y+w.z;
+          return texture2D(t,p.yz).rgb*w.x+texture2D(t,p.xz).rgb*w.y+texture2D(t,p.xy).rgb*w.z; }
+        vec3 triTex2(sampler2D t, vec3 p, vec3 n){ return mix(triTex(t,p,n),triTex(t,p*0.23+vec3(0.37,0.11,0.71),n),0.4); }   // two scales hide tiling
+        #endif
         #ifdef TERRAIN_SUNVIS
         varying float vSun;
         #endif
@@ -109,7 +116,11 @@ export function createTerrainMaterial(THREE, opts={}){
         gRockW=smoothstep(rs-uRockSoft,rs+uRockSoft,slope);
         float dirtW=clamp(smoothstep(rs-uRockSoft*2.2,rs-uRockSoft*0.4,slope)*(1.-gRockW)*0.8+flow*0.6+max(cav,0.)*0.25,0.,1.);
         dirtW=clamp(dirtW+smoothstep(0.52,0.72,tFbm(KP*0.9+vec3(7.3,1.1,4.9)))*uDirtPatch*(1.-gRockW),0.,1.);
-        vec3 col=mix(grass,uDirt*(0.8+0.4*fine),dirtW);
+        vec3 dirtC=uDirt*(0.8+0.4*fine);
+        #ifdef TERRAIN_TEX
+        { vec3 tp=KP*uTexScale; grass=triTex2(tGrassT,tp,wn)*mix(0.8,1.15,macro)*mix(1.,0.85,clamp(cav,0.,1.)); dirtC=triTex2(tDirtT,tp,wn)*(0.85+0.3*fine); }
+        #endif
+        vec3 col=mix(grass,dirtC,dirtW);
         col=mix(col,rock,gRockW);
         // moss/grass creeping into rock creases on gentler rock
         col=mix(col,grass*0.8,gRockW*smoothstep(0.1,0.6,cav)*(1.-smoothstep(0.55,0.85,slope))*0.7);
