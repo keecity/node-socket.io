@@ -30,6 +30,7 @@ export const DEFAULT_TERRAIN = {
   gullyScale: 3.2,        // channel frequency
   gullySlope: 3.0,        // how strongly slope steers the channels
   gullyOctaves: 5,
+  pads: null,             // [{x,y,z,r,fall,h,rough}] flattened settlement areas (same units)
 };
 
 // ---------------------------------------------------------------- noise
@@ -144,7 +145,7 @@ export function createTerrain(opts={}){
     const qx=px+P.warp*w1[0], qy=py+P.warp*w2[0], qz=pz+P.warp*w3[0];
     // 3. ridges (+ gentle valley floor)
     ridged(qx,qy,qz,rg); fbm(px-40,py+2,pz+11,0.9,4,vl);
-    const mh=P.mountainHeight*mt, vh=P.valleyHeight;
+    let mh=P.mountainHeight*mt; const vh=P.valleyHeight;
     let h=vh*(vl[0]*0.5+0.5)+mh*rg[0]*rg[0]*1.6;        // squaring keeps valley floors flat, lifts peaks
     const gs=mh*rg[0]*3.2, gx=gs*rg[1]+vh*0.5*vl[1], gy=gs*rg[2]+vh*0.5*vl[2], gz=gs*rg[3]+vh*0.5*vl[3];
     // 4. gullies — gradient projected onto the tangent plane, triplanar-blended by up (seamless on a sphere)
@@ -159,6 +160,10 @@ export function createTerrain(opts={}){
       h+=gully*P.gullyStrength*0.06*mh*sm*(0.35+0.65*rg[0]);
       gully*=sm;
     }
+    // 5. settlement pads: flatten an area (towns, arenas) and blend it into the surroundings
+    if(P.pads) for(let i=0;i<P.pads.length;i++){ const pd=P.pads[i], d=Math.hypot(px-pd.x,py-(pd.y||0),pz-pd.z);
+      if(d<pd.r+pd.fall){ let w=Math.min(1,Math.max(0,1-(d-pd.r)/pd.fall)); w=w*w*(3-2*w);
+        h+=(pd.h+(pd.rough||0)*vl[0]-h)*w; gully*=1-w; mt*=1-w; } }
     out.h=h; out.gully=gully; out.mountain=mt; return out;
   }
   return {params:P, sample};

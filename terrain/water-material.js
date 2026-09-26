@@ -19,17 +19,18 @@ export function makeHeightTexture(THREE, heights, res){
 }
 
 // Reflector: the three.js addon class (three/addons/objects/Reflector.js)
-export function createWater(THREE, Reflector, {size=8, origin=[-4,-4], res=256, heightTex=null, ...opts}={}){
+// size/origin/level in km; km = world units per km (1 in the lab, 100 in the game)
+export function createWater(THREE, Reflector, {size=8, origin=[-4,-4], res=256, heightTex=null, km=1, reflectRes=1024, ...opts}={}){
   const P={...DEFAULT_WATER,...opts};
-  const geo=new THREE.PlaneGeometry(size,size).rotateX(-Math.PI/2);
-  const mesh=new Reflector(geo,{textureWidth:1024,textureHeight:1024,clipBias:0.0005});
+  const geo=new THREE.PlaneGeometry(size*km,size*km).rotateX(-Math.PI/2);
+  const mesh=new Reflector(geo,{textureWidth:reflectRes,textureHeight:reflectRes,clipBias:0.0005*km});
   const reflTex=mesh.getRenderTarget().texture, texMatrix=mesh.material.uniforms.textureMatrix.value;
   mesh.material.dispose();
   const U={
     tReflect:{value:reflTex}, textureMatrix:{value:texMatrix}, tHeight:{value:heightTex}, uOrigin:{value:new THREE.Vector2(...origin)}, uSize:{value:size}, uRes:{value:res},
     uLevel:{value:P.level}, uDeep:{value:new THREE.Color(...P.deep)}, uShallow:{value:new THREE.Color(...P.shallow)}, uClarity:{value:P.clarity},
     uFoamW:{value:P.foamWidth}, uFoam:{value:P.foam}, uWaveScale:{value:P.waveScale}, uWaveStr:{value:P.waveStrength}, uDistort:{value:P.distortion}, uGlint:{value:P.glint},
-    uTime:{value:0}, uSunDir:{value:new THREE.Vector3(0,1,0)}, uSunColor:{value:new THREE.Color(1,0.95,0.85)}, uSky:{value:new THREE.Color(0.55,0.65,0.75)},
+    uTime:{value:0}, uKm:{value:km}, uSunDir:{value:new THREE.Vector3(0,1,0)}, uSunColor:{value:new THREE.Color(1,0.95,0.85)}, uSky:{value:new THREE.Color(0.55,0.65,0.75)},
   };
   mesh.material=new THREE.ShaderMaterial({
     uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{}]), transparent:true, depthWrite:false, fog:true,
@@ -42,7 +43,7 @@ export function createWater(THREE, Reflector, {size=8, origin=[-4,-4], res=256, 
         #include <fog_vertex>
       }`,
     fragmentShader:`
-      uniform sampler2D tReflect, tHeight; uniform vec2 uOrigin; uniform float uSize,uRes,uLevel,uClarity,uFoamW,uFoam,uWaveScale,uWaveStr,uDistort,uGlint,uTime;
+      uniform sampler2D tReflect, tHeight; uniform vec2 uOrigin; uniform float uKm,uSize,uRes,uLevel,uClarity,uFoamW,uFoam,uWaveScale,uWaveStr,uDistort,uGlint,uTime;
       uniform vec3 uDeep,uShallow,uSunDir,uSunColor,uSky; varying vec4 vRefl; varying vec3 vWP;
       #include <common>
       #include <fog_pars_fragment>
@@ -56,10 +57,10 @@ export function createWater(THREE, Reflector, {size=8, origin=[-4,-4], res=256, 
       float bedH(vec2 xz){ vec2 uv=(xz-uOrigin)/uSize; uv=uv*(uRes/(uRes+1.))+0.5/(uRes+1.);
         if(uv.x<0.||uv.y<0.||uv.x>1.||uv.y>1.) return -1e3; return texture2D(tHeight,uv).r; }
       void main(){
-        vec3 V=normalize(cameraPosition-vWP); float dist=length(cameraPosition-vWP);
-        float depth=uLevel-bedH(vWP.xz);
+        vec3 V=normalize(cameraPosition-vWP); float dist=length(cameraPosition-vWP)/uKm; vec3 WK=vWP/uKm;
+        float depth=uLevel-bedH(WK.xz);
         // normal from wave field; calmer in the shallows and toward the horizon (avoids shimmer)
-        vec2 p=vWP.xz*uWaveScale; float e=0.08, h0=wH(p);
+        vec2 p=WK.xz*uWaveScale; float e=0.08, h0=wH(p);
         vec2 g=vec2(wH(p+vec2(e,0))-h0, wH(p+vec2(0,e))-h0)/e;
         float calm=smoothstep(0.,uFoamW*1.5,depth)*mix(1.,0.35,smoothstep(3.,25.,dist));
         vec3 N=normalize(vec3(-g.x*uWaveStr*calm,1.,-g.y*uWaveStr*calm));
@@ -77,8 +78,8 @@ export function createWater(THREE, Reflector, {size=8, origin=[-4,-4], res=256, 
         vec3 glint=uSunColor*spec*uGlint*F*step(0.,uSunDir.y);
         // shoreline foam: bands washing toward the shore, broken up by noise
         float fz=clamp(1.-depth/uFoamW,0.,1.);
-        float bands=sin(depth/uFoamW*14.-uTime*1.8+wNoise(vWP.xz*300.)*4.)*0.5+0.5;
-        float brk=wNoise(vWP.xz*420.+uTime*0.3)*wNoise(vWP.xz*130.-uTime*0.2);
+        float bands=sin(depth/uFoamW*14.-uTime*1.8+wNoise(WK.xz*300.)*4.)*0.5+0.5;
+        float brk=wNoise(WK.xz*420.+uTime*0.3)*wNoise(WK.xz*130.-uTime*0.2);
         float foam=clamp(fz*fz*1.4+fz*smoothstep(0.55,0.95,bands)*0.9,0.,1.)*smoothstep(0.08,0.45,brk+fz*0.3)*uFoam;
         vec3 foamCol=vec3(0.92,0.95,0.95)*(0.45+0.55*max(dot(vec3(0,1,0),uSunDir),0.))+uSky*0.25;
         // compose: exact see-through blend (see header)
@@ -93,8 +94,8 @@ export function createWater(THREE, Reflector, {size=8, origin=[-4,-4], res=256, 
       }`,
   });
   Object.assign(mesh.material.uniforms,U);
-  mesh.position.y=P.level;
+  mesh.position.y=P.level*km;
   mesh.userData.uniforms=U;
-  mesh.userData.setLevel=l=>{ U.uLevel.value=l; mesh.position.y=l; };
+  mesh.userData.setLevel=l=>{ U.uLevel.value=l; mesh.position.y=l*km; };
   return mesh;
 }
