@@ -200,9 +200,9 @@ function hash2(x,y){ const s=Math.sin(x*127.1+y*311.7)*43758.5453; return s-Math
 function vnoise(x,y){ const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi; const u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
   const a=hash2(xi,yi), b=hash2(xi+1,yi), c=hash2(xi,yi+1), d=hash2(xi+1,yi+1); return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v; }
 function fbm(x,y){ let s=0,a=0.5,f=1; for(let i=0;i<5;i++){ s+=a*vnoise(x*f,y*f); f*=2.03; a*=0.5; } return s; }
-// ===================================================== generated world — shared terrain modules (1 unit = 10 m)
+// ===================================================== generated world — shared terrain modules (1 unit = 25 m)
 // Each match builds a new world from its seed: terrain, town site (settlement finder), road layout, grass, water depth.
-const KM=100, WATER_KM=DEFAULT_WATER.level, TILE_RES=320, IN_KM=0.6, INH=IN_KM/2*0.985;
+const KM=40, WATER_KM=DEFAULT_WATER.level, TILE_RES=320, IN_KM=60/KM, INH=IN_KM/2*0.985;   // 1 unit = 25 m; fine town patch stays 60 units wide
 let TER=null;   // {cx,cz (km), outer, inner} — current world's tiles
 function sampleGrid(tr,half,res,kx,kz){ const u=clamp((kx+half)/(2*half)*res,0,res-1e-4), v=clamp((kz+half)/(2*half)*res,0,res-1e-4);
   const i=u|0, j=v|0, fu=u-i, fv=v-j, R=res+1, a=tr[(j*R+i)*4], b=tr[(j*R+i+1)*4], c=tr[((j+1)*R+i)*4], d=tr[((j+1)*R+i+1)*4];
