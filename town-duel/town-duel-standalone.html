@@ -676,6 +676,8 @@ function makeHeli(team){
   const root=new THREE.Group(); const model=heliProto.clone(true); model.scale.setScalar(HELI_S); model.rotation.y=Math.PI/2; root.add(model); scene.add(root);
   const tint=team?[0.82,0.92,1.12]:[1.1,0.84,0.95]; const mats=new Map();
   model.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; if(!mats.has(o.material)){ const m=o.material.clone(); m.color.setRGB(...tint); m.metalness=0.35; m.roughness=0.55; mats.set(o.material,m); } o.material=mats.get(o.material); } });
+  const mr=model.getObjectByName('Heli_MainRotor'); if(mr){ const hx=0.019, hz=0.0145;   // model floats the rotor 0.042 above the cabin roof, hub off its spin axis
+    mr.geometry=mr.geometry.clone(); mr.geometry.translate(-hx,0,-hz); mr.position.set(-0.1094+hx,0.249,0.0025+hz); }
   const tr=model.getObjectByName('Heli_TailRotor'); if(tr) tr.position.set(0.395,0.13,0.018);   // seat tail rotor on the fin's side (model had it floating past the tip)
   const pt=(x,y,z)=>{ const o=new THREE.Object3D(); o.position.set(x,y,z); model.add(o); return o; };
   const col=team?[0.55,0.85,1]:[1,0.55,0.8];
