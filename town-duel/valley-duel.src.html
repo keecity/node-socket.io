@@ -118,7 +118,7 @@ import {createTerrain, buildTile, flatPointAt, gridIndex, bakeSunVisibility, DEF
 import {createTerrainMaterial, DEFAULT_MATERIAL} from '../terrain/terrain-material.js';     //@INLINE_MAT
 import {createWater, makeHeightTexture, DEFAULT_WATER} from '../terrain/water-material.js'; //@INLINE_WAT
 import {findSettlementSites, sitesToPads} from '../terrain/settlements.js';                 //@INLINE_SET
-import {generateRoadNetwork, RoadIndex, gradeGrid} from '../terrain/roads.js';                //@INLINE_ROADS
+import {generateRoadNetwork, RoadIndex, gradeGrid, levelArea} from '../terrain/roads.js';                //@INLINE_ROADS
 
 const BASE=window.__ASSET_BASE||'';
 // surface failures on screen instead of hanging silently
@@ -274,9 +274,11 @@ function buildWorld(seed){
     inner.terrain[k*4]=h; inner.terrain[k*4+1]=bicubic(outer.terrain,4,1,kx,kz); inner.terrain[k*4+2]=bicubic(outer.terrain,4,2,kx,kz); inner.terrain[k*4+3]=clamp(bicubic(outer.terrain,4,3,kx,kz),0,1); }
   // roads: grown over this terrain, then cut/filled into the fine patch so streets sit level
   TER={cx:c.x,cz:c.z,outer,inner};
-  NET=generateRoadNetwork((x,z)=>H(x,z),{seed,townRadius:TOWN,bound:MASK_E-1}); RIDX=new RoadIndex(NET);
-  gradeGrid(NET,{res:TILE_RES,x0:-IN_KM/2*KM,z0:-IN_KM/2*KM,size:IN_KM*KM,get:(i,j)=>inner.terrain[(j*R+i)*4]*KM,
-    set:(i,j,h)=>{ const k=j*R+i; inner.terrain[k*4]=h/KM; inner.positions[k*3+1]=h/KM; }});
+  const fineGrid={res:TILE_RES,x0:-IN_KM/2*KM,z0:-IN_KM/2*KM,size:IN_KM*KM,get:(i,j)=>inner.terrain[(j*R+i)*4]*KM,
+    set:(i,j,h)=>{ const k=j*R+i; inner.terrain[k*4]=h/KM; inner.positions[k*3+1]=h/KM; }};
+  levelArea(fineGrid,{radius:TOWN,fall:8,blur:6});   // settlement: hills become gentle slopes, land keeps its tilt
+  NET=generateRoadNetwork((x,z)=>H(x,z),{seed,townRadius:TOWN,bound:MASK_E-1,water:WATER_KM*KM+0.2}); RIDX=new RoadIndex(NET);
+  gradeGrid(NET,fineGrid);   // streets level across, smooth along, soft shoulders
   { const P=inner.positions, N=inner.normals, cs=IN_KM/TILE_RES;   // normals after erosion + road grading
     for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, l=jj*R+Math.max(0,ii-1), rr=jj*R+Math.min(TILE_RES,ii+1), d=Math.max(0,jj-1)*R+ii, u=Math.min(TILE_RES,jj+1)*R+ii;
       const nx=-(P[rr*3+1]-P[l*3+1])/(cs*((ii>0)+(ii<TILE_RES))), nz=-(P[u*3+1]-P[d*3+1])/(cs*((jj>0)+(jj<TILE_RES))), L=Math.hypot(nx,1,nz); N[k*3]=nx/L; N[k*3+1]=1/L; N[k*3+2]=nz/L; } }
