@@ -66,7 +66,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <fieldset id="fs-erosion"><legend>Erosion</legend></fieldset>
     <fieldset id="fs-surface"><legend>Surface</legend></fieldset>
     <fieldset id="fs-light"><legend>Light and water</legend></fieldset>
-    <p class="hint">Tile is 8 × 8 km. Drag to orbit, right-drag to pan, scroll to zoom. Shape and erosion regenerate the tile; surface and light update live.</p>
+    <p class="hint">Tile is 8 × 8 km. Drag to orbit, right-drag to pan, scroll or pinch to zoom toward the cursor (+/− keys also zoom). Shape and erosion regenerate the tile; surface and light update live.</p>
   </div>
 </aside>
 
@@ -91,6 +91,24 @@ renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(42,1,0.01,400); camera.position.set(6.5,4.2,7.5);
 const controls=new OrbitControls(camera,renderer.domElement); controls.target.set(0,0.35,0); controls.enableDamping=true; controls.maxPolarAngle=Math.PI*0.49; controls.minDistance=0.15; controls.maxDistance=40;
+controls.enableZoom=false;   // zoom handled below: reliable inside embedded frames, and zooms toward the cursor
+renderer.domElement.style.touchAction='none';
+const _ray=new THREE.Raycaster(), _ndc=new THREE.Vector2();
+function zoomBy(factor,cx,cy){   // factor<1 zooms in
+  const off=camera.position.clone().sub(controls.target), d=off.length(), nd=THREE.MathUtils.clamp(d*factor,controls.minDistance,controls.maxDistance), k=nd/d;
+  if(cx!==undefined&&terrainMesh&&factor<1){   // pull the orbit target toward the terrain point under the cursor
+    const r=renderer.domElement.getBoundingClientRect(); _ndc.set((cx-r.left)/r.width*2-1,-(cy-r.top)/r.height*2+1); _ray.setFromCamera(_ndc,camera);
+    const hit=_ray.intersectObject(terrainMesh,false)[0]; if(hit){ const t=1-k; controls.target.lerp(hit.point,t); camera.position.lerp(hit.point,t); return; } }
+  camera.position.copy(controls.target).addScaledVector(off,k);
+}
+renderer.domElement.addEventListener('wheel',e=>{ e.preventDefault(); zoomBy(Math.exp(THREE.MathUtils.clamp(e.deltaY,-120,120)*0.0015),e.clientX,e.clientY); },{passive:false});
+addEventListener('keydown',e=>{ if(e.target.closest&&e.target.closest('input,select')) return; if(e.key==='+'||e.key==='=') zoomBy(0.85); if(e.key==='-'||e.key==='_') zoomBy(1/0.85); });
+// pinch zoom
+const _pts=new Map(); let _pinch=0;
+renderer.domElement.addEventListener('pointerdown',e=>{ if(e.pointerType==='touch') _pts.set(e.pointerId,[e.clientX,e.clientY]); });
+renderer.domElement.addEventListener('pointermove',e=>{ if(!_pts.has(e.pointerId)) return; _pts.set(e.pointerId,[e.clientX,e.clientY]);
+  if(_pts.size===2){ const [a,b]=[..._pts.values()], d=Math.hypot(a[0]-b[0],a[1]-b[1]); if(_pinch) zoomBy(_pinch/d); _pinch=d; } });
+for(const ev of ['pointerup','pointercancel']) renderer.domElement.addEventListener(ev,e=>{ _pts.delete(e.pointerId); if(_pts.size<2) _pinch=0; });
 
 const sky=new Sky(); sky.scale.setScalar(300); scene.add(sky);
 Object.assign(sky.material.uniforms,{}); const SU=sky.material.uniforms;
