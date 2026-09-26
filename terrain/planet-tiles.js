@@ -187,7 +187,7 @@ self.onmessage=e=>{ const m=e.data;
       const yaw=hash(gi,gj,f*7+4)*6.283, s=(0.014+hash(gi,gj,f*7+5)*0.016)/TREE_H[mv];
       let tx=-d3[2], ty=0, tz=d3[0]; if(Math.abs(d3[1])>0.99){ tx=1; tz=0; } let tl=Math.hypot(tx,ty,tz); tx/=tl; ty/=tl; tz/=tl;
       let bx=d3[1]*tz-d3[2]*ty, by=d3[2]*tx-d3[0]*tz, bz=d3[0]*ty-d3[1]*tx;
-      const c=Math.cos(yaw), sn=Math.sin(yaw), Xx=tx*c+bx*sn, Xy=ty*c+by*sn, Xz=tz*c+bz*sn, Zx=-tx*sn+bx*c, Zy=-ty*sn+by*c, Zz=-tz*sn+bz*c;
+      const c=Math.cos(yaw), sn=Math.sin(yaw), Xx=tx*c+bx*sn, Xy=ty*c+by*sn, Xz=tz*c+bz*sn, Zx=tx*sn-bx*c, Zy=ty*sn-by*c, Zz=tz*sn-bz*c;   // Z = X×Y: right-handed, so normals face outward
       const hr=R+h-0.001; out.push(Xx*s,Xy*s,Xz*s,0, d3[0]*s,d3[1]*s,d3[2]*s,0, Zx*s,Zy*s,Zz*s,0, d3[0]*hr,d3[1]*hr,d3[2]*hr,1); vars.push(mv); }
     trees=new Float32Array(out); treeVar=new Uint8Array(vars); }
   const tr=[pos.buffer,nor.buffer,ter.buffer,morph.buffer]; if(trees) tr.push(trees.buffer,treeVar.buffer); if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
