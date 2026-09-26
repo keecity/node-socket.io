@@ -725,7 +725,7 @@ const RTS={target:new THREE.Vector3(0,0,0),yaw:0.55,pitch:0.98,dist:6.2,zoom:2.2
     const k=RTS.dist*RTS.zoom*0.0016; const fx=Math.sin(RTS.yaw), fz=Math.cos(RTS.yaw);
     RTS.target.x-=(fz*dx+fx*dy)*k; RTS.target.z-=(-fx*dx+fz*dy)*k; setFollow(false); });
   el.addEventListener('pointerup',()=>{ drag=null; });
-  el.addEventListener('wheel',e=>{ e.preventDefault(); RTS.zoom=clamp(RTS.zoom*Math.pow(1.0015,e.deltaY),0.8,2.2); },{passive:false});
+  el.addEventListener('wheel',e=>{ e.preventDefault(); RTS.zoom=clamp(RTS.zoom*Math.pow(1.0015,e.deltaY),0.8,14); },{passive:false});
   addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); if(['w','a','s','d','q','e','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){ RTS.keys.add(k); if('wasd'.includes(k)||k.startsWith('arrow')) setFollow(false); } });
   addEventListener('keyup',e=>RTS.keys.delete(e.key.toLowerCase()));
 }
