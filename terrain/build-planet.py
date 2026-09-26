@@ -10,6 +10,6 @@ out=[]
 for line in (d/'planet-lab.src.html').read_text().split('\n'):
     k=next((k for k in mods if k in line),None)
     if k: out.append(inline_module(line,(d/mods[k]).read_text()))
-    elif '//@SRC' in line: out.append('const GEN_SRC='+json.dumps(strip((d/'terrain-gen.js').read_text()))+', CUBE_SRC='+json.dumps(strip((d/'cube-sphere.js').read_text()))+';')
+    elif '//@SRC' in line: out.append('const GEN_SRC='+json.dumps(strip((d/'terrain-gen.js').read_text()))+', CUBE_SRC='+json.dumps(strip((d/'cube-sphere.js').read_text()))+', TREE_B64='+json.dumps((d/'assets'/'tree.b64.txt').read_text().strip())+';')
     else: out.append(line)
 (d/'planet-lab.html').write_text('\n'.join(out)); print('built planet-lab.html')
