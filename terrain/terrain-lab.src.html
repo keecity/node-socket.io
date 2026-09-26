@@ -65,7 +65,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <fieldset id="fs-shape"><legend>Shape</legend></fieldset>
     <fieldset id="fs-erosion"><legend>Erosion</legend></fieldset>
     <fieldset id="fs-surface"><legend>Surface</legend></fieldset>
-    <fieldset id="fs-light"><legend>Light and water</legend></fieldset>
+    <fieldset id="fs-light"><legend>Light</legend></fieldset>
+    <fieldset id="fs-water"><legend>Water and shore</legend></fieldset>
     <p class="hint">Tile is 8 × 8 km. Drag to orbit, right-drag to pan, scroll or pinch to zoom toward the cursor (+/− keys also zoom). Shape and erosion regenerate the tile; surface and light update live.</p>
   </div>
 </aside>
@@ -77,8 +78,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {Sky} from 'three/addons/objects/Sky.js';
+import {Reflector} from 'three/addons/objects/Reflector.js';
 import {createTerrain, buildTile, flatPointAt, gridIndex, DEFAULT_TERRAIN} from './terrain-gen.js';   //@INLINE_GEN
 import {createTerrainMaterial, DEFAULT_MATERIAL} from './terrain-material.js';                         //@INLINE_MAT
+import {createWater, makeHeightTexture, DEFAULT_WATER} from './water-material.js';                    //@INLINE_WAT
 const GEN_SRC=null;   //@GEN_SRC
 
 const SIZE=8, $=id=>document.getElementById(id);
@@ -124,21 +127,12 @@ const terrainMat=createTerrainMaterial(THREE,{});
 const MU=terrainMat.userData.uniforms;
 let terrainMesh=null;
 
-// water: flat sheet at water level, env-reflective with animated micro-normals
-const waterMat=new THREE.MeshPhysicalMaterial({color:0x0f2f38,roughness:0.06,metalness:0,transparent:true,opacity:0.8,envMapIntensity:1.1});
-const WU={uTime:{value:0}};
-waterMat.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,WU);
-  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP;').replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvWP=(modelMatrix*vec4(transformed,1.)).xyz;');
-  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
-    varying vec3 vWP; uniform float uTime;
-    float wH(vec2 p){ return sin(p.x*1.7+uTime*1.1)*0.5+sin(p.y*2.3-uTime*0.9)*0.5+sin((p.x+p.y)*3.1+uTime*1.7)*0.25+sin((p.x-p.y)*5.3-uTime*2.1)*0.12; }`)
-  .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
-    { vec2 p=vWP.xz*40.; float e=0.05; float h0=wH(p); vec3 g=vec3(wH(p+vec2(e,0))-h0,0.,wH(p+vec2(0,e))-h0)/e;
-      normal=normalize(normal-(viewMatrix*vec4(g.x*0.02,0.,g.z*0.02,0.)).xyz); }`); };
-const water=new THREE.Mesh(new THREE.PlaneGeometry(SIZE,SIZE).rotateX(-Math.PI/2),waterMat); water.receiveShadow=true; scene.add(water);
+// water: mirror reflections, depth-aware colour and shoreline foam (depth from the tile's height texture)
+const water=createWater(THREE,Reflector,{size:SIZE,origin:[-SIZE/2,-SIZE/2],res:256,level:DEFAULT_MATERIAL.waterLevel});
+const WU=water.userData.uniforms; scene.add(water);
 
 // ------------------------------------------------------------ controls
-const T={...DEFAULT_TERRAIN}, M={...DEFAULT_MATERIAL}, S={sunElev:24,sunAzim:215,fog:0.03,droplets:40000};
+const T={...DEFAULT_TERRAIN}, M={...DEFAULT_MATERIAL}, WP={...DEFAULT_WATER}, S={sunElev:24,sunAzim:215,fog:0.03,droplets:40000};
 const defs={
   'fs-shape':[
     ['coverage','Mountain coverage',0,1,0.01,T],['mountainHeight','Peak height (km)',0.2,2.5,0.01,T],['ridgeScale','Ridge frequency',0.1,0.8,0.01,T],
@@ -151,17 +145,21 @@ const defs={
     ['snowLine','Snow line (km)',0.2,2.5,0.01,M,'uSnowLine'],['snowFade','Snow fade',0.02,0.6,0.01,M,'uSnowFade'],
     ['detail','Surface detail',0,2,0.01,M,'uDetail'],['strata','Rock strata',0,1,0.01,M,'uStrata']],
   'fs-light':[
-    ['sunElev','Sun elevation (°)',2,80,1,S],['sunAzim','Sun direction (°)',0,360,1,S],['waterLevel','Water level (km)',0,0.6,0.005,M,'uWater'],['fog','Haze',0,0.08,0.001,S]],
+    ['sunElev','Sun elevation (°)',2,80,1,S],['sunAzim','Sun direction (°)',0,360,1,S],['waterLevel','Water level (km)',0,0.6,0.002,M,'uWater'],['fog','Haze',0,0.08,0.001,S]],
+  'fs-water':[
+    ['clarity','Murkiness',10,200,1,WP,'uClarity',WU],['foamWidth','Foam band (km)',0.002,0.04,0.001,WP,'uFoamW',WU],['foam','Foam amount',0,2,0.01,WP,'uFoam',WU],
+    ['waveStrength','Wave strength',0,0.8,0.01,WP,'uWaveStr',WU],['waveScale','Wave size',10,120,1,WP,'uWaveScale',WU],['distortion','Reflection ripple',0,0.06,0.001,WP,'uDistort',WU],
+    ['wetBand','Wet shore band (km)',0,0.02,0.0005,M,'uWetBand'],['beach','Sandy bank height (km)',0,0.06,0.001,M,'uBeach'],['caustics','Caustics',0,2,0.01,M,'uCaustics']],
 };
 const REGEN=new Set(['fs-shape','fs-erosion']);
 const fmt=(v,st)=>st>=1?Math.round(v).toLocaleString():v.toFixed(st<0.01?3:2);
-for(const [fs,list] of Object.entries(defs)) for(const [key,label,min,max,step,obj,uni] of list){
+for(const [fs,list] of Object.entries(defs)) for(const [key,label,min,max,step,obj,uni,uset=MU] of list){
   const id='c-'+key, row=document.createElement('div'); row.className='row';
   row.innerHTML=`<label for="${id}">${label}</label><output id="${id}-o"></output><input type="range" id="${id}" min="${min}" max="${max}" step="${step}">`;
   $(fs).append(row); const inp=row.querySelector('input'), out=row.querySelector('output');
   inp.value=obj[key]; out.textContent=fmt(+obj[key],step);
   inp.addEventListener('input',()=>{ obj[key]=+inp.value; out.textContent=fmt(obj[key],step);
-    if(uni) MU[uni].value=obj[key];
+    if(uni) uset[uni].value=obj[key];
     if(REGEN.has(fs)) schedule(); else applyScene(); });
 }
 $('seed').addEventListener('change',()=>{ T.seed=Math.max(1,parseInt($('seed').value)||1); schedule(0); });
@@ -178,7 +176,8 @@ function applyScene(){
   if(envRT) envRT.dispose(); envRT=pmrem.fromScene(skyScene,0.02); scene.environment=envRT.texture;
   const warm=Math.min(1,S.sunElev/35); sun.color.setRGB(1,0.78+0.2*warm,0.6+0.35*warm); sun.intensity=1.2+2.2*Math.min(1,S.sunElev/20);
   scene.fog.density=S.fog; scene.fog.color.setRGB(0.62+0.08*warm,0.68+0.04*warm,0.72);
-  water.position.y=M.waterLevel; water.visible=M.waterLevel>0.001;
+  water.userData.setLevel(M.waterLevel); water.visible=M.waterLevel>0.001;
+  WU.uSunDir.value.copy(d); WU.uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity/3); WU.uSky.value.copy(scene.fog.color);
 }
 
 // ------------------------------------------------------------ generation (worker, main-thread fallback)
@@ -210,6 +209,8 @@ function done(r){
   g.setAttribute('normal',new THREE.BufferAttribute(r.normals,3));
   g.setAttribute('aTerr',new THREE.BufferAttribute(r.terrain,4));
   g.computeBoundingSphere();
+  const hs=new Float32Array((r.res+1)**2); for(let i=0;i<hs.length;i++) hs[i]=r.terrain[i*4];
+  if(WU.tHeight.value) WU.tHeight.value.dispose(); WU.tHeight.value=makeHeightTexture(THREE,hs,r.res); WU.uRes.value=r.res;
   if(terrainMesh){ terrainMesh.geometry.dispose(); terrainMesh.geometry=g; }
   else { terrainMesh=new THREE.Mesh(g,terrainMat); terrainMesh.castShadow=terrainMesh.receiveShadow=true; scene.add(terrainMesh); }
   const v=(r.res+1)**2;
@@ -221,5 +222,5 @@ function done(r){
 function resize(){ const w=host.clientWidth,h=host.clientHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
 addEventListener('resize',resize); resize(); applyScene();
 makeWorker().then(w=>{ worker=w; generate(); });
-renderer.setAnimationLoop(t=>{ WU.uTime.value=t/1000; controls.update(); renderer.render(scene,camera); });
+renderer.setAnimationLoop(t=>{ WU.uTime.value=t/1000; MU.uTime.value=t/1000; controls.update(); renderer.render(scene,camera); });
 </script>

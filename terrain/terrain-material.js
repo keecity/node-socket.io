@@ -7,7 +7,8 @@
 
 export const DEFAULT_MATERIAL = {
   snowLine: 1.05, snowFade: 0.18, rockSlope: 0.52, rockSoftness: 0.16, waterLevel: 0.035,
-  detail: 1.0, strata: 0.35,
+  detail: 1.0, strata: 0.35, wetBand: 0.006, beach: 0.018, caustics: 1.0,
+  sand: [0.55,0.49,0.37],
   grass: [0.27,0.33,0.10], grassDry: [0.52,0.52,0.22], dirt: [0.33,0.28,0.20], rock: [0.19,0.19,0.20], rockLight: [0.42,0.40,0.37], snow: [0.93,0.95,0.98],
 };
 
@@ -15,7 +16,7 @@ export function createTerrainMaterial(THREE, opts={}){
   const P={...DEFAULT_MATERIAL,...opts};
   const U={
     uSnowLine:{value:P.snowLine}, uSnowFade:{value:P.snowFade}, uRockSlope:{value:P.rockSlope}, uRockSoft:{value:P.rockSoftness},
-    uWater:{value:P.waterLevel}, uDetail:{value:P.detail}, uStrata:{value:P.strata}, uUpMode:{value:opts.upMode||0}, uCenter:{value:new THREE.Vector3()},
+    uWater:{value:P.waterLevel}, uDetail:{value:P.detail}, uStrata:{value:P.strata}, uUpMode:{value:opts.upMode||0}, uTime:{value:0}, uWetBand:{value:P.wetBand}, uBeach:{value:P.beach}, uCaustics:{value:P.caustics}, uSand:{value:new THREE.Color(...P.sand)}, uCenter:{value:new THREE.Vector3()},
     uGrass:{value:new THREE.Color(...P.grass)}, uGrassDry:{value:new THREE.Color(...P.grassDry)}, uDirt:{value:new THREE.Color(...P.dirt)},
     uRock:{value:new THREE.Color(...P.rock)}, uRockLight:{value:new THREE.Color(...P.rockLight)}, uSnow:{value:new THREE.Color(...P.snow)},
   };
@@ -31,7 +32,7 @@ export function createTerrainMaterial(THREE, opts={}){
     sh.fragmentShader=sh.fragmentShader
       .replace('#include <common>',`#include <common>
         varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
-        uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata; uniform int uUpMode; uniform vec3 uCenter;
+        uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata,uTime,uWetBand,uBeach,uCaustics; uniform vec3 uSand; uniform int uUpMode; uniform vec3 uCenter;
         uniform vec3 uGrass,uGrassDry,uDirt,uRock,uRockLight,uSnow;
         float tHash(vec3 p){ p=fract(p*0.3183099+.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
         float tNoise(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
@@ -42,7 +43,8 @@ export function createTerrainMaterial(THREE, opts={}){
         float tRock(vec3 p, vec3 n){ vec3 w=pow(abs(n),vec3(4.)); w/=w.x+w.y+w.z;
           return tFbm(p.yzx*vec3(1.,3.,1.))*w.x + tFbm(p.xzy)*w.y + tFbm(p*vec3(1.,3.,1.))*w.z; }
         vec3 tUp(){ return uUpMode==1 ? normalize(vWPos-uCenter) : vec3(0.,1.,0.); }
-        float gLayer; float gRockW; float gSnowW; float gCav;`)
+        float gLayer; float gRockW; float gSnowW; float gCav; float gWet;
+        float tCaustic(vec2 p,float t){ float a=tNoise(vec3(p,t)), b=tNoise(vec3(p*1.37+11.,t*1.3)); return pow(1.-abs(a-b),9.); }`)
       .replace('#include <map_fragment>',`
         vec3 up=tUp(); vec3 wn=normalize(vWNorm); float h=vTerr.x, gully=vTerr.y, cav=clamp(vTerr.z*0.35,-1.,1.), flow=vTerr.w;
         float slope=1.-clamp(dot(wn,up),0.,1.);          // 0 flat .. 1 vertical
@@ -68,10 +70,18 @@ export function createTerrainMaterial(THREE, opts={}){
         col=mix(col,uSnow*(0.9+0.1*fine),gSnowW);
         // cavity darkening (ambient occlusion from the height field)
         gCav=cav; col*=mix(1.,0.62,smoothstep(0.,0.9,cav))*mix(1.,1.08,smoothstep(0.,0.8,-cav));
-        // underwater: darker, blue-green with depth
-        float depth=max(uWater-h,0.); col=mix(col,col*vec3(0.35,0.5,0.5),smoothstep(0.,0.08,depth));
+        // shore: sandy banks on gentle slopes near the waterline, then a dark wet band just above it
+        float above=h-uWater, depth=max(-above,0.);
+        float beachW=(1.-smoothstep(uBeach*0.4,uBeach,above))*(1.-smoothstep(0.18,0.4,slope))*(1.-gSnowW);
+        col=mix(col,uSand*(0.85+0.3*fine),beachW*smoothstep(-0.01,0.,above+0.01));
+        gWet=(1.-smoothstep(0.,uWetBand,above))*step(-0.0005,above);
+        col*=mix(1.,0.58,gWet);
+        // underwater: sand-toned bed, absorbed by depth (red first), with moving caustics in the shallows
+        if(depth>0.){ col=mix(col,uSand*0.8,0.35*(1.-gRockW));
+          col*=exp(-depth*vec3(42.,17.,13.));
+          col+=vec3(0.75,0.9,0.85)*tCaustic(vWPos.xz*260.,uTime*0.9)*uCaustics*0.35*exp(-depth*70.)*smoothstep(0.,0.002,depth); }
         diffuseColor.rgb*=col;`)
-      .replace('#include <roughnessmap_fragment>',`float roughnessFactor=roughness*mix(mix(0.95,0.8,gRockW),0.55,gSnowW);`)
+      .replace('#include <roughnessmap_fragment>',`float roughnessFactor=roughness*mix(mix(mix(0.95,0.8,gRockW),0.55,gSnowW),0.3,gWet);`)
       .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
         { // procedural detail normal: gradient of rock noise, stronger on rock
           vec3 dp=vWPos*42.; float e=0.35, n0=tFbm(dp);
@@ -81,6 +91,6 @@ export function createTerrainMaterial(THREE, opts={}){
           normal=normalize(normal-(viewMatrix*vec4(g*k,0.)).xyz);
         }`);
   };
-  m.customProgramCacheKey=()=>'terrain-v1';
+  m.customProgramCacheKey=()=>'terrain-v2';
   return m;
 }
