@@ -126,14 +126,14 @@ self.onmessage=e=>{ const m=e.data;
   let rad=0;
   for(let i=0;i<V;i++){ const X=r.positions[i*3]-cx, Y=r.positions[i*3+1]-cy, Z=r.positions[i*3+2]-cz; pos[i*3]=X; pos[i*3+1]=Y; pos[i*3+2]=Z; rad=Math.max(rad,Math.hypot(X,Y,Z)); }
   nor.set(r.normals); ter.set(r.terrain);
-  const drop=FACE/n*0.03+0.05;   // skirt depth (km)
+  const drop=FACE/n*0.12+0.3;   // skirt depth (km): deeper than coarse/fine height differences in mountains
   RING.forEach((k,q)=>{ const o=V+q, ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
     pos[o*3]=ax-ax/L*drop-cx; pos[o*3+1]=ay-ay/L*drop-cy; pos[o*3+2]=az-az/L*drop-cz;
     nor[o*3]=r.normals[k*3]; nor[o*3+1]=r.normals[k*3+1]; nor[o*3+2]=r.normals[k*3+2]; for(let c=0;c<4;c++) ter[o*4+c]=r.terrain[k*4+c]; });
   let ocean=null, oceanNormals=null;
   if(r.hmin<0.01){ ocean=new Float32Array((V+M)*3); oceanNormals=new Float32Array((V+M)*3);
     const put=(o,k)=>{ const ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
-      ocean[o*3]=ax/L*R-cx; ocean[o*3+1]=ay/L*R-cy; ocean[o*3+2]=az/L*R-cz; oceanNormals[o*3]=ax/L; oceanNormals[o*3+1]=ay/L; oceanNormals[o*3+2]=az/L; };
+      const W=R-0.002; ocean[o*3]=ax/L*W-cx; ocean[o*3+1]=ay/L*W-cy; ocean[o*3+2]=az/L*W-cz; oceanNormals[o*3]=ax/L; oceanNormals[o*3+1]=ay/L; oceanNormals[o*3+2]=az/L; };
     for(let i=0;i<V;i++) put(i,i); RING.forEach((k,q)=>put(V+q,k)); }
   const tr=[pos.buffer,nor.buffer,ter.buffer]; if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
   self.postMessage({key:m.key,gen:m.gen,positions:pos,normals:nor,terrain:ter,ocean,oceanNormals,center:[cx,cy,cz],radius:rad+drop,hmin:r.hmin,hmax:r.hmax},tr);

@@ -206,7 +206,7 @@ export function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1,
     nor[o*3]=nx/L; nor[o*3+1]=ny/L; nor[o*3+2]=nz/L;
     // cavity: + in creases/valleys, - on crests (in height units per cell)
     const cav=(h[l]+h[r]+h[d]+h[u]+0.5*(h[d-1]+h[d+1]+h[u-1]+h[u+1]))/6-h[k];
-    terr[o*4]=h[k]; terr[o*4+1]=gully[k]; terr[o*4+2]=cav/cellSize; terr[o*4+3]=Math.min(1,flow[k]*0.05+dep[k]*15)*(droplets>0?1:0);
+    terr[o*4]=h[k]; terr[o*4+1]=gully[k]; terr[o*4+2]=cav/(cellSize*cellSize)*0.03;   // curvature, independent of grid spacing (same look at every LOD) terr[o*4+3]=Math.min(1,flow[k]*0.05+dep[k]*15)*(droplets>0?1:0);
     if(delta) delta[o]=h[k]-h0[k];
     if(h[k]<hmin) hmin=h[k]; if(h[k]>hmax) hmax=h[k];
   }
