@@ -15,7 +15,7 @@
 // Dependencies are injected so the module stays bundle-agnostic:
 //   deps = {THREE, gridIndex, faceDir, dirFace, tileKey}
 export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, splitK=2.2, workerSrc, params,
-    terrainMaterial, oceanMaterial, workers=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)-1)), budget=1200, uploadMs=3}){
+    terrainMaterial, oceanMaterial, workers=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)-1)), budget=1600, uploadMs=3}){
   const {THREE,gridIndex,faceDir,dirFace,tileKey}=deps, R=radius, FACE_KM=Math.PI/2*R;
   const tiles=new Map(), group=new THREE.Group(); scene.add(group);
   const stats={drawn:0,loaded:0,building:0,waiting:0,queued:0,recomputes:0,level:0};
@@ -38,7 +38,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
   function onBuilt(m){ if(m.gen!==gen) return; const t=tiles.get(m.key); if(!t||t.state!=='building') return; t.state='arrived'; uploads.push([t,m]); }
   function upload(t,m){
     const g=new THREE.BufferGeometry(); g.setIndex(indexAttr);
-    g.setAttribute('position',new THREE.BufferAttribute(m.positions,3)); g.setAttribute('normal',new THREE.BufferAttribute(m.normals,3)); g.setAttribute('aTerr',new THREE.BufferAttribute(m.terrain,4));
+    g.setAttribute('position',new THREE.BufferAttribute(m.positions,3)); g.setAttribute('normal',new THREE.BufferAttribute(m.normals,3)); g.setAttribute('aTerr',new THREE.BufferAttribute(m.terrain,4)); g.setAttribute('aMorph',new THREE.BufferAttribute(m.morph,2));
     g.boundingSphere=new THREE.Sphere(new THREE.Vector3(),m.radius);
     const mesh=new THREE.Mesh(g,terrainMaterial); mesh.position.fromArray(m.center); mesh.matrixAutoUpdate=false; mesh.updateMatrix(); mesh.visible=false; mesh.userData.level=t.L;
     group.add(mesh); t.mesh=mesh;
@@ -49,7 +49,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
 
   // ---- registry
   const dirTmp=[0,0,0];
-  function get(f,L,x,y){ const k=tileKey(f,L,x,y); let t=tiles.get(k);
+  function get(f,L,x,y){ const k=tileKey(f,L,x,y); let t=tiles.get(k); if(t) t.seen=performance.now();
     if(!t){ const [a,b]=[-1+2*(x+0.5)/(1<<L),-1+2*(y+0.5)/(1<<L)]; faceDir(f,a,b,dirTmp);
       t={key:k,f,L,x,y,state:'none',mesh:null,ocean:null,dir:new THREE.Vector3(...dirTmp),size:FACE_KM/(1<<L)*1.15,ang:(Math.PI/2)/(1<<L)*0.8,last:0,hmin:-3,hmax:2}; tiles.set(k,t); }
     return t; }
@@ -70,9 +70,12 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
       if(Math.acos(Math.max(-1,Math.min(1,t.dir.dot(cd))))-t.ang*1.4>horizon) return;
       tp.copy(t.dir).multiplyScalar(R); sph.set(tp,t.size*0.85+3); if(!frustum.intersectsSphere(sph)) return;
       const dist=Math.max(0,tp.distanceTo(camPos)-t.size*0.5);
-      const want=t.L<maxLevel&&dist<t.size*splitK;
-      if(want){ const ch=children(t); if(ch.every(c=>c.state==='ready')){ ch.forEach(visit); return; }
-        ch.forEach(c=>request(c,c.dir.clone().multiplyScalar(R).distanceTo(camPos))); }
+      // hysteresis: split at splitK, only merge back beyond 1.25×; prefetch children from 1.6× so they are ready in time
+      const want=t.L<maxLevel&&dist<t.size*splitK*(t.split?1.25:1), soon=t.L<maxLevel&&dist<t.size*splitK*1.6;
+      t.split=false;
+      if(want||soon){ const ch=children(t);
+        if(want&&ch.every(c=>c.state==='ready')){ t.split=true; ch.forEach(visit); return; }
+        ch.forEach(c=>request(c,c.dir.clone().multiplyScalar(R).distanceTo(camPos)+(want?0:1e4))); }
       if(t.state==='ready'){ next.add(t); maxL=Math.max(maxL,t.L); } else request(t,dist-1e6);   // uncovered: most urgent
     };
     for(let f=0;f<6;f++) visit(get(f,0,0,0));
@@ -80,10 +83,11 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
     for(const t of next){ if(t.mesh) t.mesh.visible=true; if(t.ocean) t.ocean.visible=true; }
     draw=next; stats.level=maxL; pump(); evict();
   }
-  function evict(){
-    if(tiles.size<=budget) return;
-    const idle=[...tiles.values()].filter(t=>t.state==='ready'&&!draw.has(t)&&t.L>0).sort((a,b)=>a.last-b.last);
-    for(const t of idle.slice(0,tiles.size-budget)){ for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); } tiles.delete(t.key); }
+  function evict(){   // only built tiles count toward the budget; coarse base levels are never freed
+    for(const [k,t] of tiles) if(t.state==='none'&&performance.now()-(t.seen||0)>5000) tiles.delete(k);   // drop stale placeholders
+    const ready=[...tiles.values()].filter(t=>t.state==='ready'); if(ready.length<=budget) return;
+    const idle=ready.filter(t=>!draw.has(t)&&t.L>3&&!t.split).sort((a,b)=>a.last-b.last);
+    for(const t of idle.slice(0,ready.length-budget)){ for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); } tiles.delete(t.key); }
   }
 
   // ---- change key: recompute only when this differs from last frame's
@@ -108,7 +112,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
   function setParams(p){ gen++; params=p; queue.length=0; uploads.length=0;
     for(const t of tiles.values()) for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); }
     tiles.clear(); draw=new Set(); lastKey=''; dirty=true; for(const w of pool){ w.busy=false; w.postMessage({type:'params',params,R,res,ring}); } }
-  const setSplitK=v=>{ if(v!==splitK){ splitK=v; dirty=true; } };
+  const setSplitK=v=>{ if(v!==splitK){ splitK=v; dirty=true; } if(terrainMaterial.userData.uniforms&&terrainMaterial.userData.uniforms.uSplitK) terrainMaterial.userData.uniforms.uSplitK.value=splitK; };
   return {update,setParams,setSplitK,stats,group};
 }
 
@@ -126,15 +130,20 @@ self.onmessage=e=>{ const m=e.data;
   let rad=0;
   for(let i=0;i<V;i++){ const X=r.positions[i*3]-cx, Y=r.positions[i*3+1]-cy, Z=r.positions[i*3+2]-cz; pos[i*3]=X; pos[i*3+1]=Y; pos[i*3+2]=Z; rad=Math.max(rad,Math.hypot(X,Y,Z)); }
   nor.set(r.normals); ter.set(r.terrain);
+  // geomorph: how far each vertex sits from where the parent tile would put it (parent = every other vertex)
+  const morph=new Float32Array((V+M)*2), RR=RES+1, H=i=>r.terrain[i*4], tsize=FACE/n*1.15;
+  for(let j=0;j<RR;j++) for(let i=0;i<RR;i++){ const k=j*RR+i; let ph=H(k);
+    if(i&1&&!(j&1)) ph=(H(k-1)+H(k+1))/2; else if(j&1&&!(i&1)) ph=(H(k-RR)+H(k+RR))/2; else if(i&1&&j&1) ph=(H(k-RR-1)+H(k-RR+1)+H(k+RR-1)+H(k+RR+1))/4;
+    morph[k*2]=ph-H(k); morph[k*2+1]=tsize; }
   const drop=FACE/n*0.12+0.3;   // skirt depth (km): deeper than coarse/fine height differences in mountains
   RING.forEach((k,q)=>{ const o=V+q, ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
     pos[o*3]=ax-ax/L*drop-cx; pos[o*3+1]=ay-ay/L*drop-cy; pos[o*3+2]=az-az/L*drop-cz;
-    nor[o*3]=r.normals[k*3]; nor[o*3+1]=r.normals[k*3+1]; nor[o*3+2]=r.normals[k*3+2]; for(let c=0;c<4;c++) ter[o*4+c]=r.terrain[k*4+c]; });
+    nor[o*3]=r.normals[k*3]; nor[o*3+1]=r.normals[k*3+1]; nor[o*3+2]=r.normals[k*3+2]; for(let c=0;c<4;c++) ter[o*4+c]=r.terrain[k*4+c]; morph[o*2]=morph[k*2]; morph[o*2+1]=tsize; });
   let ocean=null, oceanNormals=null;
   if(r.hmin<0.01){ ocean=new Float32Array((V+M)*3); oceanNormals=new Float32Array((V+M)*3);
     const put=(o,k)=>{ const ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
       const W=R-0.002; ocean[o*3]=ax/L*W-cx; ocean[o*3+1]=ay/L*W-cy; ocean[o*3+2]=az/L*W-cz; oceanNormals[o*3]=ax/L; oceanNormals[o*3+1]=ay/L; oceanNormals[o*3+2]=az/L; };
     for(let i=0;i<V;i++) put(i,i); RING.forEach((k,q)=>put(V+q,k)); }
-  const tr=[pos.buffer,nor.buffer,ter.buffer]; if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
-  self.postMessage({key:m.key,gen:m.gen,positions:pos,normals:nor,terrain:ter,ocean,oceanNormals,center:[cx,cy,cz],radius:rad+drop,hmin:r.hmin,hmax:r.hmax},tr);
+  const tr=[pos.buffer,nor.buffer,ter.buffer,morph.buffer]; if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
+  self.postMessage({key:m.key,gen:m.gen,positions:pos,normals:nor,terrain:ter,morph,ocean,oceanNormals,center:[cx,cy,cz],radius:rad+drop,hmin:r.hmin,hmax:r.hmax},tr);
 };`;

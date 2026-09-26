@@ -87,7 +87,7 @@ const stars=(()=>{ const n=2500, p=new Float32Array(n*3); for(let i=0;i<n;i++){ 
   const m=new THREE.PointsMaterial({color:0xffffff,size:1.5,sizeAttenuation:false,fog:false,transparent:true}); const pts=new THREE.Points(g,m); scene.add(pts); return pts; })();
 
 // ------------------------------------------------------------ materials
-const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0});
+const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0,morph:true});
 const oceanMat=new THREE.MeshStandardMaterial({color:0x0b3040,roughness:0.14,metalness:0,transparent:true,opacity:0.9});
 const OU={uTime:{value:0}};
 oceanMat.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,OU);

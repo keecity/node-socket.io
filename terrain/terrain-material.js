@@ -27,7 +27,8 @@ export function createTerrainMaterial(THREE, opts={}){
   const defines={};
   if(opts.hole){ defines.TERRAIN_HOLE=''; U.uHole={value:new THREE.Vector4(...opts.hole)}; }
   if(opts.overlay){ defines.TERRAIN_OVERLAY=''; Object.assign(U,{tMask:{value:opts.overlay.mask},uMaskE:{value:opts.overlay.extent},tAsph:{value:opts.overlay.asphalt},tStone:{value:opts.overlay.stone}}); }
-  if(opts.sunVis){ defines.TERRAIN_SUNVIS=''; }   // needs per-vertex `aSun` (bakeSunVisibility)
+  if(opts.sunVis){ defines.TERRAIN_SUNVIS=''; }
+  if(opts.morph){ defines.TERRAIN_MORPH=''; U.uSplitK={value:opts.splitK||2.2}; }   // planet LOD geomorphing (needs aMorph: parent delta, tile size)   // needs per-vertex `aSun` (bakeSunVisibility)
   if(opts.detailTex){ defines.TERRAIN_DETAILTEX=''; Object.assign(U,{tDetail:{value:opts.detailTex},uDetailScale:{value:opts.detailScale||0.9}}); }
   const m=new THREE.MeshStandardMaterial({roughness:0.9,metalness:0});
   m.defines=defines;
@@ -40,6 +41,14 @@ export function createTerrainMaterial(THREE, opts={}){
         attribute vec4 aTerr; varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
         #ifdef TERRAIN_SUNVIS
         attribute float aSun; varying float vSun;
+        #endif
+        #ifdef TERRAIN_MORPH
+        attribute vec2 aMorph; uniform float uSplitK;
+        #endif`)
+      .replace('#include <begin_vertex>',`#include <begin_vertex>
+        #ifdef TERRAIN_MORPH
+        { vec3 wp0=(modelMatrix*vec4(position,1.)).xyz; float md=distance(wp0,cameraPosition);
+          float mk=smoothstep(aMorph.y*uSplitK*1.05,aMorph.y*uSplitK*1.9,md); transformed+=normalize(wp0)*aMorph.x*mk; }
         #endif`)
       .replace('#include <worldpos_vertex>',`#include <worldpos_vertex>
         vTerr=aTerr; vWPos=(modelMatrix*vec4(transformed,1.)).xyz; vWNorm=normalize(mat3(modelMatrix)*objectNormal);
