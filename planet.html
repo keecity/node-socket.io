@@ -1,206 +1,382 @@
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
+<!doctype html><html><head><meta charset="utf-8"></head><body>
 <title>Flat Planet RTS</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #5d6166; font-family: system-ui, sans-serif; }
   canvas { display: block; }
-  #hud { position: fixed; top: 8px; left: 8px; color: #fff; background: rgba(0,0,0,.5);
-         padding: 6px 10px; border-radius: 4px; font-size: 13px; pointer-events: none; }
-  #mini { position: fixed; right: 8px; bottom: 8px; border: 2px solid #fff; cursor: pointer; }
+  #hud { position: fixed; top: 8px; left: 8px; color: #fff; background: rgba(20,24,28,.6);
+         padding: 8px 12px; border-radius: 4px; font-size: 12px; line-height: 1.5; pointer-events: none; max-width: calc(100% - 40px); }
+  #mini { position: fixed; right: 8px; bottom: 8px; border: 2px solid #e8e8e8; cursor: pointer; width: 192px; height: 192px; }
+  #box { position: fixed; border: 1px solid #7fff7f; background: rgba(127,255,127,.1); pointer-events: none; }
 </style>
-</head>
-<body>
-<canvas id="view"></canvas>
-<canvas id="mini"></canvas>
-<div id="hud">WASD / arrows / edge-scroll: pan &middot; drag-left: select &middot; right-click: move &middot; click minimap: jump<br>The world wraps on both axes (torus).</div>
+<div id="hud"><b>Flat Planet</b> — wraps on both axes<br>
+WASD / arrows / screen edge: pan &middot; wheel: zoom &middot; Q/E or middle-drag: rotate<br>
+Left-drag: select units &middot; right-click: move &middot; click minimap: jump</div>
+<canvas id="mini" width="192" height="192"></canvas>
+<div id="box" hidden></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-// ---- World config ----
-const TILE = 32;             // pixels per tile
-const W = 128, H = 96;       // map size in tiles
-const WORLD_W = W * TILE, WORLD_H = H * TILE;
+// ================= World =================
+const N = 256;            // heightmap resolution (periodic)
+const SIZE = 1024;        // world size in units
+const CELL = SIZE / N;
 const mod = (a, n) => ((a % n) + n) % n;
-// Shortest signed delta on a wrapped axis
-const wrapDelta = (d, n) => d - n * Math.round(d / n);
+const wrapDelta = (d, n) => d - n * Math.round(d / n);   // shortest way around
 
-// ---- Seamless (tileable) value noise ----
-let seed = Math.random() * 1e9 | 0;
-function rand2(x, y, p) { // hash on a lattice that repeats every p cells
+// ---- Seamless (periodic) value noise ----
+const seed = Math.random() * 1e9 | 0;
+function hash(x, y, p) {
   x = mod(x, p); y = mod(y, p);
-  let h = (x * 374761393 + y * 668265263 + seed * 144269504) | 0;
+  let h = (x * 374761393 + y * 668265263 + seed) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
-function noise(x, y, p) {
+function vnoise(x, y, p) {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-  const s = t => t * t * (3 - 2 * t), u = s(xf), v = s(yf);
-  const a = rand2(xi, yi, p), b = rand2(xi + 1, yi, p);
-  const c = rand2(xi, yi + 1, p), d = rand2(xi + 1, yi + 1, p);
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi, p), b = hash(xi + 1, yi, p), c = hash(xi, yi + 1, p), d = hash(xi + 1, yi + 1, p);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
-function fbm(tx, ty) {
-  let sum = 0, amp = 1, norm = 0;
-  for (let o = 0; o < 5; o++) {
-    const p = 4 << o;                 // lattice periods divide the map evenly
-    sum += amp * noise(tx / W * p, ty / H * p, p);
-    norm += amp; amp *= 0.5;
+// u,v in [0,1): periodic fbm
+function fbm(u, v, base, oct, ridged) {
+  let s = 0, amp = 1, norm = 0;
+  for (let o = 0; o < oct; o++) {
+    const p = base << o;
+    let n = vnoise(u * p, v * p, p);
+    if (ridged) n = 1 - Math.abs(2 * n - 1), n *= n;
+    s += amp * n; norm += amp; amp *= 0.5;
   }
-  return sum / norm;
+  return s / norm;
 }
 
-// ---- Terrain ----
-const terrain = new Float32Array(W * H);
-for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) terrain[y * W + x] = fbm(x, y);
-function tileColor(h) {
-  if (h < 0.38) return '#1d3f7a';   // deep water
-  if (h < 0.45) return '#2f64b0';   // shallow
-  if (h < 0.48) return '#d9c98a';   // beach
-  if (h < 0.60) return '#4f9a3a';   // grass
-  if (h < 0.70) return '#2f6b2a';   // forest
-  if (h < 0.78) return '#7a7064';   // rock
-  return '#eeeeee';                 // snow
+// ---- Heightmap ----
+const H = new Float32Array(N * N);
+const detail = new Float32Array(N * N);
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  const u = i / N, v = j / N;
+  const cont = fbm(u, v, 3, 6, false);              // continents / seas
+  const ridge = fbm(u + .31, v + .17, 4, 5, true);  // mountain ridges
+  let h = (cont - 0.52) * 170;
+  const land = Math.max(0, cont - 0.54);
+  h += land * ridge * 700;                          // mountains only inland
+  H[j * N + i] = h;
+  detail[j * N + i] = fbm(u, v, 32, 3, false);
 }
-const passable = (tx, ty) => { const h = terrain[mod(ty, H) * W + mod(tx, W)]; return h >= 0.45 && h < 0.78; };
+const hIdx = (i, j) => H[mod(j, N) * N + mod(i, N)];
+function heightAt(x, z) {
+  const fx = mod(x, SIZE) / CELL, fz = mod(z, SIZE) / CELL;
+  const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
+  const a = hIdx(i, j), b = hIdx(i + 1, j), c = hIdx(i, j + 1), d = hIdx(i + 1, j + 1);
+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+}
+function slopeAt(x, z) {
+  const dx = heightAt(x + CELL, z) - heightAt(x - CELL, z);
+  const dz = heightAt(x, z + CELL) - heightAt(x, z - CELL);
+  return Math.hypot(dx, dz) / (2 * CELL);
+}
+const passable = (x, z) => heightAt(x, z) > 0.6 && slopeAt(x, z) < 0.9;
 
-// Pre-render the whole map once into an offscreen canvas
-const mapCanvas = document.createElement('canvas');
-mapCanvas.width = WORLD_W; mapCanvas.height = WORLD_H;
-{
-  const g = mapCanvas.getContext('2d');
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    g.fillStyle = tileColor(terrain[y * W + x]);
-    g.fillRect(x * TILE, y * TILE, TILE, TILE);
+// ================= Three.js setup =================
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const SKY = new THREE.Color(0x6a6f74);
+scene.background = SKY;
+scene.fog = new THREE.Fog(SKY, 500, 1150);
+const camera = new THREE.PerspectiveCamera(50, 1, 1, 3000);
+
+scene.add(new THREE.HemisphereLight(0xdfe8ee, 0x4a4030, 0.55));
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.0);
+sun.position.set(-0.6, 0.8, 0.35).normalize();
+scene.add(sun);
+
+// ---- Terrain geometry (one tile, (N+1)^2 verts, seamless normals) ----
+const C = {
+  deepSand: new THREE.Color(0x8c7f5e), sand: new THREE.Color(0xcdbb8a),
+  grass: new THREE.Color(0x96a352), grass2: new THREE.Color(0x6f8a3c),
+  forest: new THREE.Color(0x3d5530), rock: new THREE.Color(0x5e5147),
+  rock2: new THREE.Color(0x3f3a36), snow: new THREE.Color(0xecefef),
+};
+const V = N + 1;
+const pos = new Float32Array(V * V * 3), nor = new Float32Array(V * V * 3), col = new Float32Array(V * V * 3);
+const tmp = new THREE.Color();
+for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+  const k = (j * V + i) * 3, h = hIdx(i, j);
+  pos[k] = i * CELL; pos[k + 1] = h; pos[k + 2] = j * CELL;
+  const nx = hIdx(i - 1, j) - hIdx(i + 1, j), nz = hIdx(i, j - 1) - hIdx(i, j + 1), ny = 2 * CELL;
+  const l = Math.hypot(nx, ny, nz);
+  nor[k] = nx / l; nor[k + 1] = ny / l; nor[k + 2] = nz / l;
+  const up = ny / l, d = detail[mod(j, N) * N + mod(i, N)];
+  // colour by height, slope and a bit of noise
+  if (h < -2) tmp.copy(C.deepSand);
+  else if (h < 2.5) tmp.copy(C.sand);
+  else {
+    tmp.copy(C.grass).lerp(C.grass2, d);
+    if (d > 0.55 && h < 60) tmp.lerp(C.forest, Math.min(1, (d - 0.55) * 5));
   }
-  g.strokeStyle = 'rgba(0,0,0,.08)';
-  for (let x = 0; x <= W; x++) { g.beginPath(); g.moveTo(x * TILE, 0); g.lineTo(x * TILE, WORLD_H); g.stroke(); }
-  for (let y = 0; y <= H; y++) { g.beginPath(); g.moveTo(0, y * TILE); g.lineTo(WORLD_W, y * TILE); g.stroke(); }
+  if (up < 0.82 && h > 1) tmp.lerp(d > .5 ? C.rock : C.rock2, Math.min(1, (0.82 - up) * 5));
+  if (h > 100) tmp.lerp(C.snow, Math.min(1, (h - 100) / 20) * (up > 0.6 ? 1 : 0.3));
+  col[k] = tmp.r; col[k + 1] = tmp.g; col[k + 2] = tmp.b;
+}
+const idx = new Uint32Array(N * N * 6);
+for (let j = 0, p = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  const a = j * V + i, b = a + 1, c = a + V, d = c + 1;
+  idx.set([a, c, b, b, c, d], p); p += 6;
+}
+const terrainGeo = new THREE.BufferGeometry();
+terrainGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+terrainGeo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+terrainGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+terrainGeo.setIndex(new THREE.BufferAttribute(idx, 1));
+terrainGeo.computeBoundingSphere();
+const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+// ---- Trees (instanced cones on forest-y land) ----
+const treeGeo = new THREE.ConeGeometry(2.2, 9, 5); treeGeo.translate(0, 4.5, 0);
+const treeMat = new THREE.MeshLambertMaterial({ color: 0x2b4024 });
+const treeSpots = [];
+for (let t = 0; t < 40000 && treeSpots.length < 5000; t++) {
+  const x = Math.random() * SIZE, z = Math.random() * SIZE, h = heightAt(x, z);
+  const d = detail[Math.floor(z / CELL) * N + Math.floor(x / CELL)];
+  if (h > 4 && h < 75 && d > 0.55 && slopeAt(x, z) < 0.8) treeSpots.push([x, h - 0.5, z, 0.6 + Math.random() * 0.8]);
+}
+const trees = new THREE.InstancedMesh(treeGeo, treeMat, treeSpots.length);
+const m4 = new THREE.Matrix4();
+treeSpots.forEach(([x, y, z, s], n) => trees.setMatrixAt(n, m4.makeScale(s, s * (0.8 + Math.random() * .5), s).setPosition(x, y, z)));
+trees.frustumCulled = false;
+
+// ---- 3x3 tiled copies so the world looks endless ----
+const tileMeshes = [];
+for (let tz = -1; tz <= 1; tz++) for (let tx = -1; tx <= 1; tx++) {
+  const g = new THREE.Group();
+  const mesh = new THREE.Mesh(terrainGeo, terrainMat);
+  g.add(mesh); g.add(tx === 0 && tz === 0 ? trees : trees.clone());
+  g.position.set(tx * SIZE, 0, tz * SIZE);
+  scene.add(g); tileMeshes.push(mesh);
 }
 
-// ---- Units ----
+// ---- Ocean shader ----
+const depthData = new Uint8Array(N * N * 4);
+for (let n = 0; n < N * N; n++) {
+  const d = Math.max(0, Math.min(1, -H[n] / 45));
+  depthData[n * 4] = d * 255; depthData[n * 4 + 3] = 255;
+}
+const depthTex = new THREE.DataTexture(depthData, N, N, THREE.RGBAFormat);
+depthTex.wrapS = depthTex.wrapT = THREE.RepeatWrapping;
+depthTex.magFilter = depthTex.minFilter = THREE.LinearFilter;
+depthTex.needsUpdate = true;
+
+const waterMat = new THREE.ShaderMaterial({
+  transparent: true,
+  uniforms: {
+    uTime: { value: 0 }, uDepth: { value: depthTex }, uSize: { value: SIZE },
+    uSun: { value: sun.position.clone() }, uSky: { value: new THREE.Color(0xc9d6df) },
+    uFog: { value: SKY }, uFogNear: { value: scene.fog.near }, uFogFar: { value: scene.fog.far },
+  },
+  vertexShader: `
+    varying vec3 vPos;
+    void main() {
+      vec4 w = modelMatrix * vec4(position, 1.0);
+      vPos = w.xyz;
+      gl_Position = projectionMatrix * viewMatrix * w;
+    }`,
+  fragmentShader: `
+    uniform float uTime, uSize, uFogNear, uFogFar;
+    uniform sampler2D uDepth;
+    uniform vec3 uSun, uSky, uFog;
+    varying vec3 vPos;
+    vec2 wave(vec2 p, vec2 dir, float freq, float speed) {
+      float ph = dot(p, dir) * freq + uTime * speed;
+      return dir * cos(ph) * freq;
+    }
+    void main() {
+      vec2 p = vPos.xz;
+      vec2 g = wave(p, normalize(vec2(1.0, 0.3)), 0.09, 1.3) * 0.5
+             + wave(p, normalize(vec2(-0.4, 1.0)), 0.13, 1.7) * 0.35
+             + wave(p, normalize(vec2(0.7, -0.8)), 0.27, 2.3) * 0.18
+             + wave(p, normalize(vec2(-0.9, -0.2)), 0.51, 3.1) * 0.08;
+      vec3 n = normalize(vec3(-g.x * 0.6, 1.0, -g.y * 0.6));
+      float depth = texture2D(uDepth, p / uSize).r;
+      vec3 shallow = vec3(0.45, 0.82, 0.85), deep = vec3(0.10, 0.36, 0.52);
+      vec3 base = mix(shallow, deep, smoothstep(0.0, 0.8, depth));
+      vec3 v = normalize(cameraPosition - vPos);
+      float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+      vec3 c = mix(base, uSky, fres * 0.6);
+      vec3 h = normalize(uSun + v);
+      c += vec3(1.0, 0.95, 0.85) * pow(max(dot(n, h), 0.0), 180.0) * 1.2;
+      float foam = smoothstep(0.06, 0.0, depth) * (0.6 + 0.4 * sin(uTime * 2.0 + p.x * 0.3 + p.y * 0.2));
+      c = mix(c, vec3(0.95), foam * 0.6);
+      float alpha = mix(0.35, 0.93, smoothstep(0.0, 0.5, depth)) + foam * 0.3;
+      float dist = length(cameraPosition - vPos);
+      c = mix(c, uFog, smoothstep(uFogNear, uFogFar, dist));
+      gl_FragColor = vec4(c, clamp(alpha, 0.0, 1.0));
+    }`,
+});
+const water = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 3, SIZE * 3), waterMat);
+water.rotation.x = -Math.PI / 2;
+water.position.set(SIZE / 2, 0, SIZE / 2);
+scene.add(water);
+
+// ================= Units =================
+const unitGeo = new THREE.CylinderGeometry(2.4, 3, 6, 8); unitGeo.translate(0, 3, 0);
+const unitMat = new THREE.MeshLambertMaterial({ color: 0xd83a2e });
+const ringGeo = new THREE.RingGeometry(4.5, 5.5, 24); ringGeo.rotateX(-Math.PI / 2);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x7fff7f, depthTest: false, transparent: true });
 const units = [];
-for (let i = 0; i < 12; i++) {
-  let tx, ty;
-  do { tx = Math.random() * W | 0; ty = Math.random() * H | 0; } while (!passable(tx, ty));
-  units.push({ x: (tx + .5) * TILE, y: (ty + .5) * TILE, tx: null, ty: null, sel: false, speed: 120 });
+function spawnUnits(n) {
+  // cluster around a random land spot
+  let cx, cz;
+  do { cx = Math.random() * SIZE; cz = Math.random() * SIZE; } while (!(passable(cx, cz) && heightAt(cx, cz) < 30));
+  for (let k = 0; k < n; k++) {
+    let x, z, tries = 0;
+    do { x = mod(cx + (Math.random() - .5) * 60, SIZE); z = mod(cz + (Math.random() - .5) * 60, SIZE); } while (!passable(x, z) && ++tries < 50);
+    const mesh = new THREE.Mesh(unitGeo, unitMat);
+    const ring = new THREE.Mesh(ringGeo, ringMat); ring.visible = false; ring.renderOrder = 2; mesh.add(ring);
+    scene.add(mesh);
+    units.push({ x, z, tx: null, tz: null, sel: false, speed: 40, mesh, ring });
+  }
+  return [cx, cz];
 }
+const [startX, startZ] = spawnUnits(12);
 
-// ---- Camera & input ----
-const view = document.getElementById('view'), ctx = view.getContext('2d');
-const mini = document.getElementById('mini'), mctx = mini.getContext('2d');
-const MINI_SCALE = 1.5; mini.width = W * MINI_SCALE; mini.height = H * MINI_SCALE;
-const cam = { x: units[0].x, y: units[0].y }; // camera centre in world coords
-const keys = {}; let mouse = { x: -1, y: -1 }, drag = null;
-function resize() { view.width = innerWidth; view.height = innerHeight; }
+// ================= Camera / input =================
+const cam = { x: startX, z: startZ, dist: 260, yaw: 0.6, pitch: 0.9 };
+const keys = {}; let mouse = { x: -1, y: -1 }, drag = null, rotating = null;
+const box = document.getElementById('box');
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+}
 addEventListener('resize', resize); resize();
 addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-view.addEventListener('contextmenu', e => e.preventDefault());
-
-const screenToWorld = (sx, sy) => ({
-  x: mod(cam.x + sx - view.width / 2, WORLD_W),
-  y: mod(cam.y + sy - view.height / 2, WORLD_H),
+const el = renderer.domElement;
+el.addEventListener('contextmenu', e => e.preventDefault());
+el.addEventListener('wheel', e => { e.preventDefault(); cam.dist = Math.max(60, Math.min(700, cam.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
+el.addEventListener('mousemove', e => {
+  mouse = { x: e.clientX, y: e.clientY };
+  if (drag) { drag.x2 = e.clientX; drag.y2 = e.clientY; showBox(); }
+  if (rotating) {
+    cam.yaw -= (e.clientX - rotating.x) * 0.005;
+    cam.pitch = Math.max(0.3, Math.min(1.45, cam.pitch + (e.clientY - rotating.y) * 0.005));
+    rotating = { x: e.clientX, y: e.clientY };
+  }
 });
-// Screen position of a world point, choosing the wrapped copy nearest the camera
-const worldToScreen = (wx, wy) => ({
-  x: wrapDelta(wx - cam.x, WORLD_W) + view.width / 2,
-  y: wrapDelta(wy - cam.y, WORLD_H) + view.height / 2,
-});
+el.addEventListener('mouseleave', () => mouse = { x: -1, y: -1 });
 
-view.addEventListener('mousemove', e => { mouse = { x: e.clientX, y: e.clientY }; if (drag) { drag.x2 = e.clientX; drag.y2 = e.clientY; } });
-view.addEventListener('mouseleave', () => mouse = { x: -1, y: -1 });
-view.addEventListener('mousedown', e => {
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function pickGround(sx, sy) {
+  ndc.set(sx / innerWidth * 2 - 1, -sy / innerHeight * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(tileMeshes)[0];
+  return hit ? { x: mod(hit.point.x, SIZE), z: mod(hit.point.z, SIZE) } : null;
+}
+el.addEventListener('mousedown', e => {
   if (e.button === 0) drag = { x1: e.clientX, y1: e.clientY, x2: e.clientX, y2: e.clientY };
+  if (e.button === 1) { e.preventDefault(); rotating = { x: e.clientX, y: e.clientY }; }
   if (e.button === 2) {
-    const t = screenToWorld(e.clientX, e.clientY);
-    const sel = units.filter(u => u.sel);
-    sel.forEach((u, i) => { // simple formation spread
-      const a = i * 2.4, r = 14 * Math.sqrt(i);
-      u.tx = mod(t.x + Math.cos(a) * r, WORLD_W); u.ty = mod(t.y + Math.sin(a) * r, WORLD_H);
+    const t = pickGround(e.clientX, e.clientY);
+    if (!t) return;
+    units.filter(u => u.sel).forEach((u, i) => {
+      const a = i * 2.4, r = 9 * Math.sqrt(i);
+      u.tx = mod(t.x + Math.cos(a) * r, SIZE); u.tz = mod(t.z + Math.sin(a) * r, SIZE);
     });
   }
 });
+function showBox() {
+  box.hidden = false;
+  box.style.left = Math.min(drag.x1, drag.x2) + 'px'; box.style.top = Math.min(drag.y1, drag.y2) + 'px';
+  box.style.width = Math.abs(drag.x2 - drag.x1) + 'px'; box.style.height = Math.abs(drag.y2 - drag.y1) + 'px';
+}
+const v3 = new THREE.Vector3();
 addEventListener('mouseup', e => {
+  if (e.button === 1) rotating = null;
   if (e.button !== 0 || !drag) return;
   const x1 = Math.min(drag.x1, drag.x2), x2 = Math.max(drag.x1, drag.x2);
   const y1 = Math.min(drag.y1, drag.y2), y2 = Math.max(drag.y1, drag.y2);
-  const click = x2 - x1 < 4 && y2 - y1 < 4;
-  units.forEach(u => {
-    const s = worldToScreen(u.x, u.y);
-    u.sel = click ? Math.hypot(s.x - x1, s.y - y1) < 12 : (s.x >= x1 && s.x <= x2 && s.y >= y1 && s.y <= y2);
-  });
-  drag = null;
+  const click = x2 - x1 < 5 && y2 - y1 < 5;
+  for (const u of units) {
+    v3.copy(u.mesh.position); v3.y += 3; v3.project(camera);
+    const sx = (v3.x + 1) / 2 * innerWidth, sy = (1 - v3.y) / 2 * innerHeight;
+    u.sel = v3.z < 1 && (click ? Math.hypot(sx - x1, sy - y1) < 16 : sx >= x1 && sx <= x2 && sy >= y1 && sy <= y2);
+    u.ring.visible = u.sel;
+  }
+  drag = null; box.hidden = true;
 });
+
+// ================= Minimap =================
+const mini = document.getElementById('mini'), mctx = mini.getContext('2d');
+const miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = N;
+{
+  const g = miniBase.getContext('2d'), img = g.createImageData(N, N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = (j * V + i) * 3, h = H[j * N + i], o = (j * N + i) * 4;
+    let r = col[k], gg = col[k + 1], b = col[k + 2];
+    if (h < 0) { const d = Math.min(1, -h / 45); r = .45 - .35 * d; gg = .8 - .45 * d; b = .85 - .33 * d; }
+    const shade = 0.75 + 0.35 * nor[k] - 0.35 * nor[k + 2] * 0; // simple relief
+    img.data[o] = r * 255 * shade; img.data[o + 1] = gg * 255 * shade; img.data[o + 2] = b * 255 * shade; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
 mini.addEventListener('mousedown', e => {
   const r = mini.getBoundingClientRect();
-  cam.x = (e.clientX - r.left) / MINI_SCALE * TILE; cam.y = (e.clientY - r.top) / MINI_SCALE * TILE;
+  cam.x = (e.clientX - r.left) / r.width * SIZE; cam.z = (e.clientY - r.top) / r.height * SIZE;
 });
-
-// ---- Update ----
-function update(dt) {
-  const pan = 600 * dt, edge = 20;
-  if (keys.a || keys.arrowleft || (mouse.x >= 0 && mouse.x < edge)) cam.x -= pan;
-  if (keys.d || keys.arrowright || (mouse.x >= 0 && mouse.x > view.width - edge)) cam.x += pan;
-  if (keys.w || keys.arrowup || (mouse.y >= 0 && mouse.y < edge)) cam.y -= pan;
-  if (keys.s || keys.arrowdown || (mouse.y >= 0 && mouse.y > view.height - edge)) cam.y += pan;
-  cam.x = mod(cam.x, WORLD_W); cam.y = mod(cam.y, WORLD_H);
-
-  for (const u of units) {
-    if (u.tx === null) continue;
-    const dx = wrapDelta(u.tx - u.x, WORLD_W), dy = wrapDelta(u.ty - u.y, WORLD_H); // shortest way around
-    const d = Math.hypot(dx, dy), step = u.speed * dt;
-    if (d <= step) { u.x = u.tx; u.y = u.ty; u.tx = null; continue; }
-    const nx = mod(u.x + dx / d * step, WORLD_W), ny = mod(u.y + dy / d * step, WORLD_H);
-    if (passable(Math.floor(nx / TILE), Math.floor(ny / TILE))) { u.x = nx; u.y = ny; }
-    else u.tx = null; // blocked by water/mountain (no pathfinding yet)
+function drawMini() {
+  const s = mini.width / SIZE;
+  mctx.drawImage(miniBase, 0, 0, mini.width, mini.height);
+  mctx.fillStyle = '#ff4a3a';
+  for (const u of units) mctx.fillRect(u.x * s - 2, u.z * s - 2, 4, 4);
+  // camera marker, drawn at wrapped offsets
+  const r = cam.dist * 0.6 * s;
+  mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.5;
+  for (const dx of [-mini.width, 0, mini.width]) for (const dz of [-mini.height, 0, mini.height]) {
+    mctx.beginPath(); mctx.arc(cam.x * s + dx, cam.z * s + dz, r, 0, 7); mctx.stroke();
   }
 }
 
-// ---- Render ----
-function render() {
-  const vw = view.width, vh = view.height;
-  const ox = mod(cam.x - vw / 2, WORLD_W), oy = mod(cam.y - vh / 2, WORLD_H);
-  // Blit map, tiling it so the seam is invisible
-  for (let sy = -oy; sy < vh; sy += WORLD_H)
-    for (let sx = -ox; sx < vw; sx += WORLD_W) ctx.drawImage(mapCanvas, sx, sy);
+// ================= Loop =================
+function update(dt) {
+  const pan = cam.dist * 1.4 * dt, edge = 16;
+  let mx = 0, mz = 0;
+  if (keys.a || keys.arrowleft || (mouse.x >= 0 && mouse.x < edge)) mx -= 1;
+  if (keys.d || keys.arrowright || (mouse.x >= 0 && mouse.x > innerWidth - edge)) mx += 1;
+  if (keys.w || keys.arrowup || (mouse.y >= 0 && mouse.y < edge)) mz -= 1;
+  if (keys.s || keys.arrowdown || (mouse.y >= 0 && mouse.y > innerHeight - edge)) mz += 1;
+  if (keys.q) cam.yaw += 1.5 * dt;
+  if (keys.e) cam.yaw -= 1.5 * dt;
+  const sn = Math.sin(cam.yaw), cs = Math.cos(cam.yaw);
+  cam.x = mod(cam.x + (mx * cs + mz * sn) * pan, SIZE);   // the wrap: camera always stays in the centre tile
+  cam.z = mod(cam.z + (-mx * sn + mz * cs) * pan, SIZE);
 
   for (const u of units) {
-    const s = worldToScreen(u.x, u.y);
-    if (s.x < -20 || s.y < -20 || s.x > vw + 20 || s.y > vh + 20) continue;
-    if (u.sel) {
-      ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(s.x, s.y, 12, 0, 7); ctx.stroke();
-      if (u.tx !== null) {
-        const t = worldToScreen(u.tx, u.ty);
-        ctx.strokeStyle = 'rgba(0,255,0,.4)'; ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(s.x + wrapDelta(u.tx - u.x, WORLD_W), s.y + wrapDelta(u.ty - u.y, WORLD_H));
-        ctx.stroke();
+    if (u.tx !== null) {
+      const dx = wrapDelta(u.tx - u.x, SIZE), dz = wrapDelta(u.tz - u.z, SIZE);
+      const d = Math.hypot(dx, dz), step = u.speed * dt;
+      if (d <= step) { u.x = u.tx; u.z = u.tz; u.tx = null; }
+      else {
+        const nx = mod(u.x + dx / d * step, SIZE), nz = mod(u.z + dz / d * step, SIZE);
+        if (passable(nx, nz)) { u.x = nx; u.z = nz; u.mesh.rotation.y = Math.atan2(dx, dz); }
+        else u.tx = null; // blocked by sea / cliff (no pathfinding yet)
       }
     }
-    ctx.fillStyle = '#d33'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, 7); ctx.fill(); ctx.stroke();
+    // draw each unit at the copy nearest the camera
+    u.mesh.position.set(cam.x + wrapDelta(u.x - cam.x, SIZE), heightAt(u.x, u.z), cam.z + wrapDelta(u.z - cam.z, SIZE));
   }
-  if (drag) {
-    ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1;
-    ctx.strokeRect(drag.x1, drag.y1, drag.x2 - drag.x1, drag.y2 - drag.y1);
-  }
-
-  // Minimap
-  mctx.drawImage(mapCanvas, 0, 0, mini.width, mini.height);
-  mctx.fillStyle = '#f44';
-  for (const u of units) mctx.fillRect(u.x / TILE * MINI_SCALE - 1.5, u.y / TILE * MINI_SCALE - 1.5, 3, 3);
-  // Viewport rect, drawn at all wrapped offsets so it splits across edges
-  const k = MINI_SCALE / TILE, rx = ox * k, ry = oy * k, rw = vw * k, rh = vh * k;
-  mctx.strokeStyle = '#fff'; mctx.lineWidth = 1;
-  for (const dx of [0, -mini.width]) for (const dy of [0, -mini.height]) mctx.strokeRect(rx + dx, ry + dy, rw, rh);
 }
-
+function placeCamera() {
+  const gy = Math.max(0, heightAt(cam.x, cam.z));
+  const cp = Math.cos(cam.pitch);
+  camera.position.set(cam.x + Math.sin(cam.yaw) * cp * cam.dist, gy + Math.sin(cam.pitch) * cam.dist, cam.z + Math.cos(cam.yaw) * cp * cam.dist);
+  camera.lookAt(cam.x, gy, cam.z);
+}
 let last = performance.now();
-(function loop(now) {
-  update(Math.min(0.05, (now - last) / 1000)); last = now;
-  render(); requestAnimationFrame(loop);
-})(last);
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); placeCamera();
+  waterMat.uniforms.uTime.value = now / 1000;
+  renderer.render(scene, camera);
+  drawMini();
+});
 </script>
-</body>
-</html>
+</body></html>
