@@ -745,7 +745,7 @@ function placeCamera(){
     if(pts.size===2){ const [a,b]=[...pts.values()], d=Math.hypot(a[0]-b[0],a[1]-b[1]); if(pinch) cam.alt*=pinch/d; pinch=d; return; }
     const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
     if(drag.b===2||e.shiftKey){ cam.heading+=dx*0.005; cam.tiltOff=THREE.MathUtils.clamp(cam.tiltOff-dy*0.004,-1.2,1.2); return; }
-    move(dy,-dx,0.0022); });   // grab the ground: drag down → forward, drag right → slide left
+    move(dy,dx,0.0022); });   // drag down → forward, drag right → move right
   const end=e=>{ pts.delete(e.pointerId); if(pts.size<2) pinch=0; if(!pts.size) drag=null; };
   el.addEventListener('pointerup',end); el.addEventListener('pointercancel',end);
   el.addEventListener('wheel',e=>{ e.preventDefault(); cam.alt=THREE.MathUtils.clamp(cam.alt*Math.exp(THREE.MathUtils.clamp(e.deltaY,-150,150)*0.0018),0.03,R*3); },{passive:false});
