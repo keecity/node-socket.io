@@ -27,6 +27,7 @@ export function createTerrainMaterial(THREE, opts={}){
   const defines={};
   if(opts.hole){ defines.TERRAIN_HOLE=''; U.uHole={value:new THREE.Vector4(...opts.hole)}; }
   if(opts.overlay){ defines.TERRAIN_OVERLAY=''; Object.assign(U,{tMask:{value:opts.overlay.mask},uMaskE:{value:opts.overlay.extent},tAsph:{value:opts.overlay.asphalt},tStone:{value:opts.overlay.stone}}); }
+  if(opts.sunVis){ defines.TERRAIN_SUNVIS=''; }   // needs per-vertex `aSun` (bakeSunVisibility)
   if(opts.detailTex){ defines.TERRAIN_DETAILTEX=''; Object.assign(U,{tDetail:{value:opts.detailTex},uDetailScale:{value:opts.detailScale||0.9}}); }
   const m=new THREE.MeshStandardMaterial({roughness:0.9,metalness:0});
   m.defines=defines;
@@ -36,13 +37,22 @@ export function createTerrainMaterial(THREE, opts={}){
     Object.assign(sh.uniforms,U);
     sh.vertexShader=sh.vertexShader
       .replace('#include <common>',`#include <common>
-        attribute vec4 aTerr; varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;`)
+        attribute vec4 aTerr; varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
+        #ifdef TERRAIN_SUNVIS
+        attribute float aSun; varying float vSun;
+        #endif`)
       .replace('#include <worldpos_vertex>',`#include <worldpos_vertex>
-        vTerr=aTerr; vWPos=(modelMatrix*vec4(transformed,1.)).xyz; vWNorm=normalize(mat3(modelMatrix)*objectNormal);`);
+        vTerr=aTerr; vWPos=(modelMatrix*vec4(transformed,1.)).xyz; vWNorm=normalize(mat3(modelMatrix)*objectNormal);
+        #ifdef TERRAIN_SUNVIS
+        vSun=aSun;
+        #endif`);
     sh.fragmentShader=sh.fragmentShader
       .replace('#include <common>',`#include <common>
         varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
         uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata,uTime,uWetBand,uBeach,uCaustics; uniform vec3 uSand; uniform int uUpMode; uniform vec3 uCenter; uniform float uKm;
+        #ifdef TERRAIN_SUNVIS
+        varying float vSun;
+        #endif
         #ifdef TERRAIN_HOLE
         uniform vec4 uHole;
         #endif
@@ -114,6 +124,9 @@ export function createTerrainMaterial(THREE, opts={}){
         if(depth>0.){ col=mix(col,uSand*0.8,0.35*(1.-gRockW));
           col*=exp(-depth*vec3(42.,17.,13.));
           col+=vec3(0.75,0.9,0.85)*tCaustic(KP.xz*260.,uTime*0.9)*uCaustics*0.35*exp(-depth*70.)*smoothstep(0.,0.002,depth); }
+        #ifdef TERRAIN_SUNVIS
+        col*=mix(0.42,1.,vSun);   // baked terrain shadow (mountains shading valleys)
+        #endif
         diffuseColor.rgb*=col;`)
       .replace('#include <roughnessmap_fragment>',`float roughnessFactor=roughness*mix(mix(mix(0.95,0.8,gRockW),0.55,gSnowW),0.3,gWet);`)
       .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>

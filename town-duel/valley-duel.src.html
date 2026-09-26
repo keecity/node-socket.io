@@ -114,7 +114,7 @@ import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {Sky} from 'three/addons/objects/Sky.js';
 import {Reflector} from 'three/addons/objects/Reflector.js';
-import {createTerrain, buildTile, flatPointAt, gridIndex} from '../terrain/terrain-gen.js';   //@INLINE_GEN
+import {createTerrain, buildTile, flatPointAt, gridIndex, bakeSunVisibility, DEFAULT_TERRAIN} from '../terrain/terrain-gen.js';   //@INLINE_GEN
 import {createTerrainMaterial, DEFAULT_MATERIAL} from '../terrain/terrain-material.js';     //@INLINE_MAT
 import {createWater, makeHeightTexture, DEFAULT_WATER} from '../terrain/water-material.js'; //@INLINE_WAT
 import {findSettlementSites, sitesToPads} from '../terrain/settlements.js';                 //@INLINE_SET
@@ -139,7 +139,7 @@ const GAIT={Walk_Forward:0.5279,Walk_Back:0.3495,Walk_Strafe_L:0.25,Walk_Strafe_
 const host=$('game');
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=0.9;
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 host.append(renderer.domElement);
 renderer.debug.onShaderError=(gl,prog,vs,fs)=>showErr('Shader failed to compile:\n'+(gl.getShaderInfoLog(fs)||'')+(gl.getShaderInfoLog(vs)||'')+(gl.getProgramInfoLog(prog)||''));
@@ -166,11 +166,11 @@ const sky=new Sky(); sky.scale.setScalar(3000); scene.add(sky);
   const pm=new THREE.PMREMGenerator(renderer), ss=new THREE.Scene(), s2=new Sky(); s2.scale.setScalar(3000); ss.add(s2);
   for(const k in u) if(s2.material.uniforms[k]&&u[k].value!==undefined&&u[k].value.copy) s2.material.uniforms[k].value.copy(u[k].value); else if(s2.material.uniforms[k]) s2.material.uniforms[k].value=u[k].value;
   scene.environment=pm.fromScene(ss,0.02).texture; }
-scene.add(new THREE.HemisphereLight(0xc4d0e4,0x4a4a36,0.55));
-const sun=new THREE.DirectionalLight(0xffb27a,2.7); sun.position.set(-5.5,3.4,-7); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
+scene.add(new THREE.HemisphereLight(0xbfd0e0,0x3a3a2c,0.35));
+const sun=new THREE.DirectionalLight(0xffe6cf,3.3); sun.position.set(-5.5,3.4,-7); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
 Object.assign(sun.shadow.camera,{left:-6,right:6,top:6,bottom:-6,near:1,far:26}); sun.shadow.bias=-0.0006; scene.add(sun); scene.add(sun.target);
-const fillL=new THREE.DirectionalLight(0x9fb8ff,0.6); fillL.position.set(5,4,6); scene.add(fillL);
-const camKey=new THREE.DirectionalLight(0xfff0e0,1.1); camKey.position.set(0.4,0.6,1); camera.add(camKey); camKey.target.position.set(0,-0.2,-1); camera.add(camKey.target);
+const fillL=new THREE.DirectionalLight(0x9fb8ff,0.25); fillL.position.set(5,4,6); scene.add(fillL);
+const camKey=new THREE.DirectionalLight(0xfff0e0,0.35); camKey.position.set(0.4,0.6,1); camera.add(camKey); camKey.target.position.set(0,-0.2,-1); camera.add(camKey.target);
 const composer=new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene,camera));
 composer.addPass(new UnrealBloomPass(new THREE.Vector2(1,1),0.28,0.3,1.6));   // HDR threshold: only lamps, windows, flashes, fire and sun glints glow; bright sky and sunlit ground don't
@@ -235,8 +235,8 @@ function tileMesh(r,mat,index){ const g=new THREE.BufferGeometry(); g.setIndex(n
   g.setAttribute('position',new THREE.BufferAttribute(r.positions,3)); g.setAttribute('normal',new THREE.BufferAttribute(r.normals,3)); g.setAttribute('aTerr',new THREE.BufferAttribute(r.terrain,4));
   g.computeBoundingSphere(); const m=new THREE.Mesh(g,mat); m.scale.setScalar(KM); m.position.set(-TER.cx*KM,0,-TER.cz*KM); m.receiveShadow=true; scene.add(m); return m; }
 const HOLE=(IN_KM/2-0.004)*KM;
-const terrOuterMat=createTerrainMaterial(THREE,{km:KM,hole:[-HOLE,-HOLE,HOLE,HOLE],polygonOffset:true});
-const terrInnerMat=createTerrainMaterial(THREE,{km:KM,overlay:{mask:maskTex,extent:TOWN+1,asphalt:T_ASPH,stone:T_STONE},detailTex:T_GRASS,detailScale:0.9});
+const terrOuterMat=createTerrainMaterial(THREE,{km:KM,hole:[-HOLE,-HOLE,HOLE,HOLE],polygonOffset:true,sunVis:true});
+const terrInnerMat=createTerrainMaterial(THREE,{km:KM,sunVis:true,overlay:{mask:maskTex,extent:TOWN+1,asphalt:T_ASPH,stone:T_STONE},detailTex:T_GRASS,detailScale:0.9});
 const water=createWater(THREE,Reflector,{size:8,origin:[-4,-4],res:TILE_RES,km:KM,reflectRes:768});
 { const U=water.userData.uniforms; U.uSunDir.value.copy(SUN_DIR); U.uSunColor.value.set(0xffc9a0); U.uSky.value.set(FOG); scene.add(water); }
 const worldMeshes=[];
@@ -244,19 +244,35 @@ function buildWorld(seed){
   const r=mulberry(seed*31+5);
   // town layout for this world
   const sp=2.6+r()*1.2; ROADS=r()<0.35?[-sp/2,sp/2]:[0,-sp,sp]; maskSeed=seed;
-  // terrain character for this world
-  const params={seed,coverage:0.38+r()*0.28,sharpness:1.7+r()*0.9,mountainHeight:0.85+r()*0.8,warp:0.4+r()*0.7,ridgeScale:0.26+r()*0.12};
-  const sites=findSettlementSites(createTerrain(params),{radius:2.6,count:1,water:WATER_KM,seed});
-  const pads=sitesToPads(sites,{r:(TOWN+2)/KM,fall:0.32,water:WATER_KM});
+  // terrain: the lab's generator settings; only the seed changes, so every world has full-quality mountains
+  const params={...DEFAULT_TERRAIN,seed};
+  // town site: any dry, buildable spot (benches, slopes, plateaus, shores), not just the lowest flattest one
+  const sites=findSettlementSites(createTerrain(params),{radius:2.6,count:1,water:WATER_KM,seed,pick:'random',maxSlope:0.03});
+  const PAD_R=(TOWN+2)/KM, PAD_FALL=0.14;
+  const pads=sitesToPads(sites,{r:PAD_R,fall:PAD_FALL,water:WATER_KM});
   const T=createTerrain({...params,pads}), c=sites[0];
-  TER={cx:c.x,cz:c.z,
-    outer:buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-4,c.z-4,8),cellSize:8/TILE_RES}),
-    inner:buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-IN_KM/2,c.z-IN_KM/2,IN_KM),cellSize:IN_KM/TILE_RES})};
+  const outer=buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-4,c.z-4,8),cellSize:8/TILE_RES,droplets:45000,dropletSeed:seed});
+  const inner=buildTile(T,{res:TILE_RES,pointAt:flatPointAt(c.x-IN_KM/2,c.z-IN_KM/2,IN_KM),cellSize:IN_KM/TILE_RES});
+  // the fine patch inherits the coarse tile's erosion (so they meet exactly), except on the flat town pad
+  const R=TILE_RES+1, oh=new Float32Array(R*R); for(let k=0;k<oh.length;k++) oh[k]=outer.terrain[k*4];
+  const bil=(arr,stride,off,kx,kz)=>{ const u=clamp((kx+4)/8*TILE_RES,0,TILE_RES-1e-4), v=clamp((kz+4)/8*TILE_RES,0,TILE_RES-1e-4), i=u|0, j=v|0, fu=u-i, fv=v-j, A=q=>arr[q*stride+off];
+    return (A(j*R+i)*(1-fu)+A(j*R+i+1)*fu)*(1-fv)+(A((j+1)*R+i)*(1-fu)+A((j+1)*R+i+1)*fu)*fv; };
+  for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, kx=-IN_KM/2+IN_KM*ii/TILE_RES, kz=-IN_KM/2+IN_KM*jj/TILE_RES;
+    let w=clamp((Math.hypot(kx,kz)-PAD_R)/PAD_FALL,0,1); w=w*w*(3-2*w);
+    const d=bil(outer.delta,1,0,kx,kz)*w; inner.positions[k*3+1]+=d; inner.terrain[k*4]+=d; inner.terrain[k*4+3]=bil(outer.terrain,4,3,kx,kz)*w; }
+  { const P=inner.positions, N=inner.normals, cs=IN_KM/TILE_RES;   // normals after adding erosion
+    for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++){ const k=jj*R+ii, l=jj*R+Math.max(0,ii-1), rr=jj*R+Math.min(TILE_RES,ii+1), d=Math.max(0,jj-1)*R+ii, u=Math.min(TILE_RES,jj+1)*R+ii;
+      const nx=-(P[rr*3+1]-P[l*3+1])/(cs*((ii>0)+(ii<TILE_RES))), nz=-(P[u*3+1]-P[d*3+1])/(cs*((jj>0)+(jj<TILE_RES))), L=Math.hypot(nx,1,nz); N[k*3]=nx/L; N[k*3+1]=1/L; N[k*3+2]=nz/L; } }
+  // baked mountain shadows: traced over the coarse tile, sampled by both meshes
+  const sunV=bakeSunVisibility(oh,TILE_RES,8,[SUN_DIR.x,SUN_DIR.y,SUN_DIR.z]);
+  const innerSun=new Float32Array(R*R); for(let jj=0;jj<R;jj++) for(let ii=0;ii<R;ii++) innerSun[jj*R+ii]=bil(sunV,1,0,-IN_KM/2+IN_KM*ii/TILE_RES,-IN_KM/2+IN_KM*jj/TILE_RES);
+  outer.sun=sunV; inner.sun=innerSun;
+  TER={cx:c.x,cz:c.z,outer,inner};
   worldMeshes.splice(0).forEach(m=>{ scene.remove(m); m.geometry.dispose(); });
-  worldMeshes.push(tileMesh(TER.outer,terrOuterMat));
-  const sk=withSkirt(TER.inner,0.03), inner=tileMesh(sk,terrInnerMat,sk.index); inner.castShadow=true; worldMeshes.push(inner);
-  const hs=new Float32Array((TILE_RES+1)**2); for(let i=0;i<hs.length;i++) hs[i]=TER.outer.terrain[i*4];
-  const WU=water.userData.uniforms; if(WU.tHeight.value) WU.tHeight.value.dispose(); WU.tHeight.value=makeHeightTexture(THREE,hs,TILE_RES);
+  const om=tileMesh(outer,terrOuterMat); om.geometry.setAttribute('aSun',new THREE.BufferAttribute(sunV,1)); worldMeshes.push(om);
+  const sk=withSkirt(inner,0.03), im=tileMesh(sk,terrInnerMat,sk.index); im.castShadow=true; worldMeshes.push(im);
+  const skSun=new Float32Array(sk.positions.length/3); skSun.set(innerSun); for(let q=innerSun.length;q<skSun.length;q++) skSun[q]=1; im.geometry.setAttribute('aSun',new THREE.BufferAttribute(skSun,1));
+  const WU=water.userData.uniforms; if(WU.tHeight.value) WU.tHeight.value.dispose(); WU.tHeight.value=makeHeightTexture(THREE,oh,TILE_RES);
   drawMask(maskTex.image.getContext('2d'),maskTex.image.width); maskTex.needsUpdate=true;
   buildGrass(seed);
 }

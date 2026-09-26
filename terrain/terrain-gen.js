@@ -183,11 +183,11 @@ export function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1,
     bx[k]=pt.x; by[k]=pt.y; bz[k]=pt.z; ux[k]=pt.ux; uy[k]=pt.uy; uz[k]=pt.uz;
     terrain.sample(pt.x,pt.y,pt.z,pt.ux,pt.uy,pt.uz,s); h[k]=s.h; gully[k]=s.gully; mount[k]=s.mountain;
   }
-  let flow=new Float32Array(n), dep=new Float32Array(n);
+  let flow=new Float32Array(n), dep=new Float32Array(n); const h0=droplets>0?h.slice():null;
   if(droplets>0) ({flow,dep}=erodeDroplets(h,W,{droplets,seed:dropletSeed,cellSize,margin:M}));
 
   // outputs (interior only)
-  const V=(res+1)*(res+1), pos=new Float32Array(V*3), nor=new Float32Array(V*3), terr=new Float32Array(V*4);
+  const V=(res+1)*(res+1), pos=new Float32Array(V*3), nor=new Float32Array(V*3), terr=new Float32Array(V*4), delta=h0?new Float32Array(V):null;
   const X=k=>bx[k]+ux[k]*h[k], Y=k=>by[k]+uy[k]*h[k], Z=k=>bz[k]+uz[k]*h[k];
   let hmin=1e9,hmax=-1e9;
   for(let j=0;j<=res;j++) for(let i=0;i<=res;i++){
@@ -202,9 +202,11 @@ export function buildTile(terrain, {res=256, pointAt, droplets=0, dropletSeed=1,
     // cavity: + in creases/valleys, - on crests (in height units per cell)
     const cav=(h[l]+h[r]+h[d]+h[u]+0.5*(h[d-1]+h[d+1]+h[u-1]+h[u+1]))/6-h[k];
     terr[o*4]=h[k]; terr[o*4+1]=gully[k]; terr[o*4+2]=cav/cellSize; terr[o*4+3]=Math.min(1,flow[k]*0.05+dep[k]*15)*(droplets>0?1:0);
+    if(delta) delta[o]=h[k]-h0[k];
     if(h[k]<hmin) hmin=h[k]; if(h[k]>hmax) hmax=h[k];
   }
-  return {res,positions:pos,normals:nor,terrain:terr,hmin,hmax,mountain:mount};
+  // delta: erosion change per vertex (null without droplets) — lets a finer patch inherit the same carving
+  return {res,positions:pos,normals:nor,terrain:terr,hmin,hmax,mountain:mount,delta};
 }
 
 export function flatPointAt(x0,z0,size){ return (u,v,o)=>{ o.x=x0+u*size; o.y=0; o.z=z0+v*size; o.ux=0; o.uy=1; o.uz=0; return o; }; }
@@ -260,4 +262,20 @@ export function erodeDroplets(h,W,{droplets=50000,seed=1,cellSize=1,margin=0,
   // blur flow a little for shading
   const f2=new Float32Array(n); for(let y=1;y<W-1;y++) for(let x=1;x<W-1;x++){ const k=y*W+x; f2[k]=(flow[k]*4+flow[k-1]+flow[k+1]+flow[k-W]+flow[k+W])/8; }
   return {flow:f2,dep};
+}
+
+// ---------------------------------------------------------------- baked sun visibility
+// Soft terrain self-shadowing for a flat tile: for each vertex, march toward the sun over the height
+// grid and measure how far the terrain rises above the ray. Returns 0 (shadowed) .. 1 (lit).
+// heights: (res+1)^2 grid over `size` (same units as heights); sun: unit vector toward the sun (x,y,z).
+export function bakeSunVisibility(heights,res,size,sun,{maxDist=size*0.6,softness=0.04}={}){
+  const R=res+1, cell=size/res, out=new Float32Array(R*R), hl=Math.hypot(sun[0],sun[2])||1e-6;
+  const dx=sun[0]/hl, dz=sun[2]/hl, rise=sun[1]/hl, steps=Math.ceil(maxDist/cell);
+  const Hs=(x,z)=>{ if(x<0||z<0||x>res||z>res) return -1e9; const i=Math.min(res-1,x|0), j=Math.min(res-1,z|0), fx=x-i, fz=z-j;
+    return (heights[j*R+i]*(1-fx)+heights[j*R+i+1]*fx)*(1-fz)+(heights[(j+1)*R+i]*(1-fx)+heights[(j+1)*R+i+1]*fx)*fz; };
+  for(let j=0;j<R;j++) for(let i=0;i<R;i++){ const h0=heights[j*R+i]; let vis=1;
+    for(let s=1;s<=steps;s++){ const t=s*cell*(1+s*0.01), x=i+dx*t/cell, z=j+dz*t/cell, ht=Hs(x,z); if(ht<-1e8) break;
+      const clear=h0+t*rise-ht; if(clear<0){ vis=0; break; } vis=Math.min(vis,clear/(t*softness)); if(h0+t*rise>1e3) break; }
+    out[j*R+i]=Math.max(0,Math.min(1,vis)); }
+  return out;
 }
