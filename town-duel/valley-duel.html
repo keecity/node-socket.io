@@ -979,7 +979,7 @@ function drawMask(g,S){   // R=asphalt G=plaza B=dirt/shoulder  (covers [-MASK_E
   g.setLineDash([]); g.globalCompositeOperation='source-over';
 }
 const maskTex=canvasTex(2048,drawMask,false);
-maskTex.wrapS=maskTex.wrapT=THREE.ClampToEdgeWrapping;
+maskTex.wrapS=maskTex.wrapT=THREE.ClampToEdgeWrapping; maskTex.flipY=false; maskTex.needsUpdate=true;   // canvas rows = +z, same as the road network
 function withSkirt(r,drop){   // hangs a curtain off the patch edge so no gap shows against the coarser tile
   const R=r.res+1, n=R*R, ring=[]; for(let i=0;i<R;i++) ring.push(i); for(let j=1;j<R;j++) ring.push(j*R+R-1); for(let i=R-2;i>=0;i--) ring.push((R-1)*R+i); for(let j=R-2;j>0;j--) ring.push(j*R);
   const m=ring.length, pos=new Float32Array((n+m)*3), nor=new Float32Array((n+m)*3), ter=new Float32Array((n+m)*4);
