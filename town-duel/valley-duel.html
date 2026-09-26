@@ -655,6 +655,11 @@ return {findSettlementSites, sitesToPads};
 })();
 
 const BASE=window.__ASSET_BASE||'';
+// surface failures on screen instead of hanging silently
+const errBox=(()=>{ const d=document.createElement('pre'); d.style.cssText='position:fixed;left:12px;right:12px;bottom:70px;max-height:40%;overflow:auto;margin:0;padding:10px;background:rgba(40,8,8,.92);color:#ffd9d0;font:12px/1.4 monospace;white-space:pre-wrap;z-index:9;display:none'; document.body.append(d); return d; })();
+function showErr(msg){ errBox.style.display='block'; errBox.textContent+=msg+'\n'; }
+addEventListener('error',e=>showErr('Error: '+(e.message||e)+(e.filename?' @'+e.lineno:'')));
+addEventListener('unhandledrejection',e=>showErr('Error: '+(e.reason&&(e.reason.stack||e.reason.message)||e.reason)));
 const $=id=>document.getElementById(id);
 const RNG=Math.random;
 const rand=(a,b)=>a+RNG()*(b-a);
@@ -672,6 +677,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 host.append(renderer.domElement);
+renderer.debug.onShaderError=(gl,prog,vs,fs)=>showErr('Shader failed to compile:\n'+(gl.getShaderInfoLog(fs)||'')+(gl.getShaderInfoLog(vs)||'')+(gl.getProgramInfoLog(prog)||''));
 const scene=new THREE.Scene();
 const FOG=0xa9b4bb; scene.fog=new THREE.FogExp2(FOG,0.0016);
 const camera=new THREE.PerspectiveCamera(40,1,0.05,4000); camera.position.set(0,1.6,5); scene.add(camera);
@@ -1364,7 +1370,7 @@ function useTreeModel(sc){ sc.updateMatrixWorld(true); const meshes=[]; sc.trave
     im.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(cap*3).fill(1),3); scene.add(im);
     const g='tree'+k; G[g]={im,n:0,bb:geo.boundingBox,dirty:false}; const s=geo.boundingBox.max;
     TREE_KINDS.push({g,h:s.y,w:Math.max(s.x,s.z)*2}); }); }
-function fail(){ $('loading').textContent='The robot model could not be loaded. Reload the page to try again.'; }
+function fail(e){ $('loading').textContent='The robot model could not be loaded. Reload the page to try again.'; if(e) showErr('Model load failed: '+(e.stack||e.message||e)); }
 function recolor(mat){
   mat.onBeforeCompile=sh=>{ sh.fragmentShader=sh.fragmentShader.replace('void main() {',`
       vec3 rgb2hsv(vec3 c){ vec4 K=vec4(0.,-1./3.,2./3.,-1.); vec4 p=mix(vec4(c.bg,K.wz),vec4(c.gb,K.xy),step(c.b,c.g)); vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r));
@@ -1435,7 +1441,7 @@ function resetFighters(){ F.forEach((f,i)=>{ f.pos.set(i?1.2:-1.2,0,0.3); f.vel.
 let generating=false;
 function newMatch(){ if(generating) return; generating=true; round=1; matchSeed=Math.floor(Math.random()*1e6); F.forEach(f=>f.wins=0);
   phase='gen'; showBanner('New world','Generating terrain');
-  setTimeout(()=>{ buildWorld(matchSeed); generating=false; startRound(); $('feed').innerHTML=''; log(null,`Match start: <b>Violet</b> vs <b>Cobalt</b>, world #${matchSeed}`); },60); }
+  setTimeout(()=>{ try{ buildWorld(matchSeed); }catch(e){ showErr('World generation failed: '+(e.stack||e)); generating=false; return; } generating=false; startRound(); $('feed').innerHTML=''; log(null,`Match start: <b>Violet</b> vs <b>Cobalt</b>, world #${matchSeed}`); },60); }
 function startRound(){ buildTown(matchSeed+round); resetFighters(); clearGuns(); HELIS.forEach(placeHeli); hRounds.forEach(b=>{b.alive=false;b.m.visible=false;}); missiles.forEach(m=>{m.alive=false;m.m.visible=false;}); spawnPickup(); spawnPickup(); phase='intro'; phaseT=0; timeLeft=75; showBanner(`Round ${round}`,'Systems online'); $('roundLbl').textContent='Round '+round; }
 function endRound(winner,reason){ phase='ko'; phaseT=0; const loser=winner?other(winner):null;
   if(winner){ winner.wins++; setState(winner,'win','Victory_Pose',0.2); }
