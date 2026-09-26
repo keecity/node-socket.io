@@ -15,7 +15,7 @@
 // Dependencies are injected so the module stays bundle-agnostic:
 //   deps = {THREE, gridIndex, faceDir, dirFace, tileKey}
 export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, splitK=1.8, workerSrc, params,
-    terrainMaterial, oceanMaterial, workers=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)-1)), budget=1600, uploadMs=3}){
+    terrainMaterial, oceanMaterial, treeGeometry=null, treeMaterial=null, workers=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)-1)), budget=1600, uploadMs=3}){
   const {THREE,gridIndex,faceDir,dirFace,tileKey}=deps, R=radius, FACE_KM=Math.PI/2*R;
   const tiles=new Map(), group=new THREE.Group(); scene.add(group);
   const stats={drawn:0,loaded:0,building:0,waiting:0,queued:0,recomputes:0,level:0};
@@ -51,6 +51,8 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
     group.add(mesh); t.mesh=mesh;
     if(m.ocean){ const og=new THREE.BufferGeometry(); og.setIndex(indexAttr); og.setAttribute('position',new THREE.BufferAttribute(m.ocean,3)); og.setAttribute('normal',new THREE.BufferAttribute(m.oceanNormals,3));
       og.boundingSphere=g.boundingSphere; const om=new THREE.Mesh(og,oceanMaterial); om.position.copy(mesh.position); om.matrixAutoUpdate=false; om.updateMatrix(); om.visible=false; om.renderOrder=1; group.add(om); t.ocean=om; }
+    if(m.trees&&m.trees.length&&treeGeometry){ const n=m.trees.length/16, im=new THREE.InstancedMesh(treeGeometry,treeMaterial,n);
+      im.instanceMatrix.array.set(m.trees); im.instanceMatrix.needsUpdate=true; im.frustumCulled=false; im.position.copy(mesh.position); im.matrixAutoUpdate=false; im.updateMatrix(); im.visible=false; group.add(im); t.trees=im; }
     t.hmin=m.hmin; t.hmax=m.hmax; t.state='ready';
   }
 
@@ -86,15 +88,15 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
       if(t.state==='ready'){ next.add(t); maxL=Math.max(maxL,t.L); } else request(t,dist-1e6);   // uncovered: most urgent
     };
     for(let f=0;f<6;f++) visit(get(f,0,0,0));
-    for(const t of draw) if(!next.has(t)){ if(t.mesh) t.mesh.visible=false; if(t.ocean) t.ocean.visible=false; t.last=performance.now(); }
-    for(const t of next){ if(t.mesh) t.mesh.visible=true; if(t.ocean) t.ocean.visible=true; }
+    for(const t of draw) if(!next.has(t)){ for(const m of [t.mesh,t.ocean,t.trees]) if(m) m.visible=false; t.last=performance.now(); }
+    for(const t of next){ for(const m of [t.mesh,t.ocean,t.trees]) if(m) m.visible=true; }
     draw=next; stats.level=maxL; pump(); evict();
   }
   function evict(){   // only built tiles count toward the budget; coarse base levels are never freed
     for(const [k,t] of tiles) if(t.state==='none'&&performance.now()-(t.seen||0)>5000) tiles.delete(k);   // drop stale placeholders
     const ready=[...tiles.values()].filter(t=>t.state==='ready'); if(ready.length<=budget) return;
     const idle=ready.filter(t=>!draw.has(t)&&t.L>3&&!t.split).sort((a,b)=>a.last-b.last);
-    for(const t of idle.slice(0,ready.length-budget)){ for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); } tiles.delete(t.key); }
+    for(const t of idle.slice(0,ready.length-budget)){ for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); } if(t.trees){ group.remove(t.trees); t.trees.dispose(); } tiles.delete(t.key); }
   }
 
   // ---- change key: recompute only when this differs from last frame's
@@ -119,7 +121,7 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
     stats.drawn=draw.size; stats.loaded=[...tiles.values()].filter(t=>t.state==='ready').length; stats.building=[...tiles.values()].filter(t=>t.state==='building').length; stats.waiting=uploads.length; stats.queued=queue.length;
   }
   function setParams(p){ gen++; params=p; queue.length=0; uploads.length=0;
-    for(const t of tiles.values()) for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); }
+    for(const t of tiles.values()){ for(const m of [t.mesh,t.ocean]) if(m){ group.remove(m); m.geometry.dispose(); } if(t.trees){ group.remove(t.trees); t.trees.dispose(); } }
     tiles.clear(); draw=new Set(); lastKey=''; dirty=true; for(const w of pool){ w.busy=null; w.postMessage({type:'params',params,R,res,ring}); } }
   const setSplitK=v=>{ if(v!==splitK){ splitK=v; dirty=true; } if(terrainMaterial.userData.uniforms&&terrainMaterial.userData.uniforms.uSplitK) terrainMaterial.userData.uniforms.uSplitK.value=splitK; };
   return {update,setParams,setSplitK,stats,group};
@@ -127,10 +129,10 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
 
 // Worker body (appended to the terrain-gen + cube-sphere sources): builds one tile per message.
 export const PLANET_WORKER=`
-let T=null, P0=null, TC=new Map(), R=100, RES=48, RING=[];
+let T=null, P0=null, TC=new Map(), R=100, RES=48, RING=[], TREE_LEVEL=8;
 const o3=[0,0,0], c3=[0,0,0];
 self.onmessage=e=>{ const m=e.data;
-  if(m.type==='params'){ P0=m.params; TC.clear(); R=m.R; RES=m.res; RING=m.ring; return; }
+  if(m.type==='params'){ P0=m.params; TC.clear(); R=m.R; RES=m.res; RING=m.ring; if(m.treeLevel!==undefined) TREE_LEVEL=m.treeLevel; return; }
   const {f,L,x,y}=m, n=1<<L, FACE=Math.PI/2*R;
   const pointAt=(u,v,o)=>{ faceDir(f,-1+2*(x+u)/n,-1+2*(y+v)/n,o3); o.x=o3[0]*R; o.y=o3[1]*R; o.z=o3[2]*R; o.ux=o3[0]; o.uy=o3[1]; o.uz=o3[2]; return o; };
   // band-limit per level: only noise the grid can resolve (finest wavelength ≥ 4 cells) — no aliasing spikes
@@ -157,6 +159,29 @@ self.onmessage=e=>{ const m=e.data;
     const put=(o,k)=>{ const ax=r.positions[k*3], ay=r.positions[k*3+1], az=r.positions[k*3+2], L=Math.hypot(ax,ay,az);
       const W=R-0.002; ocean[o*3]=ax/L*W-cx; ocean[o*3+1]=ay/L*W-cy; ocean[o*3+2]=az/L*W-cz; oceanNormals[o*3]=ax/L; oceanNormals[o*3+1]=ay/L; oceanNormals[o*3+2]=az/L; };
     for(let i=0;i<V;i++) put(i,i); RING.forEach((k,q)=>put(V+q,k)); }
-  const tr=[pos.buffer,nor.buffer,ter.buffer,morph.buffer]; if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
-  self.postMessage({key:m.key,gen:m.gen,positions:pos,normals:nor,terrain:ter,morph,ocean,oceanNormals,center:[cx,cy,cz],radius:rad+drop,hmin:r.hmin,hmax:r.hmax},tr);
+  // trees: jittered grid anchored to the face (not the tile), so a tile and its children place identical trees
+  let trees=null;
+  if(L>=TREE_LEVEL){ const SP=0.03, NT=Math.round(FACE/SP), g0=Math.floor(x/n*NT), g1=Math.ceil((x+1)/n*NT), h0=Math.floor(y/n*NT), h1=Math.ceil((y+1)/n*NT), out=[];
+    const hash=(a,b,c)=>{ let t=(a*73856093)^(b*19349663)^(c*83492791)^0x9e3779b9; t=Math.imul(t^(t>>>16),0x45d9f3b); t=Math.imul(t^(t>>>16),0x45d9f3b); return ((t^(t>>>16))>>>0)/4294967296; };
+    const vn=(px,py,pz)=>{ const X=Math.floor(px),Y=Math.floor(py),Z=Math.floor(pz),fx=px-X,fy=py-Y,fz=pz-Z,s=t=>t*t*(3-2*t),ux=s(fx),uy=s(fy),uz=s(fz); let v=0;
+      for(let c=0;c<8;c++){ const i=c&1,j=(c>>1)&1,k=c>>2; v+=hash(X+i,Y+j,Z+k)*(i?ux:1-ux)*(j?uy:1-uy)*(k?uz:1-uz); } return v; };
+    const RR=RES+1, d3=[0,0,0];
+    for(let gj=h0;gj<h1;gj++) for(let gi=g0;gi<g1;gi++){
+      const jx=hash(gi,gj,f*7+1), jz=hash(gi,gj,f*7+2), a=-1+2*(gi+jx)/NT, b=-1+2*(gj+jz)/NT;
+      const u=(a+1)/2*n-x, v=(b+1)/2*n-y; if(u<0||v<0||u>=1||v>=1) continue;
+      faceDir(f,a,b,d3); const px=d3[0]*R, py=d3[1]*R, pz=d3[2]*R;
+      const forest=vn(px*0.35,py*0.35,pz*0.35)*0.65+vn(px*1.3,py*1.3,pz*1.3)*0.35; if(hash(gi,gj,f*7+3)>(forest-0.42)*2.4) continue;
+      const fu=u*RES, fv=v*RES, i0=Math.min(RES-1,fu|0), j0=Math.min(RES-1,fv|0), tu=fu-i0, tv=fv-j0, K=(i,j)=>(j*RR+i);
+      const Hh=(i,j)=>r.terrain[K(i,j)*4], h=(Hh(i0,j0)*(1-tu)+Hh(i0+1,j0)*tu)*(1-tv)+(Hh(i0,j0+1)*(1-tu)+Hh(i0+1,j0+1)*tu)*tv;
+      if(h<0.012||h>0.85) continue;
+      const kN=K(Math.round(fu),Math.round(fv))*3, up=r.normals[kN]*d3[0]+r.normals[kN+1]*d3[1]+r.normals[kN+2]*d3[2]; if(up<0.9) continue;
+      // basis: Y = up (with a slight lean), X/Z tangent with random yaw
+      const yaw=hash(gi,gj,f*7+4)*6.283, s=0.7+hash(gi,gj,f*7+5)*0.7;
+      let tx=-d3[2], ty=0, tz=d3[0]; if(Math.abs(d3[1])>0.99){ tx=1; tz=0; } let tl=Math.hypot(tx,ty,tz); tx/=tl; ty/=tl; tz/=tl;
+      let bx=d3[1]*tz-d3[2]*ty, by=d3[2]*tx-d3[0]*tz, bz=d3[0]*ty-d3[1]*tx;
+      const c=Math.cos(yaw), sn=Math.sin(yaw), Xx=tx*c+bx*sn, Xy=ty*c+by*sn, Xz=tz*c+bz*sn, Zx=-tx*sn+bx*c, Zy=-ty*sn+by*c, Zz=-tz*sn+bz*c;
+      const hr=R+h-0.001; out.push(Xx*s,Xy*s,Xz*s,0, d3[0]*s,d3[1]*s,d3[2]*s,0, Zx*s,Zy*s,Zz*s,0, d3[0]*hr-cx,d3[1]*hr-cy,d3[2]*hr-cz,1); }
+    trees=new Float32Array(out); }
+  const tr=[pos.buffer,nor.buffer,ter.buffer,morph.buffer]; if(trees) tr.push(trees.buffer); if(ocean) tr.push(ocean.buffer,oceanNormals.buffer);
+  self.postMessage({key:m.key,gen:m.gen,positions:pos,normals:nor,terrain:ter,morph,trees,ocean,oceanNormals,center:[cx,cy,cz],radius:rad+drop,hmin:r.hmin,hmax:r.hmax},tr);
 };`;

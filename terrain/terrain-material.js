@@ -27,6 +27,7 @@ export function createTerrainMaterial(THREE, opts={}){
   const defines={};
   if(opts.hole){ defines.TERRAIN_HOLE=''; U.uHole={value:new THREE.Vector4(...opts.hole)}; }
   if(opts.overlay){ defines.TERRAIN_OVERLAY=''; Object.assign(U,{tMask:{value:opts.overlay.mask},uMaskE:{value:opts.overlay.extent},tAsph:{value:opts.overlay.asphalt},tStone:{value:opts.overlay.stone}}); }
+  U.uDirtPatch={value:opts.dirtPatches||0};   // large-scale dirt/bare-earth patches (0 = off)
   if(opts.sunVis){ defines.TERRAIN_SUNVIS=''; }
   if(opts.morph){ defines.TERRAIN_MORPH=''; U.uSplitK={value:opts.splitK||2.2}; }   // planet LOD geomorphing (needs aMorph: parent delta, tile size)   // needs per-vertex `aSun` (bakeSunVisibility)
   if(opts.detailTex){ defines.TERRAIN_DETAILTEX=''; Object.assign(U,{tDetail:{value:opts.detailTex},uDetailScale:{value:opts.detailScale||0.9}}); }
@@ -58,7 +59,7 @@ export function createTerrainMaterial(THREE, opts={}){
     sh.fragmentShader=sh.fragmentShader
       .replace('#include <common>',`#include <common>
         varying vec4 vTerr; varying vec3 vWPos; varying vec3 vWNorm;
-        uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata,uTime,uWetBand,uBeach,uCaustics; uniform vec3 uSand; uniform int uUpMode; uniform vec3 uCenter; uniform float uKm;
+        uniform float uSnowLine,uSnowFade,uRockSlope,uRockSoft,uWater,uDetail,uStrata,uTime,uWetBand,uBeach,uCaustics; uniform vec3 uSand; uniform int uUpMode; uniform vec3 uCenter; uniform float uKm; uniform float uDirtPatch;
         #ifdef TERRAIN_SUNVIS
         varying float vSun;
         #endif
@@ -107,6 +108,7 @@ export function createTerrainMaterial(THREE, opts={}){
         float rs=uRockSlope-gully*0.06+(macro-0.5)*0.12;
         gRockW=smoothstep(rs-uRockSoft,rs+uRockSoft,slope);
         float dirtW=clamp(smoothstep(rs-uRockSoft*2.2,rs-uRockSoft*0.4,slope)*(1.-gRockW)*0.8+flow*0.6+max(cav,0.)*0.25,0.,1.);
+        dirtW=clamp(dirtW+smoothstep(0.52,0.72,tFbm(KP*0.9+vec3(7.3,1.1,4.9)))*uDirtPatch*(1.-gRockW),0.,1.);
         vec3 col=mix(grass,uDirt*(0.8+0.4*fine),dirtW);
         col=mix(col,rock,gRockW);
         // moss/grass creeping into rock creases on gentler rock

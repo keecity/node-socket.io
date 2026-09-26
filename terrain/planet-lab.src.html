@@ -87,7 +87,13 @@ const stars=(()=>{ const n=2500, p=new Float32Array(n*3); for(let i=0;i<n;i++){ 
   const m=new THREE.PointsMaterial({color:0xffffff,size:1.5,sizeAttenuation:false,fog:false,transparent:true}); const pts=new THREE.Points(g,m); scene.add(pts); return pts; })();
 
 // ------------------------------------------------------------ materials
-const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0,morph:true});
+const terrainMat=createTerrainMaterial(THREE,{upMode:1,km:1,waterLevel:0,morph:true,beach:0.02,wetBand:0.004,dirtPatches:0.6});
+// low-poly conifer (km units): trunk + two stacked cones, vertex-coloured, merged into one geometry
+const treeGeo=(()=>{ const parts=[[new THREE.CylinderGeometry(0.0009,0.0012,0.006,5).translate(0,0.003,0),[0.28,0.2,0.13]],
+    [new THREE.ConeGeometry(0.0055,0.012,7).translate(0,0.0095,0),[0.13,0.24,0.1]],[new THREE.ConeGeometry(0.004,0.01,7).translate(0,0.0155,0),[0.15,0.27,0.11]]];
+  const pos=[],nor=[],col=[]; for(const [g,c] of parts){ const G=g.toNonIndexed(); pos.push(...G.attributes.position.array); nor.push(...G.attributes.normal.array); for(let i=0;i<G.attributes.position.count;i++) col.push(...c); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); return g; })();
+const treeMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,flatShading:true});
 const oceanMat=new THREE.MeshStandardMaterial({color:0x0b3040,roughness:0.14,metalness:0,transparent:true,opacity:0.9});
 const OU={uTime:{value:0}};
 oceanMat.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,OU);
@@ -108,7 +114,7 @@ async function workerSource(){
 }
 let tilesys=null, groundT=createTerrain(planetParams(7));
 workerSource().then(src=>{
-  tilesys=createPlanetTiles({THREE,gridIndex,faceDir,dirFace,tileKey},{scene,radius:R,res:48,maxLevel:9,workerSrc:src,params:planetParams(+$('seed').value),terrainMaterial:terrainMat,oceanMaterial:oceanMat});
+  tilesys=createPlanetTiles({THREE,gridIndex,faceDir,dirFace,tileKey},{scene,radius:R,res:48,maxLevel:9,workerSrc:src,params:planetParams(+$('seed').value),terrainMaterial:terrainMat,oceanMaterial:oceanMat,treeGeometry:treeGeo,treeMaterial:treeMat});
 });
 
 // ------------------------------------------------------------ camera: continuous orbit → ground
