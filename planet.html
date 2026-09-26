@@ -1,22 +1,25 @@
 <!doctype html><html><head><meta charset="utf-8"></head><body>
 <title>Flat Planet RTS</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #5d6166; font-family: system-ui, sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #4d5256; font-family: system-ui, sans-serif; }
   canvas { display: block; }
+  [hidden] { display: none !important; }
   #hud { position: fixed; top: 8px; left: 8px; color: #fff; background: rgba(20,24,28,.6);
          padding: 8px 12px; border-radius: 4px; font-size: 12px; line-height: 1.5; pointer-events: none; max-width: calc(100% - 40px); }
   #mini { position: fixed; right: 8px; bottom: 8px; border: 2px solid #e8e8e8; cursor: pointer; width: 192px; height: 192px; }
   #box { position: fixed; border: 1px solid #7fff7f; background: rgba(127,255,127,.1); pointer-events: none; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #eee; font-size: 16px; background: #4d5256; }
 </style>
 <div id="hud"><b>Flat Planet</b> — wraps on both axes<br>
 WASD / arrows / screen edge: pan &middot; wheel: zoom &middot; Q/E or middle-drag: rotate<br>
 Left-drag: select units &middot; right-click: move &middot; click minimap: jump</div>
 <canvas id="mini" width="192" height="192"></canvas>
 <div id="box" hidden></div>
+<div id="loading">Generating planet: eroding terrain, baking light…</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ================= World =================
-const N = 256;            // heightmap resolution (periodic)
+const N = 512;            // heightmap resolution (periodic)
 const SIZE = 1024;        // world size in units
 const CELL = SIZE / N;
 const mod = (a, n) => ((a % n) + n) % n;
@@ -32,36 +35,85 @@ function hash(x, y, p) {
 }
 function vnoise(x, y, p) {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10), v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
   const a = hash(xi, yi, p), b = hash(xi + 1, yi, p), c = hash(xi, yi + 1, p), d = hash(xi + 1, yi + 1, p);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
-// u,v in [0,1): periodic fbm
-function fbm(u, v, base, oct, ridged) {
+function fbm(u, v, base, oct, ridged) {       // u,v in [0,1) -> periodic
   let s = 0, amp = 1, norm = 0;
   for (let o = 0; o < oct; o++) {
     const p = base << o;
     let n = vnoise(u * p, v * p, p);
-    if (ridged) n = 1 - Math.abs(2 * n - 1), n *= n;
-    s += amp * n; norm += amp; amp *= 0.5;
+    if (ridged) { n = 1 - Math.abs(2 * n - 1); n *= n; }
+    s += amp * n; norm += amp; amp *= ridged ? 0.55 : 0.5;
   }
   return s / norm;
 }
 
-// ---- Heightmap ----
 const H = new Float32Array(N * N);
-const detail = new Float32Array(N * N);
-for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-  const u = i / N, v = j / N;
-  const cont = fbm(u, v, 3, 6, false);              // continents / seas
-  const ridge = fbm(u + .31, v + .17, 4, 5, true);  // mountain ridges
-  let h = (cont - 0.52) * 170;
-  const land = Math.max(0, cont - 0.54);
-  h += land * ridge * 700;                          // mountains only inland
-  H[j * N + i] = h;
-  detail[j * N + i] = fbm(u, v, 32, 3, false);
+const FLOW = new Float32Array(N * N);
+const at = (i, j) => mod(j, N) * N + mod(i, N);
+const hIdx = (i, j) => H[at(i, j)];
+
+function generate() {
+  // --- base shape: warped continents + ridged mountains + hills ---
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    let u = i / N, v = j / N;
+    const wu = fbm(u, v, 4, 4, false) - .5, wv = fbm(u + .5, v + .5, 4, 4, false) - .5;
+    u += wu * 0.12; v += wv * 0.12;
+    const cont = fbm(u, v, 2, 5, false);
+    const ridge = fbm(u + .23, v + .71, 4, 7, true);
+    const hills = fbm(u + .61, v + .13, 8, 6, false);
+    const land = Math.min(1, Math.max(0, (cont - 0.43) / 0.18));
+    let h = (cont - 0.46) * 220;
+    h += land * land * (ridge * 190 + hills * 25);
+    H[j * N + i] = h / 200;               // erosion runs on normalised heights
+  }
+  erode(160000);
+  for (let n = 0; n < N * N; n++) H[n] *= 200;
 }
-const hIdx = (i, j) => H[mod(j, N) * N + mod(i, N)];
+
+// ---- Particle hydraulic erosion (periodic grid) ----
+function erode(drops) {
+  const R = 2, brush = [];
+  let wsum = 0;
+  for (let y = -R; y <= R; y++) for (let x = -R; x <= R; x++) {
+    const d = Math.hypot(x, y); if (d <= R) { const w = R - d + 0.5; brush.push([x, y, w]); wsum += w; }
+  }
+  brush.forEach(b => b[2] /= wsum);
+  const inertia = .06, capF = 4, minCap = .01, erodeR = .3, depR = .3, evap = .015, grav = 4;
+  const sample = (x, y) => {
+    const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+    const a = H[at(i, j)], b = H[at(i + 1, j)], c = H[at(i, j + 1)], d = H[at(i + 1, j + 1)];
+    return [ (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy,
+             (b - a) * (1 - fy) + (d - c) * fy, (c - a) * (1 - fx) + (d - b) * fx, i, j, fx, fy ];
+  };
+  for (let n = 0; n < drops; n++) {
+    let x = Math.random() * N, y = Math.random() * N, dx = 0, dy = 0, speed = 1, water = 1, sed = 0;
+    for (let s = 0; s < 50; s++) {
+      const [h, gx, gy, i, j, fx, fy] = sample(x, y);
+      dx = dx * inertia - gx * (1 - inertia); dy = dy * inertia - gy * (1 - inertia);
+      const len = Math.hypot(dx, dy); if (len < 1e-9) break;
+      dx /= len; dy /= len; x += dx; y += dy;
+      const dh = sample(x, y)[0] - h;
+      FLOW[at(i, j)] += water;
+      const cap = Math.max(-dh * speed * water * capF, minCap);
+      if (sed > cap || dh > 0) {
+        const dep = dh > 0 ? Math.min(dh, sed) : (sed - cap) * depR;
+        sed -= dep;
+        H[at(i, j)] += dep * (1 - fx) * (1 - fy); H[at(i + 1, j)] += dep * fx * (1 - fy);
+        H[at(i, j + 1)] += dep * (1 - fx) * fy; H[at(i + 1, j + 1)] += dep * fx * fy;
+      } else {
+        const er = Math.min((cap - sed) * erodeR, -dh);
+        for (const [bx, by, w] of brush) H[at(i + bx, j + by)] -= er * w;
+        sed += er;
+      }
+      speed = Math.sqrt(Math.max(0, speed * speed + dh * grav));
+      water *= 1 - evap;
+    }
+  }
+}
+
 function heightAt(x, z) {
   const fx = mod(x, SIZE) / CELL, fz = mod(z, SIZE) / CELL;
   const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
@@ -73,174 +125,299 @@ function slopeAt(x, z) {
   const dz = heightAt(x, z + CELL) - heightAt(x, z - CELL);
   return Math.hypot(dx, dz) / (2 * CELL);
 }
-const passable = (x, z) => heightAt(x, z) > 0.6 && slopeAt(x, z) < 0.9;
+const passable = (x, z) => heightAt(x, z) > 0.8 && slopeAt(x, z) < 0.8;
 
 // ================= Three.js setup =================
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-const SKY = new THREE.Color(0x6a6f74);
-scene.background = SKY;
-scene.fog = new THREE.Fog(SKY, 500, 1150);
-const camera = new THREE.PerspectiveCamera(50, 1, 1, 3000);
+const HORIZON = new THREE.Color(0x8d9296).convertSRGBToLinear();
+const ZENITH = new THREE.Color(0x4a4f55).convertSRGBToLinear();
+scene.background = HORIZON;
+const camera = new THREE.PerspectiveCamera(45, 1, 1, 4000);
+const SUN = new THREE.Vector3(-0.62, 0.42, 0.36).normalize();
+const FOG_NEAR = 450, FOG_FAR = 1250;
 
-scene.add(new THREE.HemisphereLight(0xdfe8ee, 0x4a4030, 0.55));
-const sun = new THREE.DirectionalLight(0xfff2dd, 1.0);
-sun.position.set(-0.6, 0.8, 0.35).normalize();
-scene.add(sun);
-
-// ---- Terrain geometry (one tile, (N+1)^2 verts, seamless normals) ----
-const C = {
-  deepSand: new THREE.Color(0x8c7f5e), sand: new THREE.Color(0xcdbb8a),
-  grass: new THREE.Color(0x96a352), grass2: new THREE.Color(0x6f8a3c),
-  forest: new THREE.Color(0x3d5530), rock: new THREE.Color(0x5e5147),
-  rock2: new THREE.Color(0x3f3a36), snow: new THREE.Color(0xecefef),
-};
-const V = N + 1;
-const pos = new Float32Array(V * V * 3), nor = new Float32Array(V * V * 3), col = new Float32Array(V * V * 3);
-const tmp = new THREE.Color();
-for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
-  const k = (j * V + i) * 3, h = hIdx(i, j);
-  pos[k] = i * CELL; pos[k + 1] = h; pos[k + 2] = j * CELL;
-  const nx = hIdx(i - 1, j) - hIdx(i + 1, j), nz = hIdx(i, j - 1) - hIdx(i, j + 1), ny = 2 * CELL;
-  const l = Math.hypot(nx, ny, nz);
-  nor[k] = nx / l; nor[k + 1] = ny / l; nor[k + 2] = nz / l;
-  const up = ny / l, d = detail[mod(j, N) * N + mod(i, N)];
-  // colour by height, slope and a bit of noise
-  if (h < -2) tmp.copy(C.deepSand);
-  else if (h < 2.5) tmp.copy(C.sand);
-  else {
-    tmp.copy(C.grass).lerp(C.grass2, d);
-    if (d > 0.55 && h < 60) tmp.lerp(C.forest, Math.min(1, (d - 0.55) * 5));
-  }
-  if (up < 0.82 && h > 1) tmp.lerp(d > .5 ? C.rock : C.rock2, Math.min(1, (0.82 - up) * 5));
-  if (h > 100) tmp.lerp(C.snow, Math.min(1, (h - 100) / 20) * (up > 0.6 ? 1 : 0.3));
-  col[k] = tmp.r; col[k + 1] = tmp.g; col[k + 2] = tmp.b;
-}
-const idx = new Uint32Array(N * N * 6);
-for (let j = 0, p = 0; j < N; j++) for (let i = 0; i < N; i++) {
-  const a = j * V + i, b = a + 1, c = a + V, d = c + 1;
-  idx.set([a, c, b, b, c, d], p); p += 6;
-}
-const terrainGeo = new THREE.BufferGeometry();
-terrainGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-terrainGeo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-terrainGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-terrainGeo.setIndex(new THREE.BufferAttribute(idx, 1));
-terrainGeo.computeBoundingSphere();
-const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-
-// ---- Trees (instanced cones on forest-y land) ----
-const treeGeo = new THREE.ConeGeometry(2.2, 9, 5); treeGeo.translate(0, 4.5, 0);
-const treeMat = new THREE.MeshLambertMaterial({ color: 0x2b4024 });
-const treeSpots = [];
-for (let t = 0; t < 40000 && treeSpots.length < 5000; t++) {
-  const x = Math.random() * SIZE, z = Math.random() * SIZE, h = heightAt(x, z);
-  const d = detail[Math.floor(z / CELL) * N + Math.floor(x / CELL)];
-  if (h > 4 && h < 75 && d > 0.55 && slopeAt(x, z) < 0.8) treeSpots.push([x, h - 0.5, z, 0.6 + Math.random() * 0.8]);
-}
-const trees = new THREE.InstancedMesh(treeGeo, treeMat, treeSpots.length);
-const m4 = new THREE.Matrix4();
-treeSpots.forEach(([x, y, z, s], n) => trees.setMatrixAt(n, m4.makeScale(s, s * (0.8 + Math.random() * .5), s).setPosition(x, y, z)));
-trees.frustumCulled = false;
-
-// ---- 3x3 tiled copies so the world looks endless ----
-const tileMeshes = [];
-for (let tz = -1; tz <= 1; tz++) for (let tx = -1; tx <= 1; tx++) {
-  const g = new THREE.Group();
-  const mesh = new THREE.Mesh(terrainGeo, terrainMat);
-  g.add(mesh); g.add(tx === 0 && tz === 0 ? trees : trees.clone());
-  g.position.set(tx * SIZE, 0, tz * SIZE);
-  scene.add(g); tileMeshes.push(mesh);
-}
-
-// ---- Ocean shader ----
-const depthData = new Uint8Array(N * N * 4);
-for (let n = 0; n < N * N; n++) {
-  const d = Math.max(0, Math.min(1, -H[n] / 45));
-  depthData[n * 4] = d * 255; depthData[n * 4 + 3] = 255;
-}
-const depthTex = new THREE.DataTexture(depthData, N, N, THREE.RGBAFormat);
-depthTex.wrapS = depthTex.wrapT = THREE.RepeatWrapping;
-depthTex.magFilter = depthTex.minFilter = THREE.LinearFilter;
-depthTex.needsUpdate = true;
-
-const waterMat = new THREE.ShaderMaterial({
-  transparent: true,
-  uniforms: {
-    uTime: { value: 0 }, uDepth: { value: depthTex }, uSize: { value: SIZE },
-    uSun: { value: sun.position.clone() }, uSky: { value: new THREE.Color(0xc9d6df) },
-    uFog: { value: SKY }, uFogNear: { value: scene.fog.near }, uFogFar: { value: scene.fog.far },
-  },
-  vertexShader: `
-    varying vec3 vPos;
-    void main() {
-      vec4 w = modelMatrix * vec4(position, 1.0);
-      vPos = w.xyz;
-      gl_Position = projectionMatrix * viewMatrix * w;
+// gradient sky dome that follows the camera
+const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSun: { value: SUN } },
+  vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+  fragmentShader: `uniform vec3 uH, uZ, uSun; varying vec3 vD;
+    void main(){ vec3 c = mix(uH, uZ, smoothstep(0.0, 0.6, vD.y));
+      c += vec3(1.0,.9,.75) * pow(max(dot(vD,uSun),0.),64.) * .6;
+      gl_FragColor = vec4(c,1.);
+      #include <tonemapping_fragment>
+      #include <encodings_fragment>
     }`,
-  fragmentShader: `
-    uniform float uTime, uSize, uFogNear, uFogFar;
-    uniform sampler2D uDepth;
-    uniform vec3 uSun, uSky, uFog;
-    varying vec3 vPos;
-    vec2 wave(vec2 p, vec2 dir, float freq, float speed) {
-      float ph = dot(p, dir) * freq + uTime * speed;
-      return dir * cos(ph) * freq;
+}));
+scene.add(sky);
+
+// ---- shared GLSL noise ----
+const NOISE_GLSL = `
+  float h3(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+  float n3(vec3 x){ vec3 i = floor(x), f = fract(x); f = f*f*(3.0-2.0*f);
+    return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),f.x), mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),f.x),f.y),
+               mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),f.x), mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),f.x),f.y),f.z); }
+  float fbm3(vec3 p){ float s=0., a=.5; for(int i=0;i<5;i++){ s+=a*n3(p); p=p*2.03+17.1; a*=.5; } return s; }
+`;
+
+let tileGroups = [], trees, water, waterMat, units = [], miniBase, V;
+
+function buildWorld() {
+  generate();
+  V = N + 1;
+  // ---- bake normals, sun shadow, ambient occlusion, flow ----
+  const pos = new Float32Array(V * V * 3), nor = new Float32Array(V * V * 3), dat = new Float32Array(V * V * 3);
+  const sunH = Math.hypot(SUN.x, SUN.z), sdx = SUN.x / sunH, sdz = SUN.z / sunH, tanE = SUN.y / sunH;
+  let maxH = -1e9; for (let n = 0; n < N * N; n++) maxH = Math.max(maxH, H[n]);
+  const shadowG = new Float32Array(N * N), aoG = new Float32Array(N * N);
+  const dirs = []; for (let k = 0; k < 8; k++) dirs.push([Math.cos(k * Math.PI / 4), Math.sin(k * Math.PI / 4)]);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const h0 = H[j * N + i];
+    let s = 1;
+    for (let t = 1; t < 260; t++) {
+      const rayH = h0 + t * CELL * tanE;
+      if (rayH > maxH) break;
+      const th = hIdx(Math.round(i + sdx * t), Math.round(j + sdz * t));
+      s = Math.min(s, Math.max(0, (rayH - th) / (t * CELL * 0.06)));
+      if (s <= 0) break;
     }
-    void main() {
-      vec2 p = vPos.xz;
-      vec2 g = wave(p, normalize(vec2(1.0, 0.3)), 0.09, 1.3) * 0.5
-             + wave(p, normalize(vec2(-0.4, 1.0)), 0.13, 1.7) * 0.35
-             + wave(p, normalize(vec2(0.7, -0.8)), 0.27, 2.3) * 0.18
-             + wave(p, normalize(vec2(-0.9, -0.2)), 0.51, 3.1) * 0.08;
-      vec3 n = normalize(vec3(-g.x * 0.6, 1.0, -g.y * 0.6));
-      float depth = texture2D(uDepth, p / uSize).r;
-      vec3 shallow = vec3(0.45, 0.82, 0.85), deep = vec3(0.10, 0.36, 0.52);
-      vec3 base = mix(shallow, deep, smoothstep(0.0, 0.8, depth));
-      vec3 v = normalize(cameraPosition - vPos);
-      float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
-      vec3 c = mix(base, uSky, fres * 0.6);
-      vec3 h = normalize(uSun + v);
-      c += vec3(1.0, 0.95, 0.85) * pow(max(dot(n, h), 0.0), 180.0) * 1.2;
-      float foam = smoothstep(0.06, 0.0, depth) * (0.6 + 0.4 * sin(uTime * 2.0 + p.x * 0.3 + p.y * 0.2));
-      c = mix(c, vec3(0.95), foam * 0.6);
-      float alpha = mix(0.35, 0.93, smoothstep(0.0, 0.5, depth)) + foam * 0.3;
-      float dist = length(cameraPosition - vPos);
-      c = mix(c, uFog, smoothstep(uFogNear, uFogFar, dist));
-      gl_FragColor = vec4(c, clamp(alpha, 0.0, 1.0));
-    }`,
-});
-const water = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 3, SIZE * 3), waterMat);
-water.rotation.x = -Math.PI / 2;
-water.position.set(SIZE / 2, 0, SIZE / 2);
-scene.add(water);
+    shadowG[j * N + i] = s;
+    let occ = 0;
+    for (const [dx, dz] of dirs) {
+      let m = 0;
+      for (const r of [2, 5, 11, 24]) m = Math.max(m, (hIdx(Math.round(i + dx * r), Math.round(j + dz * r)) - h0) / (r * CELL));
+      occ += m / Math.sqrt(1 + m * m);
+    }
+    aoG[j * N + i] = Math.max(0, 1 - occ / 8 * 1.3);
+  }
+  let fmax = 0; for (let n = 0; n < N * N; n++) fmax = Math.max(fmax, FLOW[n]);
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const k = (j * V + i) * 3, h = hIdx(i, j), g = at(i, j);
+    pos[k] = i * CELL; pos[k + 1] = h; pos[k + 2] = j * CELL;
+    const nx = hIdx(i - 1, j) - hIdx(i + 1, j), nz = hIdx(i, j - 1) - hIdx(i, j + 1), ny = 2 * CELL;
+    const l = Math.hypot(nx, ny, nz);
+    nor[k] = nx / l; nor[k + 1] = ny / l; nor[k + 2] = nz / l;
+    dat[k] = shadowG[g]; dat[k + 1] = aoG[g]; dat[k + 2] = Math.min(1, Math.log(1 + FLOW[g]) / Math.log(1 + fmax) * 1.6);
+  }
+  const idx = new Uint32Array(N * N * 6);
+  for (let j = 0, p = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const a = j * V + i, b = a + 1, c = a + V, d = c + 1;
+    idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('aData', new THREE.BufferAttribute(dat, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeBoundingSphere();
+
+  // ---- terrain shader: per-pixel procedural materials ----
+  const terrainMat = new THREE.ShaderMaterial({
+    extensions: { derivatives: true },
+    uniforms: { uSun: { value: SUN }, uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR } },
+    vertexShader: `
+      attribute vec3 aData; varying vec3 vPos, vN, vData;
+      void main(){ vec4 w = modelMatrix * vec4(position,1.); vPos = w.xyz; vN = normal; vData = aData;
+        gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: NOISE_GLSL + `
+      uniform vec3 uSun, uH, uZ; uniform float uNear, uFar;
+      varying vec3 vPos, vN, vData;
+      vec3 lin(vec3 c){ return pow(c, vec3(2.2)); }
+      void main(){
+        vec3 n = normalize(vN);
+        float slope = 1.0 - n.y, h = vPos.y;
+        vec3 wp = vPos;
+        float big = fbm3(wp * 0.02), mid = fbm3(wp * 0.11), fine = n3(wp * 0.9);
+        float strata = n3(vec3(wp.x * .08, wp.y * 1.1 + mid * 3.0, wp.z * .08));
+
+        // materials
+        vec3 grass = mix(lin(vec3(.62,.64,.30)), lin(vec3(.40,.50,.18)), smoothstep(.35,.65,big));
+        grass = mix(grass, lin(vec3(.70,.66,.42)), smoothstep(.55,.8,mid) * .5);       // dry patches
+        grass *= .8 + .4 * fine;
+        vec3 forest = lin(vec3(.20,.27,.15)) * (.75 + .5 * fine);
+        vec3 rock = mix(lin(vec3(.30,.26,.23)), lin(vec3(.50,.42,.33)), strata);
+        rock = mix(rock, lin(vec3(.16,.17,.16)), smoothstep(.5,.8,big) * .6);         // dark mossy rock
+        rock *= .7 + .5 * fine;
+        vec3 sand = lin(vec3(.78,.70,.52)) * (.85 + .3 * fine);
+        vec3 wet = lin(vec3(.45,.40,.30));
+        vec3 snow = lin(vec3(.92,.94,.96));
+
+        vec3 col = grass;
+        col = mix(col, forest, smoothstep(.52,.62, mid + big*.2) * (1.0 - smoothstep(60.,90.,h)));
+        col = mix(col, wet, smoothstep(.35,.8, vData.z) * .7);                          // river beds / gullies
+        float sandW = 1.0 - smoothstep(1.0, 4.0, h + (mid - .5) * 4.0);
+        col = mix(col, sand, sandW);
+        col = mix(col, lin(vec3(.52,.47,.34)), 1.0 - smoothstep(-6.0, -1.0, h));          // under water
+        float rockW = smoothstep(.22, .40, slope + (mid - .5) * .25);
+        col = mix(col, rock, rockW);
+        float snowW = smoothstep(150., 175., h + big * 25.) * (1.0 - smoothstep(.35,.6,slope));
+        col = mix(col, snow, snowW);
+
+        // bump mapping from procedural height
+        float bump = (mid * 1.2 + fine * .35 + strata * rockW * 1.4) * (0.6 + rockW * 1.2);
+        vec3 dpx = dFdx(vPos), dpy = dFdy(vPos);
+        float dbx = dFdx(bump), dby = dFdy(bump);
+        vec3 r1 = cross(dpy, n), r2 = cross(n, dpx);
+        float det = dot(dpx, r1);
+        vec3 grad = sign(det) * (dbx * r1 + dby * r2);
+        vec3 bn = normalize(abs(det) * n - grad * 1.2);
+
+        float sh = vData.x, ao = vData.y;
+        float diff = max(dot(bn, uSun), 0.0) * sh;
+        vec3 amb = mix(lin(vec3(.35,.30,.25)), uZ * 2.2, bn.y * .5 + .5) * ao;
+        vec3 c = col * (vec3(1.0,.93,.82) * diff * 2.0 + amb * 0.75);
+        float d = length(cameraPosition - vPos);
+        c = mix(c, uH, smoothstep(uNear, uFar, d));
+        gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
+        #include <encodings_fragment>
+      }`,
+  });
+
+  // ---- trees: 3 stacked cones merged into one geometry, instanced ----
+  const parts = [[3.2, 6, 3.5], [2.5, 5, 6.5], [1.6, 4, 9.2]].map(([r, hh, y]) => {
+    const g = new THREE.ConeGeometry(r, hh, 6).toNonIndexed(); g.translate(0, y, 0); return g;
+  });
+  const trunk = new THREE.CylinderGeometry(.35, .45, 3, 5).toNonIndexed(); trunk.translate(0, 1.5, 0);
+  parts.push(trunk);
+  const tp = [], tn = [];
+  parts.forEach(g => { tp.push(...g.attributes.position.array); tn.push(...g.attributes.normal.array); });
+  const treeGeo = new THREE.BufferGeometry();
+  treeGeo.setAttribute('position', new THREE.Float32BufferAttribute(tp, 3));
+  treeGeo.setAttribute('normal', new THREE.Float32BufferAttribute(tn, 3));
+  const treeMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const spots = [];
+  // cheap CPU copy of the shader's forest mask
+  for (let t = 0; t < 400000 && spots.length < 14000; t++) {
+    const x = Math.random() * SIZE, z = Math.random() * SIZE, h = heightAt(x, z);
+    const u = x / SIZE, v = z / SIZE;
+    const dens = fbm(u, v, 16, 3, false);
+    if (h > 4 && h < 95 && slopeAt(x, z) < 0.55 && dens > 0.5 + Math.random() * 0.12) spots.push([x, h - .3, z]);
+  }
+  trees = new THREE.InstancedMesh(treeGeo, treeMat, spots.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p3 = new THREE.Vector3(), tc = new THREE.Color();
+  spots.forEach(([x, y, z], n) => {
+    const s = 0.55 + Math.random() * 0.7;
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6.28);
+    m4.compose(p3.set(x, y, z), q, sc.set(s, s * (0.85 + Math.random() * .5), s));
+    trees.setMatrixAt(n, m4);
+    const g = at(Math.floor(x / CELL), Math.floor(z / CELL));
+    const light = 0.35 + 0.65 * shadowG[g];
+    tc.setRGB(0.025 + Math.random() * .02, 0.05 + Math.random() * .03, 0.022).multiplyScalar(light);
+    trees.setColorAt(n, tc);
+  });
+  trees.frustumCulled = false;
+  scene.add(new THREE.HemisphereLight(0xcfd8e0, 0x4a4030, 0.5));
+  const sunL = new THREE.DirectionalLight(0xfff0dd, 1.1); sunL.position.copy(SUN); scene.add(sunL);
+
+  // ---- 3x3 tiled copies so the world is endless ----
+  for (let tz = -1; tz <= 1; tz++) for (let tx = -1; tx <= 1; tx++) {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(geo, terrainMat));
+    const tr = tx === 0 && tz === 0 ? trees : trees.clone(); tr.frustumCulled = false;
+    g.add(tr); g.userData.trees = tr;
+    g.position.set(tx * SIZE, 0, tz * SIZE);
+    scene.add(g); tileGroups.push(g);
+  }
+
+  // ---- ocean ----
+  const depthData = new Uint8Array(N * N * 4);
+  for (let n = 0; n < N * N; n++) {
+    depthData[n * 4] = Math.max(0, Math.min(1, -H[n] / 45)) * 255;
+    depthData[n * 4 + 1] = Math.max(0, Math.min(1, (H[n] + 8) / 16)) * 255;   // near-shore ramp for foam
+    depthData[n * 4 + 3] = 255;
+  }
+  const depthTex = new THREE.DataTexture(depthData, N, N, THREE.RGBAFormat);
+  depthTex.wrapS = depthTex.wrapT = THREE.RepeatWrapping;
+  depthTex.magFilter = depthTex.minFilter = THREE.LinearFilter;
+  depthTex.needsUpdate = true;
+  waterMat = new THREE.ShaderMaterial({
+    transparent: true, extensions: { derivatives: true },
+    uniforms: { uTime: { value: 0 }, uDepth: { value: depthTex }, uSize: { value: SIZE }, uSun: { value: SUN },
+                uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR } },
+    vertexShader: `varying vec3 vPos; void main(){ vec4 w = modelMatrix * vec4(position,1.); vPos = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: NOISE_GLSL + `
+      uniform float uTime, uSize, uNear, uFar; uniform sampler2D uDepth; uniform vec3 uSun, uH, uZ;
+      varying vec3 vPos;
+      vec3 lin(vec3 c){ return pow(c, vec3(2.2)); }
+      float wh(vec2 p){ float t = uTime;
+        return n3(vec3(p * .08, t * .25)) * .6 + n3(vec3(p * .23 + 7., t * .45)) * .3 + n3(vec3(p * .7 + 3., t * .8)) * .12; }
+      void main(){
+        vec2 p = vPos.xz;
+        float e = .4, h0 = wh(p);
+        vec3 n = normalize(vec3((h0 - wh(p + vec2(e,0.))) * 2.2, e, (h0 - wh(p + vec2(0.,e))) * 2.2));
+        vec4 dt = texture2D(uDepth, p / uSize);
+        float depth = dt.r, shore = dt.g;
+        vec3 shallow = lin(vec3(.50,.80,.82)), deep = lin(vec3(.10,.32,.45));
+        vec3 base = mix(shallow, deep, smoothstep(0.0, 0.7, depth));
+        vec3 v = normalize(cameraPosition - vPos);
+        vec3 r = reflect(-v, n);
+        vec3 skyc = mix(uH, uZ, smoothstep(0.0, .6, r.y)) * 1.5;
+        float fres = .04 + .96 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
+        vec3 c = mix(base * (.55 + .45 * max(dot(n, uSun), 0.)), skyc, fres);
+        c += vec3(1.,.93,.8) * pow(max(dot(r, uSun), 0.0), 250.0) * 6.0;
+        float band = sin(shore * 30.0 - uTime * 1.6 + n3(vec3(p*.1, 0.)) * 6.0) * .5 + .5;
+        float foam = smoothstep(.35, .5, shore) * (.35 + .65 * band) * smoothstep(.8,.3, depth + (1.-shore));
+        foam *= smoothstep(.4, .7, n3(vec3(p * .5, uTime * .5)) + .3);
+        c = mix(c, vec3(.9), clamp(foam, 0., 1.));
+        float alpha = mix(.45, .96, smoothstep(0.0, .35, depth)) ;
+        alpha = max(alpha, foam);
+        c = mix(c, uH, smoothstep(uNear, uFar, length(cameraPosition - vPos)));
+        gl_FragColor = vec4(c, alpha);
+        #include <tonemapping_fragment>
+        #include <encodings_fragment>
+      }`,
+  });
+  water = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 3, SIZE * 3), waterMat);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(SIZE / 2, 0, SIZE / 2);
+  scene.add(water);
+
+  // ---- minimap image ----
+  miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = N;
+  const mg = miniBase.getContext('2d'), img = mg.createImageData(N, N);
+  for (let n = 0; n < N * N; n++) {
+    const h = H[n], j = n / N | 0, i = n % N, k = (j * V + i) * 3, up = nor[k + 1];
+    let c;
+    if (h < 0) { const d = Math.min(1, -h / 45); c = [115 - 90 * d, 200 - 120 * d, 205 - 90 * d]; }
+    else if (h < 3) c = [200, 180, 135];
+    else if (up < .78) c = [105, 92, 80];
+    else if (h > 160) c = [235, 238, 240];
+    else c = [130, 145, 70];
+    const s = h < 0 ? 1 : 0.45 + 0.55 * shadowG[n] * aoG[n];
+    img.data.set([c[0] * s, c[1] * s, c[2] * s, 255], n * 4);
+  }
+  mg.putImageData(img, 0, 0);
+}
 
 // ================= Units =================
-const unitGeo = new THREE.CylinderGeometry(2.4, 3, 6, 8); unitGeo.translate(0, 3, 0);
-const unitMat = new THREE.MeshLambertMaterial({ color: 0xd83a2e });
-const ringGeo = new THREE.RingGeometry(4.5, 5.5, 24); ringGeo.rotateX(-Math.PI / 2);
+const unitGeo = new THREE.CylinderGeometry(2.2, 2.8, 5, 8); unitGeo.translate(0, 2.5, 0);
+const unitMat = new THREE.MeshLambertMaterial({ color: 0xe03a2e, emissive: 0x401010 });
+const ringGeo = new THREE.RingGeometry(4.2, 5.2, 24); ringGeo.rotateX(-Math.PI / 2);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x7fff7f, depthTest: false, transparent: true });
-const units = [];
 function spawnUnits(n) {
-  // cluster around a random land spot
-  let cx, cz;
-  do { cx = Math.random() * SIZE; cz = Math.random() * SIZE; } while (!(passable(cx, cz) && heightAt(cx, cz) < 30));
+  let cx, cz, tries = 0;
+  do { cx = Math.random() * SIZE; cz = Math.random() * SIZE; }
+  while (!(passable(cx, cz) && heightAt(cx, cz) < 25) && ++tries < 5000);
   for (let k = 0; k < n; k++) {
-    let x, z, tries = 0;
-    do { x = mod(cx + (Math.random() - .5) * 60, SIZE); z = mod(cz + (Math.random() - .5) * 60, SIZE); } while (!passable(x, z) && ++tries < 50);
+    let x, z, t = 0;
+    do { x = mod(cx + (Math.random() - .5) * 50, SIZE); z = mod(cz + (Math.random() - .5) * 50, SIZE); } while (!passable(x, z) && ++t < 50);
     const mesh = new THREE.Mesh(unitGeo, unitMat);
     const ring = new THREE.Mesh(ringGeo, ringMat); ring.visible = false; ring.renderOrder = 2; mesh.add(ring);
     scene.add(mesh);
-    units.push({ x, z, tx: null, tz: null, sel: false, speed: 40, mesh, ring });
+    units.push({ x, z, tx: null, tz: null, sel: false, speed: 35, mesh, ring });
   }
   return [cx, cz];
 }
-const [startX, startZ] = spawnUnits(12);
 
 // ================= Camera / input =================
-const cam = { x: startX, z: startZ, dist: 260, yaw: 0.6, pitch: 0.9 };
+const cam = { x: 0, z: 0, dist: 300, yaw: 0.7, pitch: 0.62 };
 const keys = {}; let mouse = { x: -1, y: -1 }, drag = null, rotating = null;
 const box = document.getElementById('box');
 function resize() {
@@ -252,24 +429,29 @@ addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 const el = renderer.domElement;
 el.addEventListener('contextmenu', e => e.preventDefault());
-el.addEventListener('wheel', e => { e.preventDefault(); cam.dist = Math.max(60, Math.min(700, cam.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
+el.addEventListener('wheel', e => { e.preventDefault(); cam.dist = Math.max(50, Math.min(650, cam.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
 el.addEventListener('mousemove', e => {
   mouse = { x: e.clientX, y: e.clientY };
   if (drag) { drag.x2 = e.clientX; drag.y2 = e.clientY; showBox(); }
   if (rotating) {
     cam.yaw -= (e.clientX - rotating.x) * 0.005;
-    cam.pitch = Math.max(0.3, Math.min(1.45, cam.pitch + (e.clientY - rotating.y) * 0.005));
+    cam.pitch = Math.max(0.25, Math.min(1.45, cam.pitch + (e.clientY - rotating.y) * 0.005));
     rotating = { x: e.clientX, y: e.clientY };
   }
 });
 el.addEventListener('mouseleave', () => mouse = { x: -1, y: -1 });
 
+// ray-march the heightfield instead of ray-casting millions of triangles
 const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
 function pickGround(sx, sy) {
   ndc.set(sx / innerWidth * 2 - 1, -sy / innerHeight * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
-  const hit = raycaster.intersectObjects(tileMeshes)[0];
-  return hit ? { x: mod(hit.point.x, SIZE), z: mod(hit.point.z, SIZE) } : null;
+  const o = raycaster.ray.origin, d = raycaster.ray.direction;
+  for (let t = 0; t < 2500; t += 1) {
+    const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+    if (y < Math.max(0, heightAt(x, z))) return { x: mod(x, SIZE), z: mod(z, SIZE) };
+  }
+  return null;
 }
 el.addEventListener('mousedown', e => {
   if (e.button === 0) drag = { x1: e.clientX, y1: e.clientY, x2: e.clientX, y2: e.clientY };
@@ -278,7 +460,7 @@ el.addEventListener('mousedown', e => {
     const t = pickGround(e.clientX, e.clientY);
     if (!t) return;
     units.filter(u => u.sel).forEach((u, i) => {
-      const a = i * 2.4, r = 9 * Math.sqrt(i);
+      const a = i * 2.4, r = 8 * Math.sqrt(i);
       u.tx = mod(t.x + Math.cos(a) * r, SIZE); u.tz = mod(t.z + Math.sin(a) * r, SIZE);
     });
   }
@@ -306,18 +488,6 @@ addEventListener('mouseup', e => {
 
 // ================= Minimap =================
 const mini = document.getElementById('mini'), mctx = mini.getContext('2d');
-const miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = N;
-{
-  const g = miniBase.getContext('2d'), img = g.createImageData(N, N);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const k = (j * V + i) * 3, h = H[j * N + i], o = (j * N + i) * 4;
-    let r = col[k], gg = col[k + 1], b = col[k + 2];
-    if (h < 0) { const d = Math.min(1, -h / 45); r = .45 - .35 * d; gg = .8 - .45 * d; b = .85 - .33 * d; }
-    const shade = 0.75 + 0.35 * nor[k] - 0.35 * nor[k + 2] * 0; // simple relief
-    img.data[o] = r * 255 * shade; img.data[o + 1] = gg * 255 * shade; img.data[o + 2] = b * 255 * shade; img.data[o + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-}
 mini.addEventListener('mousedown', e => {
   const r = mini.getBoundingClientRect();
   cam.x = (e.clientX - r.left) / r.width * SIZE; cam.z = (e.clientY - r.top) / r.height * SIZE;
@@ -327,7 +497,6 @@ function drawMini() {
   mctx.drawImage(miniBase, 0, 0, mini.width, mini.height);
   mctx.fillStyle = '#ff4a3a';
   for (const u of units) mctx.fillRect(u.x * s - 2, u.z * s - 2, 4, 4);
-  // camera marker, drawn at wrapped offsets
   const r = cam.dist * 0.6 * s;
   mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.5;
   for (const dx of [-mini.width, 0, mini.width]) for (const dz of [-mini.height, 0, mini.height]) {
@@ -337,7 +506,7 @@ function drawMini() {
 
 // ================= Loop =================
 function update(dt) {
-  const pan = cam.dist * 1.4 * dt, edge = 16;
+  const pan = cam.dist * 1.3 * dt, edge = 16;
   let mx = 0, mz = 0;
   if (keys.a || keys.arrowleft || (mouse.x >= 0 && mouse.x < edge)) mx -= 1;
   if (keys.d || keys.arrowright || (mouse.x >= 0 && mouse.x > innerWidth - edge)) mx += 1;
@@ -356,27 +525,43 @@ function update(dt) {
       if (d <= step) { u.x = u.tx; u.z = u.tz; u.tx = null; }
       else {
         const nx = mod(u.x + dx / d * step, SIZE), nz = mod(u.z + dz / d * step, SIZE);
-        if (passable(nx, nz)) { u.x = nx; u.z = nz; u.mesh.rotation.y = Math.atan2(dx, dz); }
+        if (passable(nx, nz)) { u.x = nx; u.z = nz; }
         else u.tx = null; // blocked by sea / cliff (no pathfinding yet)
       }
     }
-    // draw each unit at the copy nearest the camera
     u.mesh.position.set(cam.x + wrapDelta(u.x - cam.x, SIZE), heightAt(u.x, u.z), cam.z + wrapDelta(u.z - cam.z, SIZE));
+  }
+  // only draw tile copies near the camera (terrain + trees are heavy)
+  for (const g of tileGroups) {
+    const cx = Math.max(g.position.x, Math.min(cam.x, g.position.x + SIZE));
+    const cz = Math.max(g.position.z, Math.min(cam.z, g.position.z + SIZE));
+    const d = Math.hypot(cx - cam.x, cz - cam.z);
+    g.visible = d < FOG_FAR;
+    g.userData.trees.visible = d < 700;
   }
 }
 function placeCamera() {
   const gy = Math.max(0, heightAt(cam.x, cam.z));
   const cp = Math.cos(cam.pitch);
   camera.position.set(cam.x + Math.sin(cam.yaw) * cp * cam.dist, gy + Math.sin(cam.pitch) * cam.dist, cam.z + Math.cos(cam.yaw) * cp * cam.dist);
+  const minY = heightAt(camera.position.x, camera.position.z) + 15;
+  if (camera.position.y < minY) camera.position.y = minY;
   camera.lookAt(cam.x, gy, cam.z);
+  sky.position.copy(camera.position);
 }
-let last = performance.now();
-renderer.setAnimationLoop(now => {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt); placeCamera();
-  waterMat.uniforms.uTime.value = now / 1000;
-  renderer.render(scene, camera);
-  drawMini();
-});
+
+setTimeout(() => {
+  buildWorld();
+  [cam.x, cam.z] = spawnUnits(12);
+  document.getElementById('loading').hidden = true;
+  let last = performance.now();
+  renderer.setAnimationLoop(now => {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    update(dt); placeCamera();
+    waterMat.uniforms.uTime.value = now / 1000;
+    renderer.render(scene, camera);
+    drawMini();
+  });
+}, 30);
 </script>
 </body></html>
