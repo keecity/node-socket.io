@@ -127,13 +127,17 @@ export function createPlanetTiles(deps, {scene, radius, res=48, maxLevel=9, spli
 
 // Worker body (appended to the terrain-gen + cube-sphere sources): builds one tile per message.
 export const PLANET_WORKER=`
-let T=null, R=100, RES=48, RING=[];
+let T=null, P0=null, TC=new Map(), R=100, RES=48, RING=[];
 const o3=[0,0,0], c3=[0,0,0];
 self.onmessage=e=>{ const m=e.data;
-  if(m.type==='params'){ T=createTerrain(m.params); R=m.R; RES=m.res; RING=m.ring; return; }
+  if(m.type==='params'){ P0=m.params; TC.clear(); R=m.R; RES=m.res; RING=m.ring; return; }
   const {f,L,x,y}=m, n=1<<L, FACE=Math.PI/2*R;
   const pointAt=(u,v,o)=>{ faceDir(f,-1+2*(x+u)/n,-1+2*(y+v)/n,o3); o.x=o3[0]*R; o.y=o3[1]*R; o.z=o3[2]*R; o.ux=o3[0]; o.uy=o3[1]; o.uz=o3[2]; return o; };
-  const r=buildTile(T,{res:RES,pointAt,cellSize:FACE/n/RES});
+  // band-limit per level: only noise the grid can resolve (finest wavelength ≥ 4 cells) — no aliasing spikes
+  const cell=FACE/n/RES, fmax=1/(4*cell), P=Object.assign({},DEFAULT_TERRAIN,P0);
+  const oct=Math.max(2,Math.min(P.octaves,Math.floor(Math.log2(fmax/P.ridgeScale))+1)), goct=Math.max(0,Math.min(P.gullyOctaves,Math.floor(Math.log2(fmax/(P.gullyScale*2)))+1));
+  const tk=oct+'/'+goct; T=TC.get(tk); if(!T){ T=createTerrain(Object.assign({},P0,{octaves:oct,normOctaves:P.octaves,gullyOctaves:goct,gullyStrength:goct?P.gullyStrength:0})); TC.set(tk,T); }
+  const r=buildTile(T,{res:RES,pointAt,cellSize:cell});
   faceDir(f,-1+2*(x+0.5)/n,-1+2*(y+0.5)/n,c3); const cx=c3[0]*R, cy=c3[1]*R, cz=c3[2]*R;
   const V=(RES+1)*(RES+1), M=RING.length, pos=new Float32Array((V+M)*3), nor=new Float32Array((V+M)*3), ter=new Float32Array((V+M)*4);
   let rad=0;

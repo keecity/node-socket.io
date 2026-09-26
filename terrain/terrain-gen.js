@@ -108,6 +108,7 @@ export function createTerrain(opts={}){
       const n6=2*(RM[6]*m0+RM[7]*m3+RM[8]*m6), n7=2*(RM[6]*m1+RM[7]*m4+RM[8]*m7), n8=2*(RM[6]*m2+RM[7]*m5+RM[8]*m8);
       m0=n0;m1=n1;m2=n2;m3=n3;m4=n4;m5=n5;m6=n6;m7=n7;m8=n8; a*=0.5;
     }
+    norm=2*(1-Math.pow(0.5,P.normOctaves||P.octaves));   // band-limited LOD keeps the full-detail scale, so levels agree
     out[0]=sum/norm; out[1]=gx/norm; out[2]=gy/norm; out[3]=gz/norm; return out;
   }
 
