@@ -14,6 +14,8 @@
 (function () {
 'use strict';
 const BATTLE_S = 12;
+// robots are drawn RS times the demo's size; their motion, reach and hit volumes scale with them
+const RS = 1.5;
 const S = BATTLE_S, W = SIZE / S;
 const wd = d => d - W * Math.round(d / W);                          // shortest wrapped delta
 const wm = x => ((x % W) + W) % W;
@@ -483,7 +485,7 @@ const GUN_S = 0.34;
 const robots = [], helis = [];
 const _tmp = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3(), _fp = new THREE.Vector3();
 function makeRobot(team, role, x, z) {
-  const root = new THREE.Group(); const model = THREE.SkeletonUtils.clone(gltf.scene); root.add(model); battleRoot.add(root);
+  const root = new THREE.Group(); const model = THREE.SkeletonUtils.clone(gltf.scene); root.add(model); root.scale.setScalar(RS); battleRoot.add(root);
   const mats = new Map();
   model.traverse(o => { if (o.isMesh) { o.frustumCulled = false;
     const src = Array.isArray(o.material) ? o.material : [o.material]; const cl = src.map(m => { if (!mats.has(m)) mats.set(m, m.clone()); return mats.get(m); }); o.material = Array.isArray(o.material) ? cl : cl[0]; } });
@@ -515,7 +517,7 @@ function makeRobot(team, role, x, z) {
   f.id = robots.length; robots.push(f);
   if (f.gun) makeGunFX(f);
   setState(f, 'idle', idleClip(f), 0.01); f.act.time = Math.random();
-  makeBars(f, 0.95, 0.9);
+  makeBars(f, 0.95 * RS, 0.9);
   return f;
 }
 const LOOPS = new Set(['Battle_Idle', 'Boost_Forward', 'Boost_Back', 'Boost_Strafe_L', 'Boost_Strafe_R', 'Air_Hover', 'Head_Vulcan_Fire', 'Air_Vulcan_Fire', 'Saber_Idle', 'Walk_Forward', 'Walk_Back', 'Walk_Strafe_L', 'Walk_Strafe_R', 'Run_Forward', 'Gun_Idle']);
@@ -530,7 +532,7 @@ function setState(f, s, clip, fade) { if (f.act) f.act.timeScale = 1; f.lodge = 
 const idleClip = f => f.saberOut ? 'Saber_Idle' : (f.gun ? 'Gun_Idle' : 'Battle_Idle');
 function toIdle(f, fade = 0.14, think = 0.05) { setState(f, 'idle', idleClip(f), fade); f.thinkT = think; }
 const groundY = f => Math.max(Hd(f.pos.x, f.pos.z), -3 / S);
-const chestPos = (f, out) => out.set(f.pos.x, groundY(f) + f.y + 0.56, f.pos.z);
+const chestPos = (f, out) => out.set(f.pos.x, groundY(f) + (f.y + 0.56) * RS, f.pos.z);
 const tgtPos = (t, out) => t.kind === 'robot' ? chestPos(t, out) : out.copy(t.pos);
 const alive = t => t && (t.kind === 'robot' ? t.state !== 'ko' : t.alive);
 const enemiesOf = team => robots.filter(r => r.team !== team && r.state !== 'ko');
@@ -600,8 +602,8 @@ function fireBullet(f) {
 }
 // what does a projectile at pos (team) hit? returns {t: robot|heli} or null
 function projHits(pos, team, rad) {
-  for (const r of robots) { if (r.team === team || r.state === 'ko') continue; chestPos(r, tmpC); const tb = groundY(r) + r.y;
-    if (wdist3(pos, tmpC) < 0.17 + rad || (Math.abs(wd(pos.x - r.pos.x)) < 0.09 + rad && Math.abs(wd(pos.z - r.pos.z)) < 0.09 + rad && pos.y > tb + 0.05 && pos.y < tb + 0.8)) return r; }
+  for (const r of robots) { if (r.team === team || r.state === 'ko') continue; chestPos(r, tmpC); const tb = groundY(r) + r.y * RS;
+    if (wdist3(pos, tmpC) < 0.17 * RS + rad || (Math.abs(wd(pos.x - r.pos.x)) < 0.09 * RS + rad && Math.abs(wd(pos.z - r.pos.z)) < 0.09 * RS + rad && pos.y > tb + 0.05 * RS && pos.y < tb + 0.8 * RS)) return r; }
   for (const h of helis) if (h.team !== team && h.alive && wdist3(pos, h.pos) < 0.22 + rad) return h;
   return null;
 }
@@ -795,6 +797,7 @@ const STEER = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6, 2.2, -2.2];
 // move by (vx, vz) * dt; if the way is blocked, steer to the nearest open direction instead of stopping
 function tryMove(f, dt) {
   const vx = f.vel.x, vz = f.vel.z; if (vx * vx + vz * vz < 1e-8) return;
+  dt *= RS;                                                         // velocities are in robot units
   if (f.y > 0.25 || !passableD(f.pos.x, f.pos.z)) { f.pos.x = wm(f.pos.x + vx * dt); f.pos.z = wm(f.pos.z + vz * dt); return; }   // already in deep water: always let it wade out
   for (const a of STEER) {
     const c = Math.cos(a), s2 = Math.sin(a), rx = vx * c - vz * s2, rz = vx * s2 + vz * c;
@@ -843,7 +846,7 @@ function jump(f, plan) { f.cool.jump = 5; f.boost -= 24; f.airPlan = plan; f.str
 function quickstep(f) { f.boost -= 16; const left = chance(0.5); setState(f, 'dodge', left ? 'QuickStep_L' : 'QuickStep_R', 0.05);
   f.vel.set(Math.cos(f.yaw), 0, -Math.sin(f.yaw)).multiplyScalar(2.6 * (left ? 1 : -1)); }
 // ---- thruster flight for long trips: faster than walking, burns the boost meter
-const FLY_SPEED = 2.8, FLY_ALT = 1.0, FLY_MIN_DIST = 4, FLY_BURN = 11;
+const FLY_SPEED = 2.0, FLY_ALT = 1.0, FLY_MIN_DIST = 4, FLY_BURN = 11;
 function takeOff(f, x, z) { f.flyGoal = { x, z }; f.flyPhase = 'up'; f.path = null; setState(f, 'fly', 'Boost_Jump', 0.1);
   FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 12, { size: [0.08, 0.45], vel: 0.9, up: 0.06 }); }
 const canFly = (f, d) => d > FLY_MIN_DIST && f.boost > 40 && f.y < 0.02;
@@ -859,10 +862,10 @@ function lostAtSea(f) {
 }
 const wrecks = [];
 function landShock(f, rad) { const p = new THREE.Vector3(f.pos.x, groundY(f), f.pos.z); FX.dust(p, 18, { size: [0.08, 0.5], life: [0.7, 1.5], vel: 0.9, up: 0.1, a: 0.5 });
-  impact(p.clone().setY(p.y + 0.05), rad, null, 1.1, 'land'); addShake(0.25, p); scorchMarks.add(p.x, p.z, f.yaw, 0.3, 0.3); }
+  impact(p.clone().setY(p.y + 0.05 * RS), rad * RS, null, 1.1, 'land'); addShake(0.25, p); scorchMarks.add(p.x, p.z, f.yaw, 0.3, 0.3); }
 function react(f) {
   const r = f.pending; f.pending = null; if (!r || (r.from && r.from.state === 'ko')) return;
-  const o = r.from, d = o ? wdist2(f.pos.x, f.pos.z, o.pos.x, o.pos.z) : 3, P = f.p;
+  const o = r.from, d = o ? wdist2(f.pos.x, f.pos.z, o.pos.x, o.pos.z) / RS : 3, P = f.p;
   if (!o && r.type !== 'fire') return;                           // incoming missiles (no robot attached): dodge only
   if (!['idle', 'walk', 'fire', 'burst', 'boostStrafe', 'boostBack'].includes(f.state) || f.y > 0.05) return;
   if (f.order && f.order.type === 'move') return;                 // obeying a move order: don't get distracted
@@ -901,7 +904,7 @@ function think(f) {
     if (f.saberOut && chance(0.3)) { setState(f, 'sheathe', 'Saber_Sheathe'); return; }
     return toIdle(f, 0.2, rand(0.4, 0.9));
   }
-  const op = tgtFrame(f, o), d = Math.hypot(op.x - f.pos.x, op.z - f.pos.z), P = f.p, B = f.boost, cd = k => !(f.cool[k] > 0);
+  const op = tgtFrame(f, o), d = Math.hypot(op.x - f.pos.x, op.z - f.pos.z) / RS, P = f.p, B = f.boost, cd = k => !(f.cool[k] > 0);
   const opts = []; const add = (name, s, fn) => opts.push({ name, s, fn });
   if (o.kind === 'heli') {                                        // gunship overhead: head vulcans / rifle, keep it in range
     add('shootHeli', d < 5 && cd('fire') ? 1.6 : 0, () => { f.cool.fire = rand(1.6, 3); f.fireT = rand(0.8, 1.4); setState(f, 'fire', 'Head_Vulcan_Fire'); });
@@ -968,7 +971,7 @@ function skidTrail(f, sp) {
 function footfalls(f) {
   for (const s of ['L', 'R']) { const node = s === 'L' ? f.nodes.footL : f.nodes.footR; toDemo(node, _fp); near(_fp, f.pos, _fp); const h = _fp.y - Hd(_fp.x, _fp.z);
     const prev = f.footY[s]; f.footY[s] = h;
-    if (f.y < 0.02 && prev > 0.158 && h <= 0.155 && ['walk', 'turn', 'idle', 'land', 'attack', 'hit'].includes(f.state)) {
+    if (f.y < 0.02 && prev > 0.158 * RS && h <= 0.155 * RS && ['walk', 'turn', 'idle', 'land', 'attack', 'hit'].includes(f.state)) {
       footprints.add(_fp.x, _fp.z, f.yaw, 0.07, 0.13); FX.dust(_fp, 4, { size: [0.04, 0.2], life: [0.5, 1.0], vel: 0.3, up: 0.05, a: 0.45 });
       addShake(f.walkMode === 'run' ? 0.05 : 0.03, _fp); impact(new THREE.Vector3(_fp.x, Hd(_fp.x, _fp.z) + 0.02, _fp.z), 0.07, null, 0.6, 'step'); }
   }
@@ -977,7 +980,7 @@ function faceTo(f, target, dt, rate = 0.0002) { let dy = target - f.yaw; dy = Ma
 function updateRobot(f, dt) {
   f.st += dt; for (const k in f.cool) f.cool[k] -= dt;
   const T = alive(f.target) ? f.target : null, fight = !!T && f.state !== 'ko';
-  const dx = T ? wd(T.pos.x - f.pos.x) : 0, dz = T ? wd(T.pos.z - f.pos.z) : 0, d = T ? Math.hypot(dx, dz) : 99;
+  const dx = T ? wd(T.pos.x - f.pos.x) : 0, dz = T ? wd(T.pos.z - f.pos.z) : 0, d = T ? Math.hypot(dx, dz) / RS : 99;   // robot units
   const dir = T ? new THREE.Vector3(dx, 0, dz).normalize() : new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw));
   const fwd = new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)), side = new THREE.Vector3(Math.cos(f.yaw), 0, -Math.sin(f.yaw));
   const targetYaw = T ? Math.atan2(dx, dz) : f.yaw; let boosting = false;
@@ -1079,7 +1082,7 @@ function updateRobot(f, dt) {
     case 'gunBeam': { const t = clipT(f); if (!f.beamFired && t >= 0.05) { f.beamFired = true; fireBeam(f); } skid(f, dt); if (clipDone(f)) toIdle(f, 0.14, rand(0.1, 0.3)); break; }
     case 'ko': skid(f, dt); f.koT += dt; break;
   }
-  if (f.lost) { f.sink = Math.min(0.5, (f.sink || 0) + dt * 0.12); if (chance(dt * 1.5)) particlesA.emit(f.pos.x + rand(-.1, .1), 0.01, f.pos.z + rand(-.1, .1), 0, rand(0.1, 0.3), 0, rand(0.4, 0.8), 0.02, 0.035, [0.8, 0.9, 1, 0.6], [0.8, 0.9, 1, 0], 0, 0.5); }
+  if (f.lost) { f.sink = Math.min(0.5 * RS, (f.sink || 0) + dt * 0.12); if (chance(dt * 1.5)) particlesA.emit(f.pos.x + rand(-.1, .1), 0.01, f.pos.z + rand(-.1, .1), 0, rand(0.1, 0.3), 0, rand(0.4, 0.8), 0.02, 0.035, [0.8, 0.9, 1, 0.6], [0.8, 0.9, 1, 0], 0, 0.5); }
   else if (f.state === 'ko' && f.koT > 18) { f.sink = (f.sink || 0) + dt * 0.04; }
   // vertical: gravity outside the flight states, landing shocks
   if (!['jump', 'air', 'airfire', 'dive', 'fly'].includes(f.state) && f.y > 0) f.vy -= 4.5 * dt;
@@ -1093,8 +1096,8 @@ function updateRobot(f, dt) {
       else f.stuckN = 0;
       f.stuckT = 0; f.lastPos = { x: f.pos.x, z: f.pos.z }; } } else f.stuckT = 0;
   // body vs town: crush whatever the robot moves through
-  const sp = f.vel.length(); if (sp > 0.08 || f.y > 0) { const base = groundY(f) + f.y; const dv = sp > 0.01 ? f.vel.clone().setY(0).normalize() : null;
-    for (const hh of [0.06, 0.22, 0.42]) impact(new THREE.Vector3(f.pos.x, base + hh, f.pos.z), 0.13, dv, 0.4 + sp * 0.7, 'body'); }
+  const sp = f.vel.length(); if (sp > 0.08 || f.y > 0) { const base = groundY(f) + f.y * RS; const dv = sp > 0.01 ? f.vel.clone().setY(0).normalize() : null;
+    for (const hh of [0.06, 0.22, 0.42]) impact(new THREE.Vector3(f.pos.x, base + hh * RS, f.pos.z), 0.13 * RS, dv, 0.4 + sp * RS * 0.7, 'body'); }
 }
 // thrusters: flames + exhaust while boosting or airborne
 function thrusters(f) {
@@ -1136,11 +1139,11 @@ function doAttack(f, d, dir, fwd, dt) {
   A.hits.forEach(([t0, t1, dmg, label, w, heavy], i) => {
     if (f.hitDone[i]) return;
     if (t > t1) { f.hitDone[i] = true;                    // whiff: the swing still wrecks whatever is in front
-      const hp = new THREE.Vector3(f.pos.x + fwd.x * 0.34, groundY(f) + f.y + 0.25, f.pos.z + fwd.z * 0.34); if (impact(hp, A.saber ? 0.24 : 0.14, fwd.clone(), heavy ? 1.2 : 0.7, 'strike')) addShake(0.08, hp); return; }
+      const hp = new THREE.Vector3(f.pos.x + fwd.x * 0.34 * RS, groundY(f) + (f.y + 0.25) * RS, f.pos.z + fwd.z * 0.34 * RS); if (impact(hp, (A.saber ? 0.24 : 0.14) * RS, fwd.clone(), heavy ? 1.2 : 0.7, 'strike')) addShake(0.08, hp); return; }
     if (t < t0 || !o) return;
-    const rad = weaponSeg(f, w); const ob = groundY(o) + o.y; const op = near(o.pos, f.pos, new THREE.Vector3()); _s1.set(op.x, ob + 0.12, op.z); _s2.set(op.x, ob + 0.8, op.z);
+    const rad = weaponSeg(f, w); const ob = groundY(o) + o.y * RS; const op = near(o.pos, f.pos, new THREE.Vector3()); _s1.set(op.x, ob + 0.12 * RS, op.z); _s2.set(op.x, ob + 0.8 * RS, op.z);
     const p1 = _wa.clone(), q1 = _wb.clone(), dist = segDist(p1, q1, _s1.clone(), _s2.clone(), _cp);
-    if (dist < 0.15 + rad) { f.hitDone[i] = true; const at = _cp.clone(); const res = damage(f, o, dmg, label, !!heavy, dir, at);
+    if (dist < 0.15 * RS + rad) { f.hitDone[i] = true; const at = _cp.clone(); const res = damage(f, o, dmg, label, !!heavy, dir, at);
       const blade = w === 'blade'; f.lodge = { t: res === 'blocked' ? 0.07 : (blade ? 0.15 : 0.07), p: at, blade, after: blade ? 0.55 : 0.8 }; f.act.timeScale = 0;
       FX.sparks(at, blade ? 45 : 18, [1, 0.85, 0.5], blade ? 2.2 : 1.4); FX.flash(at, blade ? 0.3 : 0.15, [1, 0.9, 0.7]); if (blade) FX.sparks(at, 20, f.col, 1.6);
       if (A.hits.length === 1 || heavy) impact(at, 0.2, fwd.clone(), 0.9, 'strike'); }
@@ -1190,7 +1193,7 @@ function updateTrail(f) {
 }
 function separate() {
   for (let i = 0; i < robots.length; i++) for (let j = i + 1; j < robots.length; j++) { const a = robots[i], b = robots[j]; if (a.state === 'ko' && b.state === 'ko') continue;
-    const dx = wd(b.pos.x - a.pos.x), dz = wd(b.pos.z - a.pos.z), d = Math.hypot(dx, dz), min = 0.38;
+    const dx = wd(b.pos.x - a.pos.x), dz = wd(b.pos.z - a.pos.z), d = Math.hypot(dx, dz), min = 0.38 * RS;
     if (d < min && d > 1e-4) { const p = (min - d) / 2; a.pos.x = wm(a.pos.x - dx / d * p); a.pos.z = wm(a.pos.z - dz / d * p); b.pos.x = wm(b.pos.x + dx / d * p); b.pos.z = wm(b.pos.z + dz / d * p); } }
 }
 
@@ -1317,7 +1320,7 @@ function placeBar(u, x, y, z, visible) {
 // ------------------------------------------------------------------ selection rings
 const selRingGeo = new THREE.RingGeometry(0.34, 0.4, 32).rotateX(-Math.PI / 2);
 const selRingMat = new THREE.MeshBasicMaterial({ color: 0x7fff7f, depthTest: false, transparent: true, opacity: 0.9 });
-function ringFor(u) { if (!u.ring) { u.ring = new THREE.Mesh(selRingGeo, selRingMat); u.ring.renderOrder = 15; u.ring.scale.setScalar(u.kind === 'heli' ? 1.6 : 1); battleRoot.add(u.ring); } return u.ring; }
+function ringFor(u) { if (!u.ring) { u.ring = new THREE.Mesh(selRingGeo, selRingMat); u.ring.renderOrder = 15; u.ring.scale.setScalar(u.kind === 'heli' ? 1.6 : RS); battleRoot.add(u.ring); } return u.ring; }
 
 // ------------------------------------------------------------------ HUD: event feed + status
 function log(team, html) { const feed = document.getElementById('feed'); if (!feed) return; const d = document.createElement('div'); d.className = team === 0 ? 'e1' : team === 1 ? 'e2' : ''; d.innerHTML = html; feed.append(d); while (feed.children.length > 5) feed.firstChild.remove(); }
@@ -1380,7 +1383,7 @@ const Battle = {
   selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive)]; },
   enemiesVisible() { return [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive)]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
-  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + u.y + 0.5 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
+  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   select(list) { for (const u of Battle.selectables()) u.sel = false; for (const u of list) u.sel = true; },
   order(sel, ground, enemy) {
     if (!sel.length) return;
@@ -1404,11 +1407,11 @@ const Battle = {
       const dx = disp(f.pos.x, c.x), dz = disp(f.pos.z, c.z);
       f.visible = Math.hypot(dx - c.x, dz - c.z) * S < FOG_FAR + 100;
       f.root.visible = f.visible && !(f.sink > 0.9);
-      f.root.position.set(dx, groundY(f) + f.y - (f.sink || 0), dz); f.root.rotation.y = f.yaw;
+      f.root.position.set(dx, groundY(f) + f.y * RS - (f.sink || 0), dz); f.root.rotation.y = f.yaw;
       if (f.visible) { f.mixer.update(dt); weaponOverride(f); headTrack(f, dt); gunCarry(f, dt); f.model.updateMatrixWorld(true); footfalls(f); damageFX(f, dt); gunFX(f, dt); updateTrail(f);
         thrusters(f); }
       else { f.mixer.update(dt); }
-      placeBar(f, dx * S, (groundY(f) + f.y) * S, dz * S, f.visible && f.state !== 'ko');
+      placeBar(f, dx * S, (groundY(f) + f.y * RS) * S, dz * S, f.visible && f.state !== 'ko');
       if (f.sel && f.state !== 'ko') { const r = ringFor(f); r.visible = true; r.position.set(dx, groundY(f) + 0.01, dz); } else if (f.ring) f.ring.visible = false;
     }
     for (let i = robots.length - 1; i >= 0; i--) { const f = robots[i]; if (f.sink > 1) { battleRoot.remove(f.root); battleRoot.remove(f.trail); scene.remove(f.bar.g); if (f.ring) battleRoot.remove(f.ring); if (f.glow) { battleRoot.remove(f.glow); battleRoot.remove(f.beamFx.g); } robots.splice(i, 1); } }
