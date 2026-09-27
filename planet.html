@@ -11,7 +11,7 @@
   #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #eee; font-size: 16px; background: #4d5256; }
 </style>
 <div id="hud"><b>Flat Planet</b> — wraps on both axes<br>
-WASD / arrows / screen edge: pan &middot; wheel: zoom &middot; Q/E or middle-drag: rotate<br>
+Middle-drag / WASD / screen edge: pan &middot; right-drag / Q/E: orbit &middot; wheel: zoom<br>
 Left-drag: select units &middot; right-click: move &middot; click minimap: jump</div>
 <canvas id="mini" width="192" height="192"></canvas>
 <div id="box" hidden></div>
@@ -1251,7 +1251,7 @@ function spawnUnits(n) {
 
 // ================= Camera / input =================
 const cam = { x: 0, z: 0, dist: 380, yaw: 0.7, pitch: 0.62 };
-const keys = {}; let mouse = { x: -1, y: -1 }, drag = null, rotating = null;
+const keys = {}; let mouse = { x: -1, y: -1 }, drag = null, orbit = null, panDrag = null;
 const box = document.getElementById('box');
 function resize() {
   renderer.setSize(innerWidth, innerHeight);
@@ -1266,10 +1266,22 @@ el.addEventListener('wheel', e => { e.preventDefault(); cam.dist = Math.max(50, 
 el.addEventListener('mousemove', e => {
   mouse = { x: e.clientX, y: e.clientY };
   if (drag) { drag.x2 = e.clientX; drag.y2 = e.clientY; showBox(); }
-  if (rotating) {
-    cam.yaw -= (e.clientX - rotating.x) * 0.005;
-    cam.pitch = Math.max(0.25, Math.min(1.45, cam.pitch + (e.clientY - rotating.y) * 0.005));
-    rotating = { x: e.clientX, y: e.clientY };
+  if (orbit) {                                     // right-drag: orbit around the view centre
+    const dx = e.clientX - orbit.x, dy = e.clientY - orbit.y;
+    if (Math.abs(e.clientX - orbit.x0) + Math.abs(e.clientY - orbit.y0) > 5) orbit.moved = true;
+    if (orbit.moved) {
+      cam.yaw -= dx * 0.005;
+      cam.pitch = Math.max(0.25, Math.min(1.45, cam.pitch + dy * 0.005));
+    }
+    orbit.x = e.clientX; orbit.y = e.clientY;
+  }
+  if (panDrag) {                                   // middle-drag: grab the ground and drag it
+    const dx = e.clientX - panDrag.x, dy = e.clientY - panDrag.y;
+    const k = cam.dist * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / innerHeight;
+    const sn = Math.sin(cam.yaw), cs = Math.cos(cam.yaw), ky = k / Math.max(0.3, Math.sin(cam.pitch));
+    cam.x = mod(cam.x - (dx * cs * k + dy * sn * ky), SIZE);   // screen right = (cs, -sn), screen down = (sn, cs)
+    cam.z = mod(cam.z - (-dx * sn * k + dy * cs * ky), SIZE);
+    panDrag.x = e.clientX; panDrag.y = e.clientY;
   }
 });
 el.addEventListener('mouseleave', () => mouse = { x: -1, y: -1 });
@@ -1288,16 +1300,19 @@ function pickGround(sx, sy) {
 }
 el.addEventListener('mousedown', e => {
   if (e.button === 0) drag = { x1: e.clientX, y1: e.clientY, x2: e.clientX, y2: e.clientY };
-  if (e.button === 1) { e.preventDefault(); rotating = { x: e.clientX, y: e.clientY }; }
-  if (e.button === 2) {
-    const t = pickGround(e.clientX, e.clientY);
+  if (e.button === 1) { e.preventDefault(); panDrag = { x: e.clientX, y: e.clientY }; }
+  if (e.button === 2) orbit = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false };
+});
+function issueMove(sx, sy) {
+  {
+    const t = pickGround(sx, sy);
     if (!t) return;
     units.filter(u => u.sel).forEach((u, i) => {
       const a = i * 2.4, r = 8 * Math.sqrt(i);
       u.tx = mod(t.x + Math.cos(a) * r, SIZE); u.tz = mod(t.z + Math.sin(a) * r, SIZE);
     });
   }
-});
+}
 function showBox() {
   box.hidden = false;
   box.style.left = Math.min(drag.x1, drag.x2) + 'px'; box.style.top = Math.min(drag.y1, drag.y2) + 'px';
@@ -1305,7 +1320,8 @@ function showBox() {
 }
 const v3 = new THREE.Vector3();
 addEventListener('mouseup', e => {
-  if (e.button === 1) rotating = null;
+  if (e.button === 1) panDrag = null;
+  if (e.button === 2 && orbit) { if (!orbit.moved) issueMove(e.clientX, e.clientY); orbit = null; }   // click = move order
   if (e.button !== 0 || !drag) return;
   const x1 = Math.min(drag.x1, drag.x2), x2 = Math.max(drag.x1, drag.x2);
   const y1 = Math.min(drag.y1, drag.y2), y2 = Math.max(drag.y1, drag.y2);
@@ -1339,7 +1355,7 @@ function drawMini() {
 
 // ================= Loop =================
 function update(dt) {
-  const pan = cam.dist * 1.3 * dt, edge = 16;
+  const pan = cam.dist * 1.3 * dt, edge = (orbit || panDrag) ? -1 : 16;
   let mx = 0, mz = 0;
   if (keys.a || keys.arrowleft || (mouse.x >= 0 && mouse.x < edge)) mx -= 1;
   if (keys.d || keys.arrowright || (mouse.x >= 0 && mouse.x > innerWidth - edge)) mx += 1;
