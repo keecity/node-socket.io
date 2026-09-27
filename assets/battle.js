@@ -498,7 +498,7 @@ function makeRobot(team, role, x, z) {
   const f = { kind: 'robot', team, role, root, model, mixer, actions, nodes, flames, trail, trailHist: [], col, bodyMats, bones, wounds: [],
     pos: new THREE.Vector3(wm(x), 0, wm(z)), vel: new THREE.Vector3(), y: 0, vy: 0, yaw: rand(0, 6.28), hp: 1000, maxHp: 1000, state: 'idle', st: 0, clip: null, act: null,
     saberOut: false, cool: {}, hitDone: {}, fireAcc: 0, fireSide: 0, thinkT: rand(0, 0.5), bulletHits: 0, lastAction: '', lookT: 0, headQ: new THREE.Quaternion(),
-    footY: { L: 0, R: 0 }, lastSkid: { L: null, R: null }, gun: role === 'gunner' ? { energy: 100 } : null, target: null, order: null, sel: false, alive: true, koT: 0 };
+    gaitRate: rand(0.93, 1.07), footY: { L: 0, R: 0 }, lastSkid: { L: null, R: null }, gun: role === 'gunner' ? { energy: 100 } : null, target: null, order: null, sel: false, alive: true, koT: 0 };
   f.id = robots.length; robots.push(f);
   if (f.gun) makeGunFX(f);
   setState(f, 'idle', idleClip(f), 0.01); f.act.time = Math.random();
@@ -509,6 +509,7 @@ const LOOPS = new Set(['Battle_Idle', 'Boost_Forward', 'Boost_Back', 'Boost_Stra
 const SABER_CLIPS = new Set(['Saber_Draw', 'Saber_Idle', 'Saber_Slash_Combo', 'Saber_Dash_Thrust', 'Saber_Sheathe', 'Saber_Air_Slash', 'Saber_Run_Slash', 'Saber_Boost_Slash', 'Saber_Rising_Slash', 'Saber_Wide_Sweep', 'Saber_Stab_Combo', 'Saber_Cross_Cut', 'Saber_Parry_Riposte']);
 function play(f, name, fade = 0.12) { const next = f.actions[name]; if (!next) return; const once = !LOOPS.has(name);
   next.reset(); next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); next.clampWhenFinished = once; next.enabled = true; next.setEffectiveWeight(1).play();
+  if (!once) { next.time = Math.random() * next.getClip().duration; next.timeScale = GAIT[name] ? f.gaitRate : rand(0.9, 1.1); }   // loops start out of phase so squads don't move in lockstep
   if (f.act && f.act !== next) f.act.crossFadeTo(next, fade, false); f.act = next; f.clip = name; f.clipT0 = f.st; }
 const clipT = f => f.act ? f.act.time : 0;
 const clipDone = f => f.act && f.act.loop === THREE.LoopOnce && f.act.time >= f.act.getClip().duration - 1e-3;
@@ -876,7 +877,8 @@ function updateRobot(f, dt) {
       const fw = m.dot(fwd), lf = m.dot(side);
       let clip = Math.abs(fw) >= Math.abs(lf) * 0.9 ? (fw > 0 ? (f.walkMode === 'run' ? 'Run_Forward' : 'Walk_Forward') : 'Walk_Back') : (lf > 0 ? 'Walk_Strafe_L' : 'Walk_Strafe_R');
       if (clip !== f.clip && (f.gaitClip === null || f.st - f.clipT0 > 0.35)) { play(f, clip, 0.2); f.gaitClip = clip; }
-      const cs = GAIT[f.clip] || 0; const ramp = smooth((f.st - f.clipT0) / 0.2);
+      // foot speed matches this robot's stride rate
+      const cs = (GAIT[f.clip] || 0) * f.gaitRate; const ramp = smooth((f.st - f.clipT0) / 0.2);
       const cv = (f.clip === 'Walk_Forward' || f.clip === 'Run_Forward') ? fwd : f.clip === 'Walk_Back' ? fwd.clone().negate() : f.clip === 'Walk_Strafe_L' ? side : side.clone().negate();
       f.vel.copy(cv).multiplyScalar(cs * ramp);
       const reach = T && f.stopAt > 0.2 && f.order?.type !== 'move' ? d < f.stopAt : dist < Math.max(0.08, f.stopAt);
