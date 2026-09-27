@@ -9,6 +9,7 @@ const INDEX = '/index.html';
 const server = express()
   .use('/assets', express.static(__dirname + '/assets'))
   .get('/planet', (req, res) => res.sendFile('/planet.html', { root: __dirname }))
+  .get('/powerplant', (req, res) => res.sendFile('/powerplant.html', { root: __dirname }))
   .use((req, res) => res.sendFile(INDEX, { root: __dirname }))
   .listen(PORT, () => console.log(`Listening on ${PORT}`));
 

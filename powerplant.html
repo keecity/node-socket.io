@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body>
+<title>Power Plant Asset</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd3d6; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #ui { position: fixed; left: 12px; top: 12px; background: rgba(20,24,28,.72); color: #eef1f3; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6; max-width: calc(100% - 48px); }
+  #ui b { font-size: 14px; }
+  #ui button { font: inherit; color: #eef1f3; background: #2b3238; border: 1px solid #56606a; border-radius: 4px; padding: 4px 8px; cursor: pointer; margin-right: 4px; }
+  #ui button:focus-visible { outline: 2px solid #9cc7ff; }
+  #ui button[aria-pressed="true"] { background: #3f4b56; border-color: #cfd8e0; }
+</style>
+<div id="ui"><b>Power plant</b><br>Drag to orbit · wheel to zoom<br>
+  Team colour: <button id="c0" aria-pressed="false">Violet</button><button id="c1" aria-pressed="true">Blue</button><button id="spin" aria-pressed="true">Turntable</button></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="assets/powerplant.js"></script>
+<script>
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xcfd3d6).convertSRGBToLinear();
+scene.fog = new THREE.Fog(scene.background, 160, 320);
+const camera = new THREE.PerspectiveCamera(35, 1, 1, 1000);
+scene.add(new THREE.HemisphereLight(0xe8eef4, 0x6a6258, 0.75));
+const sun = new THREE.DirectionalLight(0xfff2e0, 1.5); sun.position.set(-40, 70, 45); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 10, far: 200 }); sun.shadow.bias = -0.0005; scene.add(sun);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(160, 64), new THREE.MeshStandardMaterial({ color: new THREE.Color(0x9aa08f).convertSRGBToLinear(), roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+let plant = null;
+function make(accent) { if (plant) scene.remove(plant.group); plant = PowerPlant.build({ accent }); scene.add(plant.group); }
+make(0x2f6fd6);
+const view = { yaw: -0.62, pitch: 0.55, dist: 95, spin: true };
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); camera.userData.viewH = innerHeight; }
+addEventListener('resize', resize); resize();
+let drag = null;
+renderer.domElement.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; renderer.domElement.setPointerCapture(e.pointerId); });
+renderer.domElement.addEventListener('pointermove', e => { if (!drag) return; view.yaw -= (e.clientX - drag.x) * 0.006; view.pitch = Math.max(0.08, Math.min(1.4, view.pitch + (e.clientY - drag.y) * 0.005)); drag = { x: e.clientX, y: e.clientY }; });
+renderer.domElement.addEventListener('pointerup', () => drag = null);
+renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); view.dist = Math.max(35, Math.min(220, view.dist * Math.pow(1.0012, e.deltaY))); }, { passive: false });
+const setPressed = (id, on) => document.getElementById(id).setAttribute('aria-pressed', on);
+document.getElementById('c0').onclick = () => { make(0xe0579c); setPressed('c0', true); setPressed('c1', false); };
+document.getElementById('c1').onclick = () => { make(0x2f6fd6); setPressed('c0', false); setPressed('c1', true); };
+document.getElementById('spin').onclick = () => { view.spin = !view.spin; setPressed('spin', view.spin); };
+let last = performance.now();
+renderer.setAnimationLoop(now => { const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (view.spin && !drag) view.yaw += dt * 0.12;
+  const cp = Math.cos(view.pitch); camera.position.set(Math.sin(view.yaw) * cp * view.dist, 12 + Math.sin(view.pitch) * view.dist, Math.cos(view.yaw) * cp * view.dist); camera.lookAt(0, 11, 0);
+  plant.update(dt, camera); renderer.render(scene, camera); });
+</script>
+</body></html>

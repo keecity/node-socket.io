@@ -50,6 +50,7 @@ function roadAt(xw, zw) { const i = Math.floor(mod(xw, SIZE) / SIZE * RM), j = M
 function noTreesAt(xw, zw) {                    // world units: keep forests off roads and out of towns
   if (roadAt(xw, zw) > 0.02) return true;
   for (const t of TOWNS) if (Math.hypot(wd(xw / S - t.x), wd(zw / S - t.z)) < TOWN + 1.6) return true;
+  for (let i = 0; i < Math.min(2, TOWNS.length); i++) { const t = TOWNS[i]; if (Math.abs(wd(xw / S - t.x - 6.2)) < 2.8 && Math.abs(wd(zw / S - t.z - 6.2)) < 2.8) return true; }   // power plant lots
   return false;
 }
 function planTowns() {
@@ -77,7 +78,7 @@ function planTowns() {
   const rest = TOWNS.filter((_, i) => i !== a && i !== b); TOWNS.length = 0; TOWNS.push(ta, tb, ...rest);
 
   // 2) flatten the ground under each town
-  const R0 = (TOWN + 1.2) * S, R1 = R0 * 1.8;
+  const R0 = (TOWN + 3.6) * S, R1 = R0 * 1.6;
   for (const t of TOWNS) {
     const cx = t.x * S, cz = t.z * S; let sum = 0, n = 0;
     for (let k = 0; k < 200; k++) { const a2 = r() * 6.283, rr = Math.sqrt(r()) * R0; sum += hAt(cx + Math.cos(a2) * rr, cz + Math.sin(a2) * rr); n++; }
@@ -354,6 +355,7 @@ function buildTown(t, idx) {
   for (let x = -TOWN + 0.3; x <= TOWN - 0.3; x += STEP) for (let z = -TOWN + 0.3; z <= TOWN - 0.3; z += STEP) {
     const jx = x + (r() - .5) * 0.08, jz = z + (r() - .5) * 0.08, rr = Math.hypot(jx, jz);
     if (rr < PLAZA_R + 0.35 || onRoad(jx, 0.25) || onRoad(jz, 0.25) || rr > TOWN) continue;
+    if (idx < 2 && jx > 3.9 && jz > 3.9) continue;                   // power plant lot
     const nearX = ROADS.some(k => Math.abs(jz - k) < 0.8), nearZ = ROADS.some(k => Math.abs(jx - k) < 0.8);
     if (r() < ((nearX || nearZ) ? 0.62 : 0.3)) {
       const nearestZ = ROADS.reduce((a, k) => Math.abs(jz - k) < Math.abs(jz - a) ? k : a, 99), nearestX = ROADS.reduce((a, k) => Math.abs(jx - k) < Math.abs(jx - a) ? k : a, 99);
@@ -364,13 +366,22 @@ function buildTown(t, idx) {
   }
   for (const k of ROADS) for (let s = -TOWN + 0.6; s < TOWN - 0.6; s += 0.9) {
     if (Math.hypot(s, k) > PLAZA_R + 0.2 && !onRoad(s, 0.3)) { buildLamp(cx + s, cz + k + ROAD_W / 2 + 0.05); buildLamp(cx + k - ROAD_W / 2 - 0.05, cz + s); }
-    if (r() < 0.3 && !onRoad(s, 0.3)) buildCar(cx + s + 0.2, cz + k + (r() < .5 ? 0.1 : -0.1), Math.PI / 2, r);
-    if (r() < 0.3 && !onRoad(s, 0.3)) buildCar(cx + k + (r() < .5 ? 0.1 : -0.1), cz + s + 0.2, 0, r);
+    if (r() < 0.3 && !onRoad(s, 0.3) && !(idx < 2 && s > 3.7 && k > 3)) buildCar(cx + s + 0.2, cz + k + (r() < .5 ? 0.1 : -0.1), Math.PI / 2, r);
+    if (r() < 0.3 && !onRoad(s, 0.3) && !(idx < 2 && s > 3.7 && k > 3)) buildCar(cx + k + (r() < .5 ? 0.1 : -0.1), cz + s + 0.2, 0, r);
   }
   const teamCol = idx === 0 ? 0xff5aa8 : idx === 1 ? 0x46b8ff : null;
+  if (idx < 2 && window.PowerPlant) {
+    const PK = 3.6 / 42, px = cx + 6.2, pz = cz + 6.2;              // ~43 world units across, just outside the houses
+    const plant = PowerPlant.build({ accent: idx === 0 ? 0xe0579c : 0x2f6fd6 });
+    plant.group.scale.setScalar(PK); plant.group.position.set(px, Hd(px, pz) - 0.02, pz); plant.group.rotation.y = Math.PI;   // front faces the plaza
+    root.add(plant.group); curTown.plant = plant;
+    const half = 21 * PK;
+    blockers.push({ x: px, z: pz, hw: half + 0.25, hd: half + 0.25 });
+    const pp = newProp('plant', px, pz, 0, half * 1.42, Hd(px, pz) + 36 * PK, { hw: half, hd: half, y0: Hd(px, pz) - 0.05 }); pp.total = 0; registerProp(pp);
+  }
   curTown.hq = buildTower(cx, cz - PLAZA_R + 0.2, teamCol);
   for (const k in curTown.G) { curTown.G[k].im.instanceMatrix.needsUpdate = true; curTown.G[k].im.instanceColor.needsUpdate = true; }
-  towns.push(curTown); curTown.total = props.filter(p => p.town === curTown).length; curTown.destroyed = 0;
+  towns.push(curTown); curTown.total = props.filter(p => p.town === curTown && p.kind !== 'plant').length; curTown.destroyed = 0;
   return curTown;
 }
 
@@ -736,7 +747,8 @@ function nearestEnemy(f, range) {
   return best;
 }
 // mechs climb any slope; only deep water blocks them
-function passableD(x, z) { return heightAt(x * S, z * S) > -5; }
+const blockers = [];                                   // solid structures: {x, z, hw, hd} in demo units (axis aligned)
+function passableD(x, z) { if (heightAt(x * S, z * S) <= -5) return false; for (const b of blockers) if (Math.abs(wd(x - b.x)) < b.hw && Math.abs(wd(z - b.z)) < b.hd) return false; return true; }
 // ---- pathfinding: A* over a wrapping walkability grid (1 cell = 1 demo unit = 12 world units)
 const PG = Math.floor(W), PC = W / PG; let passGrid = null;
 function buildPassGrid() {
@@ -1423,6 +1435,7 @@ const Battle = {
     for (let i = helis.length - 1; i >= 0; i--) { const h = helis[i]; if (!h.alive && !h.falling) { battleRoot.remove(h.root); scene.remove(h.bar.g); if (h.ring) battleRoot.remove(h.ring); helis.splice(i, 1); } }
     for (const t of towns) { const sx = W * Math.round((c.x - t.x) / W), sz = W * Math.round((c.z - t.z) / W); t.root.position.set(sx, 0, sz);
       t.root.visible = Math.hypot(t.x + sx - camera.position.x / S, t.z + sz - camera.position.z / S) * S < FOG_FAR + TOWN * S; }
+    for (const t of towns) if (t.plant && t.root.visible) t.plant.update(dt, camera);
     updateBullets(dt); updateLasers(dt); updateBeams(dt); updateHeliProjectiles(dt); updateDebris(dt);
     for (const p of PARTS) p.update(dt);
     teamUpdate(dt); checkVictory();
