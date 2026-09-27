@@ -371,13 +371,13 @@ function buildTown(t, idx) {
   }
   const teamCol = idx === 0 ? 0xff5aa8 : idx === 1 ? 0x46b8ff : null;
   if (idx < 2 && window.PowerPlant) {
-    const PK = 3.6 / 42, px = cx + 6.2, pz = cz + 6.2;              // ~43 world units across, just outside the houses
+    const PK = 3.8 / 46, px = cx + 6.2, pz = cz + 6.2;              // ~43 world units across, just outside the houses
     const plant = PowerPlant.build({ accent: idx === 0 ? 0xe0579c : 0x2f6fd6 });
     plant.group.scale.setScalar(PK); plant.group.position.set(px, Hd(px, pz) - 0.02, pz); plant.group.rotation.y = Math.PI;   // front faces the plaza
     root.add(plant.group); curTown.plant = plant;
-    const half = 21 * PK;
+    const half = 23 * PK;
     blockers.push({ x: px, z: pz, hw: half + 0.25, hd: half + 0.25 });
-    const pp = newProp('plant', px, pz, 0, half * 1.42, Hd(px, pz) + 36 * PK, { hw: half, hd: half, y0: Hd(px, pz) - 0.05 }); pp.total = 0; registerProp(pp);
+    const pp = newProp('plant', px, pz, 0, half * 1.42, Hd(px, pz) + 38 * PK, { hw: half, hd: half, y0: Hd(px, pz) - 0.05 }); pp.total = 0; registerProp(pp);
   }
   curTown.hq = buildTower(cx, cz - PLAZA_R + 0.2, teamCol);
   for (const k in curTown.G) { curTown.G[k].im.instanceMatrix.needsUpdate = true; curTown.G[k].im.instanceColor.needsUpdate = true; }
