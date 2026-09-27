@@ -27,6 +27,8 @@ function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
 const lin = hex => new THREE.Color(hex).convertSRGBToLinear();
 const camD = () => ({ x: cam.x / S, z: cam.z / S });
 const disp = (x, c) => x + W * Math.round((c - x) / W);             // copy of x nearest to c
+const _Zax = new THREE.Vector3(0, 0, 1), _odir = new THREE.Vector3();
+const orient = (m, v) => { _odir.copy(v).normalize(); if (_odir.lengthSq() > 0) m.quaternion.setFromUnitVectors(_Zax, _odir); };   // point +Z along v
 const toDemo = (obj, out) => obj.getWorldPosition(out).divideScalar(S);
 // wrap-aware distance between two demo-space points
 function wdist3(a, b) { return Math.hypot(wd(b.x - a.x), b.y - a.y, wd(b.z - a.z)); }
@@ -585,8 +587,8 @@ function knockOut(def, att, dir) {
   log(def.team, `${att ? `<b>${unitName(att)}</b> destroys ` : ''}<b>${unitName(def)}</b>`);
 }
 const bulletGeo = new THREE.BoxGeometry(0.007, 0.007, 0.09);
-const bulletMats = [new THREE.MeshBasicMaterial({ color: 0xffb0d6 }), new THREE.MeshBasicMaterial({ color: 0xb5ecff })];
-const bullets = []; for (let i = 0; i < 400; i++) { const m = new THREE.Mesh(bulletGeo, bulletMats[0]); m.visible = false; m.scale.set(2.2, 2.2, 1.4); battleRoot.add(m); bullets.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
+const bulletMats = [0xffb0d6, 0xb5ecff].map(c => new THREE.MeshBasicMaterial({ color: c, toneMapped: false, fog: false, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+const bullets = []; for (let i = 0; i < 400; i++) { const m = new THREE.Mesh(bulletGeo, bulletMats[0]); m.visible = false; m.scale.set(4, 4, 2.2); m.frustumCulled = false; battleRoot.add(m); bullets.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
 function aimAt(f, out) { const T = f.target; tgtPos(T, out); near(out, f.pos, out); out.addScaledVector(T.vel || _tmp.set(0, 0, 0), 0.12); return out; }
 function fireBullet(f) {
   const node = (f.fireSide ^= 1) ? f.nodes.flashL : f.nodes.flashR; toDemo(node, tmpA); near(tmpA, f.pos, tmpA);
@@ -606,7 +608,7 @@ function projHits(pos, team, rad) {
 function updateBullets(dt) {
   const c = camD();
   for (const b of bullets) { if (!b.alive) continue; b.life -= dt; b.v.y -= 1.3 * dt; b.p.addScaledVector(b.v, dt); const pos = b.p;
-    b.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); b.m.lookAt(_tmp.copy(b.m.position).add(b.v));
+    b.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); orient(b.m, b.v);
     const t = projHits(pos, b.owner.team, 0);
     if (t) { b.alive = false; b.m.visible = false; if (t.kind === 'robot') t.bulletHits++; damage(b.owner, t, t.kind === 'robot' ? 5 : 5, null, false, b.v.clone().setY(0).normalize(), pos.clone()); continue; }
     if (propHit(pos)) { impact(pos.clone(), 0.032, b.v.clone().normalize(), 0.9, 'bullet'); FX.sparks(pos, 2, [1, 0.75, 0.4], 0.8); b.alive = false; b.m.visible = false; continue; }
@@ -618,8 +620,8 @@ function updateBullets(dt) {
 // ---- beam rifle: laser bursts + charged beam (gunners)
 const lasers = [];
 const laserGeo = new THREE.CylinderGeometry(0.0065, 0.0065, 0.24, 6, 1).rotateX(Math.PI / 2);
-const laserMats = [0, 1].map(i => new THREE.MeshBasicMaterial({ color: i ? 0xbff0ff : 0xffc4e6, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-for (let i = 0; i < 90; i++) { const m = new THREE.Mesh(laserGeo, laserMats[0]); m.visible = false; m.scale.set(2.2, 2.2, 1); battleRoot.add(m); lasers.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
+const laserMats = [0, 1].map(i => new THREE.MeshBasicMaterial({ color: i ? 0xbff0ff : 0xffc4e6, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }));
+for (let i = 0; i < 90; i++) { const m = new THREE.Mesh(laserGeo, laserMats[0]); m.visible = false; m.scale.set(3.2, 3.2, 1.6); m.frustumCulled = false; battleRoot.add(m); lasers.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
 function muzzle(f, out) { toDemo(f.nodes.muzzle, out); return near(out, f.pos, out); }
 function fireLaser(f) {
   if (!alive(f.target)) return; muzzle(f, tmpA); aimAt(f, tmpB);
@@ -629,7 +631,7 @@ function fireLaser(f) {
 function updateLasers(dt) {
   const c = camD();
   for (const l of lasers) { if (!l.alive) continue; l.life -= dt; l.p.addScaledVector(l.v, dt); const pos = l.p, att = l.owner, col = att.col;
-    l.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); l.m.lookAt(_tmp.copy(l.m.position).add(l.v));
+    l.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); orient(l.m, l.v);
     particlesA.emit(pos.x, pos.y, pos.z, 0, 0, 0, 0.07, 0.06, 0.02, [...col, 0.45], [...col, 0]);
     const end = () => { l.alive = false; l.m.visible = false; FX.flash(pos, 0.14, col); FX.sparks(pos, 8, col, 1.3); FX.sparks(pos, 4, [1, 0.9, 0.6], 1.0); };
     const t = projHits(pos, att.team, 0.01);
@@ -644,7 +646,7 @@ function makeGunFX(f) {
   const halo = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(...f.col), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false })); halo.scale.setScalar(2.3);
   g.add(core, halo); g.visible = false; battleRoot.add(g); f.glow = g; f.glowHalo = halo;
   const bg = new THREE.CylinderGeometry(1, 1, 1, 20, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5); const B = new THREE.Group();
-  const mk = (c, o) => { const m = new THREE.Mesh(bg, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })); m.frustumCulled = false; B.add(m); return m; };
+  const mk = (c, o) => { const m = new THREE.Mesh(bg, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false })); m.frustumCulled = false; B.add(m); return m; };
   const outer = mk(new THREE.Color(...f.col), 0.35), mid = mk(new THREE.Color(...f.col).lerp(new THREE.Color(1, 1, 1), 0.4), 0.7), core2 = mk(0xffffff, 1);
   B.visible = false; battleRoot.add(B); f.beamFx = { g: B, outer, mid, core: core2, on: false, t: 0, dur: 0.7, a: new THREE.Vector3(), dir: new THREE.Vector3(), len: 1, p1: new THREE.Vector3(), p2: new THREE.Vector3() };
 }
@@ -670,7 +672,7 @@ function fireBeam(f) {
     if (Math.round(s / 0.05) % 2 === 0) impact(p.clone(), 0.13, B.dir.clone(), 1.6, 'strike');
     if (p.y - Hd(p.x, p.z) < 0.12 && Math.round(s / 0.05) % 3 === 0) scorchMarks.add(p.x, p.z, Math.atan2(B.dir.x, B.dir.z), 0.07, 0.16); }
   const c = camD();
-  B.len = len; B.on = true; B.t = 0; B.g.visible = true; B.g.position.set(disp(B.a.x, c.x), B.a.y, disp(B.a.z, c.z)); B.g.lookAt(p.copy(B.g.position).add(B.dir)); B.g.scale.set(1, 1, len);
+  B.len = len; B.on = true; B.t = 0; B.g.visible = true; B.g.position.set(disp(B.a.x, c.x), B.a.y, disp(B.a.z, c.z)); orient(B.g, B.dir); B.g.scale.set(1, 1, len);
   const end = B.a.clone().addScaledVector(B.dir, len); B.end = end;
   FX.flash(B.a, 0.6, f.col); FX.flash(B.a, 0.3, [1, 1, 1]); FX.sparks(B.a, 40, f.col, 2.4); addShake(0.5, B.a);
   for (let i = 0; i < 4; i++) arc(B.a, B.a.clone().addScaledVector(_rd(), 0.25), 1.2);
@@ -1177,8 +1179,8 @@ function heliHit(h, amount, by, at) {
     log(h.team, `${by ? `<b>${unitName(by)}</b> shoots down ` : ''}<b>${unitName(h)}</b>`); }
   return 'hit';
 }
-const hRounds = []; const hRoundMats = [0, 1].map(i => new THREE.MeshBasicMaterial({ color: i ? 0xd8f4ff : 0xffd8ec }));
-for (let i = 0; i < 160; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.008, 0.08), hRoundMats[0]); m.visible = false; m.scale.set(2, 2, 1.4); battleRoot.add(m); hRounds.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
+const hRounds = []; const hRoundMats = [0, 1].map(i => new THREE.MeshBasicMaterial({ color: i ? 0xd8f4ff : 0xffd8ec, toneMapped: false, fog: false, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+for (let i = 0; i < 160; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.008, 0.08), hRoundMats[0]); m.visible = false; m.scale.set(3.5, 3.5, 2); m.frustumCulled = false; battleRoot.add(m); hRounds.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
 const msGeo = new THREE.CylinderGeometry(0.009, 0.009, 0.075, 8).rotateX(Math.PI / 2), msMat = new THREE.MeshStandardMaterial({ color: 0xd6d2cc, metalness: 0.4, roughness: 0.5 });
 const missiles = []; for (let i = 0; i < 40; i++) { const m = new THREE.Mesh(msGeo, msMat); m.visible = false; m.scale.setScalar(1.5); battleRoot.add(m); missiles.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0, tgt: null }); }
 function heliFireRound(h) {
@@ -1196,7 +1198,7 @@ function heliFireMissile(h) {
 function updateHeliProjectiles(dt) {
   const c = camD();
   for (const b of hRounds) { if (!b.alive) continue; b.life -= dt; b.v.y -= 1.0 * dt; b.p.addScaledVector(b.v, dt); const pos = b.p;
-    b.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); b.m.lookAt(_tmp.copy(b.m.position).add(b.v));
+    b.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); orient(b.m, b.v);
     const t = projHits(pos, b.owner.team, 0);
     if (t) { b.alive = false; b.m.visible = false; if (t.kind === 'robot') t.bulletHits++; damage(b.owner, t, t.kind === 'robot' ? 3 : 6, null, false, b.v.clone().setY(0).normalize(), pos.clone()); continue; }
     if (propHit(pos)) { impact(pos.clone(), 0.035, b.v.clone().normalize(), 0.9, 'bullet'); FX.sparks(pos, 2, [1, 0.75, 0.4], 0.8); b.alive = false; b.m.visible = false; continue; }
@@ -1205,7 +1207,7 @@ function updateHeliProjectiles(dt) {
   for (const m of missiles) { if (!m.alive) continue; m.life -= dt; m.age += dt; const pos = m.p;
     if (m.age > 0.18 && alive(m.tgt)) { tgtPos(m.tgt, tmpB); near(tmpB, pos, tmpB); const want = tmpB.sub(pos).normalize().multiplyScalar(Math.min(3.8, m.v.length() + 6 * dt)); m.v.lerp(want, 1 - Math.pow(0.08, dt)); }
     else m.v.y -= 0.6 * dt;
-    pos.addScaledVector(m.v, dt); m.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); m.m.lookAt(_tmp.copy(m.m.position).add(m.v));
+    pos.addScaledVector(m.v, dt); m.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); orient(m.m, m.v);
     const back = m.v.clone().normalize().multiplyScalar(-0.04).add(pos); particlesA.emit(back.x, back.y, back.z, 0, 0, 0, 0.06, 0.045, 0.01, [1, 0.8, 0.4, 1], [1, 0.3, 0.1, 0]);
     if (chance(0.7)) particlesN.emit(back.x, back.y, back.z, rand(-.02, .02), rand(0, .05), rand(-.02, .02), rand(0.8, 1.5), 0.03, rand(0.12, 0.2), [0.72, 0.7, 0.68, 0.35], [0.8, 0.78, 0.76, 0], -0.02, 0.6);
     const t = projHits(pos, m.owner.team, 0.06), gy = Hd(pos.x, pos.z);
