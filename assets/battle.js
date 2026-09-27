@@ -509,7 +509,7 @@ function makeRobot(team, role, x, z) {
   const f = { kind: 'robot', team, role, root, model, mixer, actions, nodes, flames, trail, trailHist: [], col, bodyMats, bones, wounds: [],
     pos: new THREE.Vector3(wm(x), 0, wm(z)), vel: new THREE.Vector3(), y: 0, vy: 0, yaw: rand(0, 6.28), hp: 1000, maxHp: 1000, state: 'idle', st: 0, clip: null, act: null,
     saberOut: false, cool: {}, hitDone: {}, fireAcc: 0, fireSide: 0, thinkT: rand(0, 0.5), bulletHits: 0, lastAction: '', lookT: 0, headQ: new THREE.Quaternion(),
-    gaitRate: rand(0.93, 1.07), footY: { L: 0, R: 0 }, lastSkid: { L: null, R: null }, gun: role === 'gunner' ? { energy: 100 } : null, target: null, order: null, sel: false, alive: true, koT: 0 };
+    p: persona(role), boost: 100, strafeDir: 1, pending: null, airT: 0, gaitRate: rand(0.93, 1.07), footY: { L: 0, R: 0 }, lastSkid: { L: null, R: null }, gun: role === 'gunner' ? { energy: 100 } : null, target: null, order: null, sel: false, alive: true, koT: 0 };
   f.id = robots.length; robots.push(f);
   if (f.gun) makeGunFX(f);
   setState(f, 'idle', idleClip(f), 0.01); f.act.time = Math.random();
@@ -524,7 +524,7 @@ function play(f, name, fade = 0.12) { const next = f.actions[name]; if (!next) r
   if (f.act && f.act !== next) f.act.crossFadeTo(next, fade, false); f.act = next; f.clip = name; f.clipT0 = f.st; }
 const clipT = f => f.act ? f.act.time : 0;
 const clipDone = f => f.act && f.act.loop === THREE.LoopOnce && f.act.time >= f.act.getClip().duration - 1e-3;
-function setState(f, s, clip, fade) { if (f.act) f.act.timeScale = 1; f.lodge = null; f.flyV = 0; f.state = s; f.st = 0; f.hitDone = {}; if (clip) play(f, clip, fade); }
+function setState(f, s, clip, fade) { if (f.act) f.act.timeScale = 1; f.lodge = null; f.flyV = 0; f.liftFx = 0; f.landFx = 0; f.state = s; f.st = 0; f.hitDone = {}; if (clip) play(f, clip, fade); }
 const idleClip = f => f.saberOut ? 'Saber_Idle' : (f.gun ? 'Gun_Idle' : 'Battle_Idle');
 function toIdle(f, fade = 0.14, think = 0.05) { setState(f, 'idle', idleClip(f), fade); f.thinkT = think; }
 const groundY = f => Math.max(Hd(f.pos.x, f.pos.z), -3 / S);
@@ -538,6 +538,10 @@ const enemyHelisOf = team => helis.filter(h => h.team !== team && h.alive);
 const ATTACKS = {
   Saber_Slash_Combo: { hits: [[0.15, 0.31, 55, 'a saber cut', 'blade'], [0.45, 0.6, 55, 'a backhand sweep', 'blade'], [0.84, 1.0, 95, 'an overhead cleave', 'blade', 1]], saber: true },
   Saber_Run_Slash: { hits: [[0.13, 0.3, 85, 'a running cut', 'blade', 1]], saber: true, root: 'run' },
+  Saber_Boost_Slash: { hits: [[0.5, 0.76, 110, 'a boost slash', 'blade', 1]], saber: true, root: 'boost' },
+  Saber_Air_Slash: { hits: [[0.26, 0.43, 110, 'a diving cleave', 'blade', 1]], saber: true },
+  Saber_Dash_Thrust: { hits: [[0.3, 0.44, 100, 'a thrust', 'blade', 1]], saber: true },
+  Saber_Parry_Riposte: { hits: [[0.42, 0.57, 80, 'a riposte', 'blade', 1]], saber: true, parry: [0.04, 0.33] },
   Saber_Rising_Slash: { hits: [[0.16, 0.36, 65, 'a rising slash', 'blade', 1]], saber: true },
   Saber_Wide_Sweep: { hits: [[0.28, 0.48, 80, 'a wide sweep', 'blade', 1]], saber: true },
   Saber_Stab_Combo: { hits: [[0.1, 0.26, 45, 'a thrust', 'blade'], [0.34, 0.5, 55, 'a second thrust', 'blade']], saber: true },
@@ -549,6 +553,17 @@ function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'heli' ? 'gunsh
 function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'heli') return heliHit(def, amount, att, at);
   if (def.state === 'ko') return;
+  const facing = dir && new THREE.Vector3(Math.sin(def.yaw), 0, Math.cos(def.yaw)).dot(dir) < -0.3;
+  const PA = def.state === 'attack' && ATTACKS[def.clip] && ATTACKS[def.clip].parry, pt = clipT(def);
+  if (att && att.kind === 'robot' && PA && pt > PA[0] && pt < PA[1] && facing && (label || chance(0.7))) {    // parried: blades clash, attacker staggers
+    def.nodes.blade.updateWorldMatrix(true, false); const clash = new THREE.Vector3(0, 0.2, 0).applyMatrix4(def.nodes.blade.matrixWorld).divideScalar(S); near(clash, def.pos, clash);
+    FX.sparks(clash, label ? 60 : 6, [1, 0.85, 0.5], 2.4); if (label) { FX.sparks(clash, 25, att.col, 1.8); FX.sparks(clash, 25, def.col, 1.8); FX.flash(clash, 0.45, [1, 0.95, 0.8]); addShake(0.25, clash);
+      if (att.state !== 'ko') { setState(att, 'hitL', 'Hit_React_Light', 0.04); att.vel.copy(dir).multiplyScalar(-0.3); } }
+    return 'blocked'; }
+  if (def.state === 'block' && clipT(def) > 0.04 && clipT(def) < 0.64 && facing) { amount = Math.round(amount * (label ? 0.2 : 0.3)); if (at) tmpA.copy(at); else chestPos(def, tmpA).addScaledVector(dir, -0.12);
+    FX.sparks(tmpA, label ? 40 : 4, [1, 0.8, 0.45], 2);
+    if (label) { setState(def, 'blockHit', 'Guard_Block_Hit', 0.04); def.vel.copy(dir).multiplyScalar(0.3); addShake(0.15, tmpA); }
+    def.hp = Math.max(1, def.hp - amount); return 'blocked'; }
   def.hp = Math.max(0, def.hp - amount); def.lastHitBy = att;
   if (heavy || label || chance(0.08)) addWound(def, at ? at.clone() : chestPos(def, new THREE.Vector3()).add(new THREE.Vector3(rand(-.08, .08), rand(-.15, .1), rand(-.08, .08))));
   if (heavy && def.hp < 700) electricStorm(def, 3);
@@ -560,8 +575,8 @@ function damage(att, def, amount, label, heavy, dir, at) {
   if (def.hp <= 0) { knockOut(def, att, dir); return 'hit'; }
   if (!def.target && att && def.order?.type !== 'move') def.target = att;          // fight back
   if (heavy) { setState(def, 'hit', 'Hit_React_Heavy', 0.05); if (dir) def.vel.copy(dir).multiplyScalar(0.7); }
-  else if (!['attack', 'draw', 'sheathe', 'hit', 'gunBurst', 'gunCharge', 'gunBeam'].includes(def.state) && !(def.cool.flinch > 0) && (def.bulletHits >= 9 || amount >= 40)) {
-    def.bulletHits = 0; def.cool.flinch = 1.6; setState(def, 'hitL', 'Hit_React_Light', 0.05); if (dir) def.vel.copy(dir).multiplyScalar(0.25); }
+  else if (!['attack', 'draw', 'sheathe', 'hit', 'dive', 'turn', 'gunBurst', 'gunCharge', 'gunBeam'].includes(def.state) && !(def.cool.flinch > 0) && (def.bulletHits >= 9 || amount >= 40)) {
+    def.bulletHits = 0; def.cool.flinch = 1.6; if (def.y > 0.05) return 'hit'; setState(def, 'hitL', 'Hit_React_Light', 0.05); if (dir) def.vel.copy(dir).multiplyScalar(0.25); }
   return 'hit';
 }
 function knockOut(def, att, dir) {
@@ -716,88 +731,6 @@ function nearestEnemy(f, range) {
   if (!best) for (const h of helis) if (h.team !== f.team && h.alive) { const d = wdist2(f.pos.x, f.pos.z, h.pos.x, h.pos.z); if (d < Math.min(bd, 6)) { bd = d; best = h; } }
   return best;
 }
-function walkTo(f, x, z, mode, stopAt = 0.1, moveT = 3) { f.wp = new THREE.Vector3(x, 0, z); f.stopAt = stopAt; f.walkMode = mode; setState(f, 'walk', null); f.gaitClip = null; f.moveT = moveT; }
-function think(f) {
-  const o = f.order;
-  // plain move order: go there, ignore enemies until arrival
-  if (o && o.type === 'move') {
-    f.stuckN = f.stuckN || 0;
-    const d = wdist2(f.pos.x, f.pos.z, o.x, o.z);
-    if (d < 0.25) { f.order = null; }
-    else { if (f.saberOut && d > 3) { setState(f, 'sheathe', 'Saber_Sheathe'); return; } goTo(f, o.x, o.z, d > 1.2 ? 'run' : 'walk', 0.1, 3); return; }
-  }
-  if (o && o.type === 'attack') { if (alive(o.target)) f.target = o.target; else f.order = null; }
-  if (!alive(f.target) || wdist2(f.pos.x, f.pos.z, f.target.pos.x, f.target.pos.z) > SIGHT * 1.3) f.target = null;
-  if (!f.target || !(o && o.type === 'attack')) { const e = nearestEnemy(f, SIGHT); if (e && (!f.target || e !== f.target && chance(0.3))) f.target = e; }
-  const T = f.target;
-  if (!T) {
-    if (o && o.type === 'amove') { const d = wdist2(f.pos.x, f.pos.z, o.x, o.z); if (d < 0.5) f.order = null;
-      else { goTo(f, o.x, o.z, 'run', 0.3, 2.5); return; } }
-    if (f.saberOut && chance(0.3)) { setState(f, 'sheathe', 'Saber_Sheathe'); return; }
-    return toIdle(f, 0.2, rand(0.4, 0.9));
-  }
-  const isHeli = T.kind === 'heli';
-  const d = wdist2(f.pos.x, f.pos.z, T.pos.x, T.pos.z), tx = f.pos.x + wd(T.pos.x - f.pos.x), tz = f.pos.z + wd(T.pos.z - f.pos.z);
-  const cd = k => !(f.cool[k] > 0); const opts = []; const add = (name, s, fn) => opts.push({ name, s, fn });
-  const striker = f.role === 'striker';
-  if (isHeli) {
-    add('fire', d < 6 && cd('fire') ? 2 : 0, () => { f.cool.fire = rand(1.2, 2.2); f.fireT = rand(0.8, 1.4); setState(f, 'fire', 'Head_Vulcan_Fire'); });
-    if (f.gun && f.gun.energy >= 12) add('gunBurst', d < 6.5 && cd('gunBurst') ? 2 : 0, () => { f.cool.gunBurst = rand(0.9, 1.6); gunBurst(f); });
-    add('close', d > 3.5 ? 1.5 : 0, () => goTo(f, tx, tz, 'run', 3, 1.5));
-    add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
-  } else if (f.saberOut) {
-    add('slash', d < 0.74 && cd('slash') ? 3.0 : 0, () => { f.cool.slash = 1.4; attack(f, pickStrike(f, d)); });
-    add('runSlash', d > 0.95 && d < 3.6 && cd('runSlash') ? 1.8 : 0, () => { f.cool.runSlash = 2.2; walkTo(f, tx, tz, 'run', 0.6, 2.5); f.onArrive = 'runSlash'; });
-    add('close', d > 0.7 ? 1.0 + (d - 0.7) * 0.9 : 0, () => goTo(f, tx, tz, d > 1.4 ? 'run' : 'walk', 0.55, 1.6));
-    add('circle', 0.35, () => strafe(f, chance(.5) ? 1 : -1));
-    add('sheathe', d > 3.4 ? 1.5 : 0, () => setState(f, 'sheathe', 'Saber_Sheathe'));
-    add('hold', 0.2, () => toIdle(f, 0.12, rand(0.2, 0.45)));
-  } else {
-    const pref = striker ? 1.2 : 3.0;
-    add('fire', d > 0.9 && d < 5 && cd('fire') ? (f.gun ? 0.9 : 2.1) * (d > 1.8 ? 1.2 : 0.75) : 0, () => { f.cool.fire = rand(1.6, 3.0); f.fireT = rand(0.8, 1.5); setState(f, 'fire', 'Head_Vulcan_Fire'); });
-    add('draw', striker && d < 2.8 && cd('draw') ? 1.8 : 0, () => { f.cool.draw = 3; setState(f, 'draw', 'Saber_Draw'); });
-    add('melee', d < 0.58 ? 2.4 : 0, () => attack(f, chance(0.5) ? 'Melee_Punch_Combo' : 'Melee_Boost_Kick'));
-    add('close', d > pref ? 0.8 + (d - pref) * 0.7 : 0, () => goTo(f, tx, tz, d - pref > 1.2 ? 'run' : 'walk', pref, 2));
-    add('circle', 0.6, () => strafe(f, chance(.5) ? 1 : -1));
-    add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
-    if (f.gun) { const E = f.gun.energy;
-      add('gunBurst', d > 0.8 && d < 6.5 && E >= 12 && cd('gunBurst') ? 2.5 : 0, () => { f.cool.gunBurst = rand(0.9, 1.6); gunBurst(f); });
-      add('gunCharge', d > 1.3 && d < 7.5 && E >= 40 && cd('gunCharge') ? 1.6 : 0, () => { f.cool.gunCharge = rand(4, 6.5); gunCharge(f); }); }
-  }
-  opts.forEach(q => { if (q.name === f.lastAction && q.name !== 'slash') q.s *= 0.6; });
-  const c = choose(opts); if (!c) return toIdle(f, 0.12, 0.2); f.lastAction = c.name; c.fn();
-}
-function pickStrike(f, d) {
-  const opts = [['Saber_Slash_Combo', d < 0.64 ? 1.0 : 0], ['Saber_Rising_Slash', d < 0.62 ? 0.9 : 0], ['Saber_Wide_Sweep', d < 0.64 ? 0.8 : 0], ['Saber_Stab_Combo', d < 0.74 ? 0.9 : 0],
-    ['Saber_Cross_Cut', d < 0.54 ? 0.9 : 0]].filter(o => o[1] > 0).map(([n, s]) => ({ name: n, s: s * (n === f.lastStrike ? 0.35 : 1) }));
-  const c = choose(opts) || { name: 'Saber_Stab_Combo' }; f.lastStrike = c.name; return c.name;
-}
-function gunBurst(f) { setState(f, 'gunBurst', 'Gun_Burst', 0.08); f.shots = 0; f.gun.energy -= 12; }
-function gunCharge(f) { setState(f, 'gunCharge', 'Gun_Charge', 0.12); f.gun.energy -= 40; f.aimPt = tgtPos(f.target, new THREE.Vector3()); near(f.aimPt, f.pos, f.aimPt); f.chargeU = 0; }
-function attack(f, clip) { setState(f, 'attack', clip); }
-function strafe(f, dir) { const side = new THREE.Vector3(Math.cos(f.yaw), 0, -Math.sin(f.yaw)).multiplyScalar(dir); walkTo(f, f.pos.x + side.x * rand(0.3, 0.5), f.pos.z + side.z * rand(0.3, 0.5), 'walk', 0.03, rand(1.0, 1.6)); f.strafing = true; }
-
-// ----------------------------------------------------- per-robot update
-const FRICTION = 3.4;
-function skid(f, dt) { const sp = f.vel.length(); if (sp < 1e-3) { f.vel.set(0, 0, 0); return; }
-  const dec = (sp > 0.25 ? FRICTION : 12) * dt; f.vel.multiplyScalar(Math.max(0, sp - dec) / sp);
-  if (sp > 0.45 && f.y < 0.02 && f.visible) skidTrail(f, sp); else { f.lastSkid.L = null; f.lastSkid.R = null; } }
-function skidTrail(f, sp) {
-  for (const s of ['L', 'R']) { const node = s === 'L' ? f.nodes.footL : f.nodes.footR; toDemo(node, _fp); near(_fp, f.pos, _fp);
-    const last = f.lastSkid[s]; if (last && last.distanceTo(_fp) < 0.035) continue;
-    if (last && last.distanceTo(_fp) < 0.25) { const mid = last.clone().add(_fp).multiplyScalar(0.5); skidMarks.add(mid.x, mid.z, Math.atan2(_fp.x - last.x, _fp.z - last.z), 0.032, last.distanceTo(_fp) + 0.008); }
-    f.lastSkid[s] = _fp.clone();
-    FX.dust(_fp, 1, { size: [0.05, 0.22], life: [0.5, 1.1], vel: 0.2, up: 0.1, a: 0.5 }); if (sp > 0.9 && chance(0.6)) FX.sparks(_fp, 2, [1, 0.75, 0.4], 0.9); }
-}
-function footfalls(f) {
-  for (const s of ['L', 'R']) { const node = s === 'L' ? f.nodes.footL : f.nodes.footR; toDemo(node, _fp); near(_fp, f.pos, _fp); const h = _fp.y - Hd(_fp.x, _fp.z);
-    const prev = f.footY[s]; f.footY[s] = h;
-    if (prev > 0.158 && h <= 0.155 && ['walk', 'idle', 'attack', 'hit'].includes(f.state)) {
-      footprints.add(_fp.x, _fp.z, f.yaw, 0.07, 0.13); FX.dust(_fp, 4, { size: [0.04, 0.2], life: [0.5, 1.0], vel: 0.3, up: 0.05, a: 0.45 });
-      addShake(f.walkMode === 'run' ? 0.05 : 0.03, _fp); impact(new THREE.Vector3(_fp.x, Hd(_fp.x, _fp.z) + 0.02, _fp.z), 0.07, null, 0.6, 'step'); }
-  }
-}
-function faceTo(f, target, dt, rate = 0.0002) { let dy = target - f.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); f.yaw += dy * (1 - Math.pow(rate, dt)); return dy; }
 // mechs climb any slope; only deep water blocks them
 function passableD(x, z) { return heightAt(x * S, z * S) > -5; }
 // ---- pathfinding: A* over a wrapping walkability grid (1 cell = 1 demo unit = 12 world units)
@@ -868,23 +801,184 @@ function tryMove(f, dt) {
   }
   f.vel.multiplyScalar(0.5);                                          // boxed in: slow down but keep the order
 }
+
+// ---- personalities (from the demo): strikers fight like Violet, gunners like Cobalt, each with some variation
+const PERSONA = {
+  striker: { aggro: 0.74, range: 0.35, guard: 0.6, air: 0.45, saber: 0.9, dodge: 0.58, react: [0.09, 0.18] },
+  gunner: { aggro: 0.45, range: 0.9, guard: 0.55, air: 0.5, saber: 0.35, dodge: 0.72, react: [0.1, 0.2] },
+};
+function persona(role) { const b = PERSONA[role], o = {}; for (const k in b) o[k] = Array.isArray(b[k]) ? b[k] : clamp(b[k] * rand(0.85, 1.15), 0.05, 1); return o; }
+function walkTo(f, x, z, mode, stopAt = 0.1, moveT = 3) { f.onArrive = null; f.wp = new THREE.Vector3(x, 0, z); f.stopAt = stopAt; f.walkMode = mode; setState(f, 'walk', null); f.gaitClip = null; f.moveT = moveT; }
+const tgtFrame = (f, t) => near(t.pos, f.pos, new THREE.Vector3());          // target position in f's frame
+// ---- the demo's reaction system: an attacker "announces" and the defender may dodge / block / counter
+function announce(f, type) {
+  const o = f.target; if (!o || o.kind !== 'robot' || o.state === 'ko') return;
+  const [a, b] = o.p.react; o.pending = { type, at: rand(a, b), from: f };
+}
+function isRecovering(o) { if (['land', 'hitL', 'hit', 'sheathe', 'draw', 'blockHit', 'turn', 'gunBeam'].includes(o.state)) return true;
+  if (o.state === 'attack' || o.state === 'dive') { const A = ATTACKS[o.clip]; return A && clipT(o) > A.hits[A.hits.length - 1][1] + 0.04; } return false; }
+function isThreat(o, d) { if (o.state !== 'attack' && o.state !== 'dive') return false; const A = ATTACKS[o.clip]; if (!A) return false; const t = clipT(o); return A.hits.some(([, t1]) => t < t1) && d < (A.root ? 2.2 : 1.5); }
+function pickStrike(f, d, rec) {
+  const opts = [['Saber_Slash_Combo', d < 0.64 ? 1.0 : 0], ['Saber_Rising_Slash', d < 0.62 ? 0.9 : 0], ['Saber_Wide_Sweep', d < 0.64 ? (rec ? 1.1 : 0.7) : 0], ['Saber_Stab_Combo', d < 0.74 ? 0.9 : 0],
+    ['Saber_Cross_Cut', d < 0.54 ? 0.9 : 0], ['Saber_Dash_Thrust', d > 0.5 && d < 0.95 ? 0.7 : 0]].filter(o => o[1] > 0).map(([n, s]) => ({ name: n, s: s * (n === f.lastStrike ? 0.35 : 1) }));
+  const c = choose(opts) || { name: 'Saber_Stab_Combo' }; f.lastStrike = c.name; return c.name;
+}
+function gunBurst(f) { setState(f, 'gunBurst', 'Gun_Burst', 0.08); f.shots = 0; f.gun.energy -= 12; announce(f, 'fire'); }
+function gunCharge(f) { setState(f, 'gunCharge', 'Gun_Charge', 0.12); f.gun.energy -= 40; f.aimPt = near(tgtPos(f.target, new THREE.Vector3()), f.pos, new THREE.Vector3()); f.chargeU = 0;
+  if (f.target.kind === 'robot') f.target.pending = { type: 'charge', at: rand(0.7, 1.15), from: f }; }
+function attack(f, clip) { setState(f, 'attack', clip); announce(f, 'melee'); }
+function walkBack(f) { const o = f.target; const t = tgtFrame(f, o); const away = f.pos.clone().sub(t).setY(0).normalize(); walkTo(f, f.pos.x + away.x * rand(0.6, 1.2), f.pos.z + away.z * rand(0.6, 1.2), 'walk', 0.05, rand(0.9, 1.6)); }
+function strafe(f, dir, boost) { if (boost) { setState(f, 'boostStrafe', dir > 0 ? 'Boost_Strafe_L' : 'Boost_Strafe_R', 0.1); f.moveT = rand(0.35, 0.6); f.strafeDir = dir; return; }
+  const side = new THREE.Vector3(Math.cos(f.yaw), 0, -Math.sin(f.yaw)).multiplyScalar(dir); walkTo(f, f.pos.x + side.x * rand(0.3, 0.5), f.pos.z + side.z * rand(0.3, 0.5), 'walk', 0.03, rand(1.0, 1.8)); }
+function reposition(f) { const t = tgtFrame(f, f.target); const a0 = Math.atan2(f.pos.z - t.z, f.pos.x - t.x) + rand(-1.3, 1.3); const R = rand(1.8, 3.2);
+  const wx = t.x + Math.cos(a0) * R, wz = t.z + Math.sin(a0) * R; walkTo(f, wx, wz, Math.hypot(wx - f.pos.x, wz - f.pos.z) > 1.2 ? 'run' : 'walk', 0.1, 2.6); }
+const HOPS = { B: 'Boost_Hop_Back', L: 'Boost_Hop_L', R: 'Boost_Hop_R' };
+function hop(f, side) { f.cool.hop = 1.1; f.boost -= 18; f.hopSide = side; setState(f, 'hop', HOPS[side], 0.06); f.hopFx = 0; }
+function boostBack(f) { f.boost -= 6; setState(f, 'boostBack', 'Boost_Back', 0.1); f.moveT = rand(0.4, 0.75); }
+function burstTo(f) { announce(f, 'approach'); f.cool.dash = 4; setState(f, 'burst', 'Boost_Dash_Burst', 0.06); f.boost -= 10; }
+function block(f) { setState(f, 'block', 'Guard_Block', 0.05); }
+function jump(f, plan) { f.cool.jump = 5; f.boost -= 24; f.airPlan = plan; f.strafeDir = chance(.5) ? 1 : -1; setState(f, 'jump', 'Boost_Jump'); }
+function quickstep(f) { f.boost -= 16; const left = chance(0.5); setState(f, 'dodge', left ? 'QuickStep_L' : 'QuickStep_R', 0.05);
+  f.vel.set(Math.cos(f.yaw), 0, -Math.sin(f.yaw)).multiplyScalar(2.6 * (left ? 1 : -1)); }
+function landShock(f, rad) { const p = new THREE.Vector3(f.pos.x, groundY(f), f.pos.z); FX.dust(p, 18, { size: [0.08, 0.5], life: [0.7, 1.5], vel: 0.9, up: 0.1, a: 0.5 });
+  impact(p.clone().setY(p.y + 0.05), rad, null, 1.1, 'land'); addShake(0.25, p); scorchMarks.add(p.x, p.z, f.yaw, 0.3, 0.3); }
+function react(f) {
+  const r = f.pending; f.pending = null; if (!r || (r.from && r.from.state === 'ko')) return;
+  const o = r.from, d = o ? wdist2(f.pos.x, f.pos.z, o.pos.x, o.pos.z) : 3, P = f.p;
+  if (!o && r.type !== 'fire') return;                           // incoming missiles (no robot attached): dodge only
+  if (!['idle', 'walk', 'fire', 'burst', 'boostStrafe', 'boostBack'].includes(f.state) || f.y > 0.05) return;
+  if (f.order && f.order.type === 'move') return;                 // obeying a move order: don't get distracted
+  if (!chance(Math.min(0.95, P.dodge + 0.15))) return;
+  if (o) f.target = o;                                            // turn to face whoever is coming at us
+  const B = f.boost, canHop = B > 18 && !(f.cool.hop > 0), opts = []; const add = (n, s, fn) => opts.push({ name: n, s, fn });
+  if (r.type === 'melee') { if (o.state !== 'attack' && o.state !== 'dive') return; const A = ATTACKS[o.clip]; if (!A || d > (A.root ? 2.6 : 1.5)) return;
+    add('block', (f.saberOut ? 0.6 : 1.2) * P.guard, () => block(f)); add('parry', f.saberOut && !A.root ? 2.4 * P.guard : 0, () => attack(f, 'Saber_Parry_Riposte')); add('hopBack', canHop ? 1.1 * P.dodge + (A.root ? 0.3 : 0) : 0, () => hop(f, 'B'));
+    add('sideHop', canHop ? 0.9 * P.dodge + (A.root ? 0.5 : 0) : 0, () => hop(f, chance(.5) ? 'L' : 'R')); add('skid', B > 16 ? 0.4 : 0, () => quickstep(f)); }
+  else if (r.type === 'fire') { add('boostStrafe', B > 20 ? 1.1 : 0, () => strafe(f, chance(.5) ? 1 : -1, true)); add('sideHop', canHop ? 0.9 : 0, () => hop(f, chance(.5) ? 'L' : 'R'));
+    add('jump', B > 40 && !(f.cool.jump > 0) ? 0.5 * P.air : 0, () => jump(f, 'fire')); add('skid', B > 16 ? 0.3 : 0, () => quickstep(f)); }
+  else if (r.type === 'charge') { if (o.state !== 'gunCharge') return;
+    add('sideHop', canHop ? 1.4 * P.dodge : 0, () => hop(f, chance(.5) ? 'L' : 'R')); add('boostStrafe', B > 20 ? 1.2 : 0, () => strafe(f, chance(.5) ? 1 : -1, true));
+    add('rush', f.saberOut && d > 1.1 && d < 3.8 && B > 30 ? 1.2 * P.aggro : 0, () => { f.boost -= 22; attack(f, 'Saber_Boost_Slash'); });
+    add('block', 0.4 * P.guard, () => block(f)); add('jump', B > 40 && !(f.cool.jump > 0) ? 0.6 * P.air : 0, () => jump(f, 'fire')); }
+  else if (r.type === 'approach') { add('boostBack', B > 25 ? 1.3 * P.range : 0, () => boostBack(f)); add('hopBack', canHop ? 0.9 : 0, () => hop(f, 'B'));
+    add('sideHop', canHop ? 0.7 : 0, () => hop(f, chance(.5) ? 'L' : 'R')); add('block', o.clip === 'Saber_Boost_Slash' ? 0.8 * P.guard : 0.2, () => block(f)); add('stand', 0.5 * P.aggro, () => {}); }
+  const c = choose(opts); if (c) c.fn();
+}
+// ---- the demo's fighting brain, pointed at the robot's current target
+function think(f) {
+  const ord = f.order;
+  // plain move order: go there, ignore enemies until arrival
+  if (ord && ord.type === 'move') {
+    const d = wdist2(f.pos.x, f.pos.z, ord.x, ord.z);
+    if (d < 0.25) { f.order = null; }
+    else { if (f.saberOut && d > 3) { setState(f, 'sheathe', 'Saber_Sheathe'); return; } goTo(f, ord.x, ord.z, d > 1.2 ? 'run' : 'walk', 0.1, 3); return; }
+  }
+  if (ord && ord.type === 'attack') { if (alive(ord.target)) f.target = ord.target; else f.order = null; }
+  if (!alive(f.target) || wdist2(f.pos.x, f.pos.z, f.target.pos.x, f.target.pos.z) > SIGHT * 1.3) f.target = null;
+  if (!f.target || !(ord && ord.type === 'attack')) { const e = nearestEnemy(f, SIGHT); if (e && (!f.target || e !== f.target && chance(0.25))) f.target = e; }
+  const o = f.target;
+  if (!o) {
+    if (ord && ord.type === 'amove') { const d = wdist2(f.pos.x, f.pos.z, ord.x, ord.z); if (d < 0.5) f.order = null;
+      else { goTo(f, ord.x, ord.z, 'run', 0.3, 2.5); return; } }
+    if (f.saberOut && chance(0.3)) { setState(f, 'sheathe', 'Saber_Sheathe'); return; }
+    return toIdle(f, 0.2, rand(0.4, 0.9));
+  }
+  const op = tgtFrame(f, o), d = Math.hypot(op.x - f.pos.x, op.z - f.pos.z), P = f.p, B = f.boost, cd = k => !(f.cool[k] > 0);
+  const opts = []; const add = (name, s, fn) => opts.push({ name, s, fn });
+  if (o.kind === 'heli') {                                        // gunship overhead: head vulcans / rifle, keep it in range
+    add('shootHeli', d < 5 && cd('fire') ? 1.6 : 0, () => { f.cool.fire = rand(1.6, 3); f.fireT = rand(0.8, 1.4); setState(f, 'fire', 'Head_Vulcan_Fire'); });
+    if (f.gun && f.gun.energy >= 12) add('rifleHeli', d < 6 && cd('gunBurst') ? 1.4 : 0, () => { f.cool.gunBurst = rand(0.9, 1.6); gunBurst(f); });
+    add('close', d > 3.5 ? 1.2 : 0, () => goTo(f, op.x, op.z, 'run', 3, 1.5));
+    add('boostStrafe', B > 25 ? 0.5 : 0, () => strafe(f, chance(.5) ? 1 : -1, true));
+    add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
+  } else {
+    const rec = isRecovering(o), firing = o.state === 'fire' || o.state === 'airfire', threat = isThreat(o, d), lowHp = f.hp < o.hp * 0.6;
+    if (d > 8) { add('close', 3, () => goTo(f, op.x, op.z, 'run', 4, 2.5)); }   // far away (RTS scale): run in first
+    else if (f.saberOut) {
+      add('slash', d < 0.74 && cd('slash') ? 3.0 * P.aggro * (rec ? 1.9 : 1) : 0, () => { f.cool.slash = 1.6; attack(f, pickStrike(f, d, rec)); });
+      add('runSlash', d > 0.95 && d < 3.6 && cd('runSlash') ? 1.8 * P.aggro * (rec ? 1.6 : 1) : 0, () => { f.cool.runSlash = 2.2; walkTo(f, op.x, op.z, 'run', 0.6, 2.5); f.onArrive = 'runSlash'; announce(f, 'approach'); });
+      add('boostSlash', d > 1.1 && d < 3.8 && B > 30 && cd('boostSlash') ? 1.6 * P.aggro * (rec ? 1.5 : 1) * (o.state === 'gunCharge' ? 1.8 : 1) : 0, () => { f.cool.boostSlash = 2.6; f.boost -= 22; attack(f, 'Saber_Boost_Slash'); announce(f, 'approach'); });
+      add('close', d > 0.7 ? (1.0 + (d - 0.7) * 0.9) * P.aggro : 0, () => walkTo(f, op.x, op.z, d > 1.4 ? 'run' : 'walk', 0.35, rand(1.2, 2.6)));
+      add('circle', 0.5 + (firing ? 0.8 : 0), () => strafe(f, chance(.5) ? 1 : -1, firing && B > 25));
+      add('block', threat ? 2.4 * P.guard : 0, () => block(f));
+      add('jumpDive', d > 1.0 && d < 2.6 && B > 35 && cd('jump') ? 0.6 * P.air : 0, () => jump(f, 'dive'));
+      add('sheathe', d > 3.2 ? 0.9 * (1 - P.saber) + 0.2 : 0, () => setState(f, 'sheathe', 'Saber_Sheathe'));
+      add('retreat', lowHp && d < 1.2 ? 1.0 * (1 - P.aggro) : 0, () => walkBack(f));
+      add('hold', 0.25, () => toIdle(f, 0.12, rand(0.2, 0.45)));
+    } else {
+      const pref = P.saber > 0.6 ? 1.2 : 3.0;
+      add('fire', d > 0.9 && d < 5 && cd('fire') ? (f.gun ? 0.9 : 2.1) * P.range * (rec ? 1.5 : 1) * (d > 1.8 ? 1.2 : 0.75) : 0, () => { f.cool.fire = rand(1.6, 3.0); f.fireT = rand(0.8, 1.5); setState(f, 'fire', 'Head_Vulcan_Fire'); announce(f, 'fire'); });
+      add('draw', d < 2.8 && cd('draw') ? 1.7 * P.saber * P.aggro : 0, () => { f.cool.draw = 3; setState(f, 'draw', 'Saber_Draw'); });
+      add('melee', d < 0.58 ? 2.4 * P.aggro * (rec ? 1.6 : 1) : 0, () => attack(f, chance(0.5) ? 'Melee_Punch_Combo' : 'Melee_Boost_Kick'));
+      add('close', d > pref ? 0.8 + (d - pref) * 0.7 : 0, () => walkTo(f, op.x, op.z, d - pref > 1.2 ? 'run' : 'walk', pref, rand(1.2, 2.6)));
+      add('dash', d > 3.2 && B > 40 && cd('dash') ? 0.5 : 0, () => burstTo(f));
+      add('retreat', d < 1.4 ? 1.2 * P.range * (1.2 - P.aggro) : 0, () => walkBack(f));
+      add('circle', 0.9 + (firing ? 1.0 : 0), () => strafe(f, chance(.5) ? 1 : -1, firing && B > 25));
+      add('reposition', 0.55 + (d < 1.0 ? 0.4 : 0), () => reposition(f));
+      add('jump', B > 40 && cd('jump') ? 0.2 * P.air + (firing ? 0.5 * P.air : 0) : 0, () => jump(f, 'fire'));
+      add('block', threat ? 2.2 * P.guard : 0, () => block(f));
+      add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
+    }
+    if (d <= 8 && f.gun) { const E = f.gun.energy, sm = f.saberOut ? 0.55 : 1;
+      add('gunBurst', d > 0.8 && d < 6.5 && E >= 12 && cd('gunBurst') ? 2.5 * (0.5 + P.range) * (rec ? 1.4 : 1) * sm : 0, () => { f.cool.gunBurst = rand(0.9, 1.6); gunBurst(f); });
+      add('gunCharge', d > 1.3 && d < 7.5 && E >= 40 && cd('gunCharge') ? (1.1 + P.range) * (rec ? 2.2 : 1) * (firing ? 0.5 : 1) * sm : 0, () => { f.cool.gunCharge = rand(4, 6.5); gunCharge(f); }); }
+    if (d <= 8) {
+      if (o.state === 'gunCharge' && o.target === f) add('evadeBeam', B > 25 ? 1.5 * P.dodge : 0.7, () => strafe(f, chance(.5) ? 1 : -1, B > 25));
+      const threatish = threat || (o.state === 'walk' && o.onArrive) || o.state === 'burst' || o.state === 'boost';
+      add('hopBack', d < 1.3 && B > 22 && cd('hop') ? 0.7 * (1 - P.aggro) + (lowHp ? 0.6 : 0) + (threatish ? 1.2 : 0) - (rec ? 0.6 : 0) : 0, () => hop(f, 'B'));
+      add('sideHop', d < 2.4 && B > 22 && cd('hop') ? 0.35 + (firing ? 0.9 : 0) + (threatish ? 0.6 : 0) : 0, () => hop(f, chance(.5) ? 'L' : 'R'));
+      add('boostBack', d < 2.0 && B > 30 ? 0.7 * P.range + (lowHp ? 0.5 : 0) + (threatish ? 0.8 * P.range : 0) : 0, () => boostBack(f));
+      add('boostStrafe', B > 25 ? 0.3 + (firing ? 1.1 : 0) : 0, () => strafe(f, chance(.5) ? 1 : -1, true));
+    }
+  }
+  opts.forEach(q => { if (q.name === f.lastAction && q.name !== 'slash') q.s *= 0.6; });
+  const c = choose(opts); if (!c) return toIdle(f, 0.12, 0.2); f.lastAction = c.name; c.fn();
+}
+
+// ----------------------------------------------------- per-robot update (the demo's state machine)
+const FRICTION = 3.4;
+function skid(f, dt) { const sp = f.vel.length(); if (sp < 1e-3) { f.vel.set(0, 0, 0); return; }
+  const dec = (sp > 0.25 ? FRICTION : 12) * dt; f.vel.multiplyScalar(Math.max(0, sp - dec) / sp);
+  if (sp > 0.45 && f.y < 0.02 && f.visible) skidTrail(f, sp); else { f.lastSkid.L = null; f.lastSkid.R = null; } }
+function skidTrail(f, sp) {
+  for (const s of ['L', 'R']) { const node = s === 'L' ? f.nodes.footL : f.nodes.footR; toDemo(node, _fp); near(_fp, f.pos, _fp);
+    const last = f.lastSkid[s]; if (last && last.distanceTo(_fp) < 0.035) continue;
+    if (last && last.distanceTo(_fp) < 0.25) { const mid = last.clone().add(_fp).multiplyScalar(0.5); skidMarks.add(mid.x, mid.z, Math.atan2(_fp.x - last.x, _fp.z - last.z), 0.032, last.distanceTo(_fp) + 0.008); }
+    f.lastSkid[s] = _fp.clone();
+    FX.dust(_fp, 1, { size: [0.05, 0.22], life: [0.5, 1.1], vel: 0.2, up: 0.1, a: 0.5 }); if (sp > 0.9 && chance(0.6)) FX.sparks(_fp, 2, [1, 0.75, 0.4], 0.9); }
+}
+function footfalls(f) {
+  for (const s of ['L', 'R']) { const node = s === 'L' ? f.nodes.footL : f.nodes.footR; toDemo(node, _fp); near(_fp, f.pos, _fp); const h = _fp.y - Hd(_fp.x, _fp.z);
+    const prev = f.footY[s]; f.footY[s] = h;
+    if (f.y < 0.02 && prev > 0.158 && h <= 0.155 && ['walk', 'turn', 'idle', 'land', 'attack', 'hit'].includes(f.state)) {
+      footprints.add(_fp.x, _fp.z, f.yaw, 0.07, 0.13); FX.dust(_fp, 4, { size: [0.04, 0.2], life: [0.5, 1.0], vel: 0.3, up: 0.05, a: 0.45 });
+      addShake(f.walkMode === 'run' ? 0.05 : 0.03, _fp); impact(new THREE.Vector3(_fp.x, Hd(_fp.x, _fp.z) + 0.02, _fp.z), 0.07, null, 0.6, 'step'); }
+  }
+}
+function faceTo(f, target, dt, rate = 0.0002) { let dy = target - f.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); f.yaw += dy * (1 - Math.pow(rate, dt)); return dy; }
 function updateRobot(f, dt) {
   f.st += dt; for (const k in f.cool) f.cool[k] -= dt;
-  const T = alive(f.target) ? f.target : null;
-  const dx = T ? wd(T.pos.x - f.pos.x) : 0, dz = T ? wd(T.pos.z - f.pos.z) : 0, d = Math.hypot(dx, dz);
-  const dir = new THREE.Vector3(dx, 0, dz).normalize();
+  const T = alive(f.target) ? f.target : null, fight = !!T && f.state !== 'ko';
+  const dx = T ? wd(T.pos.x - f.pos.x) : 0, dz = T ? wd(T.pos.z - f.pos.z) : 0, d = T ? Math.hypot(dx, dz) : 99;
+  const dir = T ? new THREE.Vector3(dx, 0, dz).normalize() : new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw));
   const fwd = new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)), side = new THREE.Vector3(Math.cos(f.yaw), 0, -Math.sin(f.yaw));
-  const targetYaw = T ? Math.atan2(dx, dz) : f.yaw;
+  const targetYaw = T ? Math.atan2(dx, dz) : f.yaw; let boosting = false;
   f.bulletHits = Math.max(0, f.bulletHits - dt * 2);
   if (f.gun) f.gun.energy = Math.min(100, f.gun.energy + 7 * dt);
   if (f.underAttackT) f.underAttackT = Math.max(0, f.underAttackT - dt);
+  if (f.pending) { f.pending.at -= dt; if (f.pending.at <= 0) react(f); }
+  const onMove = f.order && f.order.type === 'move';
   switch (f.state) {
-    case 'idle': skid(f, dt); if (T) faceTo(f, targetYaw, dt, 0.05); if (f.st > f.thinkT) think(f); break;
+    case 'idle': skid(f, dt);
+      if (fight && !onMove && Math.abs(Math.atan2(Math.sin(targetYaw - f.yaw), Math.cos(targetYaw - f.yaw))) > 0.55 && f.vel.length() < 0.1) { const s = Math.sign(Math.atan2(Math.sin(targetYaw - f.yaw), Math.cos(targetYaw - f.yaw)));
+        setState(f, 'turn', s > 0 ? 'Turn_L_45' : 'Turn_R_45', 0.12); f.turnFrom = f.yaw; f.turnDir = s; break; }
+      if (f.st > f.thinkT) think(f); break;
+    case 'turn': { const u = clipT(f) / 0.7; f.yaw = f.turnFrom + f.turnDir * Math.PI / 4 * smooth(Math.min(1, u / 0.72)); skid(f, dt); if (clipDone(f)) toIdle(f, 0.12, 0.02); break; }
     case 'walk': {
       if (f.onArrive === 'runSlash' && T) f.wp.set(f.pos.x + dx, 0, f.pos.z + dz);
       const m = new THREE.Vector3(wd(f.wp.x - f.pos.x), 0, wd(f.wp.z - f.pos.z)); const dist = m.length(); m.normalize();
-      const moving = !T || f.order?.type === 'move' || (f.order?.type === 'amove' && !T);
-      faceTo(f, moving || f.walkMode === 'run' ? Math.atan2(m.x, m.z) : targetYaw, dt, 0.02);
+      const travel = onMove || !T || (f.order && f.order.type === 'amove' && d > 6) || f.path || d > 6;   // long moves face the way they go
+      faceTo(f, travel ? Math.atan2(m.x, m.z) : targetYaw, dt, 0.02);
       const fw = m.dot(fwd), lf = m.dot(side);
       let clip = Math.abs(fw) >= Math.abs(lf) * 0.9 ? (fw > 0 ? (f.walkMode === 'run' ? 'Run_Forward' : 'Walk_Forward') : 'Walk_Back') : (lf > 0 ? 'Walk_Strafe_L' : 'Walk_Strafe_R');
       if (clip !== f.clip && (f.gaitClip === null || f.st - f.clipT0 > 0.35)) { play(f, clip, 0.2); f.gaitClip = clip; }
@@ -892,18 +986,49 @@ function updateRobot(f, dt) {
       const cs = (GAIT[f.clip] || 0) * f.gaitRate; const ramp = smooth((f.st - f.clipT0) / 0.2);
       const cv = (f.clip === 'Walk_Forward' || f.clip === 'Run_Forward') ? fwd : f.clip === 'Walk_Back' ? fwd.clone().negate() : f.clip === 'Walk_Strafe_L' ? side : side.clone().negate();
       f.vel.copy(cv).multiplyScalar(cs * ramp);
-      const reach = T && f.stopAt > 0.2 && f.order?.type !== 'move' ? d < f.stopAt : dist < Math.max(0.08, f.stopAt);
-      if (f.onArrive === 'runSlash' && T && T.kind === 'robot' && d < 0.7 && f.clip === 'Run_Forward' && f.saberOut) { f.onArrive = null; setState(f, 'attack', 'Saber_Run_Slash', 0.08); break; }
       if (f.path && dist < 0.35) { if (f.path.length) { const w = f.path.shift(); f.wp.set(f.pos.x + wd(w[0] - f.pos.x), 0, f.pos.z + wd(w[1] - f.pos.z)); if (!f.path.length) f.stopAt = f.pathStop; f.st = Math.min(f.st, 0.3); break; } f.path = null; }
-      if ((reach && !(f.path && f.path.length)) || f.st > f.moveT) { f.onArrive = null; f.strafing = false; f.path = null; toIdle(f, 0.2, rand(0.02, 0.12)); }
+      const reach = !onMove && T && f.walkMode === 'walk' && f.stopAt > 0.2 ? d < f.stopAt : dist < Math.max(0.08, onMove || !T ? 0.08 : f.stopAt);
+      if (f.onArrive === 'runSlash' && T && T.kind === 'robot' && d < 0.7 && f.clip === 'Run_Forward' && f.saberOut) { f.onArrive = null; setState(f, 'attack', 'Saber_Run_Slash', 0.08); announce(f, 'melee'); break; }
+      if ((reach && !(f.path && f.path.length)) || f.st > f.moveT || (!onMove && T && T.kind === 'robot' && f.saberOut && d < 0.62 && !f.onArrive)) { f.onArrive = null; f.path = null; toIdle(f, 0.2, rand(0.02, 0.12)); }
       break; }
-    case 'fire': { skid(f, dt); if (T) faceTo(f, targetYaw, dt, 0.002); if (!T) { toIdle(f, 0.1, 0.05); break; }
+    case 'burst': boosting = true; faceTo(f, targetYaw, dt); f.vel.lerp(dir.clone().multiplyScalar(clipT(f) > 0.1 ? 2.4 : 0.3), 1 - Math.pow(0.0005, dt)); if (clipDone(f) || f.st > 0.45) { setState(f, 'boost', 'Boost_Forward', 0.1); f.moveT = rand(0.3, 0.6); } break;
+    case 'boost': boosting = true; f.boost -= 20 * dt; faceTo(f, targetYaw, dt); f.vel.lerp(dir.clone().multiplyScalar(2.2), 1 - Math.pow(0.001, dt));
+      if (!fight || f.st > f.moveT || f.boost <= 0 || d < (f.saberOut ? 0.7 : 1.3)) toIdle(f, 0.15, 0.02); break;
+    case 'boostStrafe': boosting = true; f.boost -= 22 * dt; faceTo(f, targetYaw, dt); f.vel.lerp(side.clone().multiplyScalar(1.7 * f.strafeDir).addScaledVector(dir, (Math.min(d, 6) - 2) * 0.4), 1 - Math.pow(0.001, dt));
+      if (!fight || f.st > f.moveT || f.boost <= 0) toIdle(f, 0.15, 0.02); break;
+    case 'dodge': boosting = true; skid(f, dt); if (f.st > 0.45) toIdle(f, 0.12, 0.03); break;
+    case 'hop': { const t = clipT(f); faceTo(f, targetYaw, dt, 0.01); const hv = f.hopSide === 'B' ? fwd.clone().negate().multiplyScalar(2.0) : side.clone().multiplyScalar(f.hopSide === 'L' ? 2.2 : -2.2);
+      if (t < 0.12) skid(f, dt);
+      else if (t < 0.48) { boosting = true; if (!f.hopFx) { f.hopFx = 1; FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 10, { size: [0.06, 0.35], vel: 0.8, up: 0.06 }); addShake(0.06, f.pos); } f.vel.lerp(hv, 1 - Math.pow(0.0002, dt)); }
+      else { if (f.hopFx === 1) { f.hopFx = 2; FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 8, { size: [0.06, 0.3], vel: 0.6, up: 0.05 }); addShake(0.08, f.pos); } skid(f, dt); }
+      if (clipDone(f)) toIdle(f, 0.12, rand(0.02, 0.1)); break; }
+    case 'boostBack': boosting = true; f.boost -= 20 * dt; faceTo(f, targetYaw, dt); f.vel.lerp(dir.clone().multiplyScalar(-1.7), 1 - Math.pow(0.001, dt));
+      if (!fight || f.st > f.moveT || f.boost <= 0) toIdle(f, 0.15, 0.02); break;
+    case 'block': skid(f, dt); faceTo(f, targetYaw, dt); if (clipDone(f) || f.st > 0.8) toIdle(f, 0.1, 0.02); break;
+    case 'blockHit': skid(f, dt); if (clipDone(f)) toIdle(f, 0.08, 0.02); break;
+    case 'fire': { skid(f, dt); if (!T) { toIdle(f, 0.1, 0.05); break; } faceTo(f, targetYaw, dt, 0.002);
       f.fireAcc += dt; while (f.fireAcc > 1 / 12) { f.fireAcc -= 1 / 12; fireBullet(f); }
       if (f.st > f.fireT) toIdle(f, 0.12, rand(0.05, 0.2)); break; }
+    case 'jump': { boosting = true; const t = clipT(f); faceTo(f, targetYaw, dt); if (t < 0.22) skid(f, dt); else f.vel.lerp(side.clone().multiplyScalar(f.strafeDir * 0.8), 1 - Math.pow(0.05, dt));
+      if (t > 0.24) f.vy = THREE.MathUtils.lerp(f.vy, t < 0.62 ? 1.7 : 0.15, 1 - Math.pow(0.001, dt));
+      if (t > 0.22 && t < 0.3 && f.y < 0.03) { FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 6, { size: [0.08, 0.4], vel: 0.8 }); addShake(0.1, f.pos); }
+      if (clipDone(f)) { f.airT = rand(0.8, 1.4); f.strafeDir = chance(0.5) ? 1 : -1; if (f.airPlan === 'fire' && fight) { setState(f, 'airfire', 'Air_Vulcan_Fire', 0.12); announce(f, 'fire'); } else setState(f, 'air', 'Air_Hover', 0.15); } break; }
+    case 'air': case 'airfire': boosting = true; f.boost -= 9 * dt; faceTo(f, targetYaw, dt);
+      f.vy = THREE.MathUtils.lerp(f.vy, f.st < f.airT ? 0 : -1.8, 1 - Math.pow(0.01, dt));
+      f.vel.lerp(side.clone().multiplyScalar(f.strafeDir * 1.0).addScaledVector(dir, (Math.min(d, 6) - (f.saberOut ? 0.9 : 2.0)) * 0.6), 1 - Math.pow(0.05, dt));
+      if (f.state === 'airfire' && fight && f.st < f.airT) { f.fireAcc += dt; while (f.fireAcc > 1 / 12) { f.fireAcc -= 1 / 12; fireBullet(f); } }
+      if (f.saberOut && fight && T.kind === 'robot' && d < 1.5 && f.st > 0.25 && f.y > 0.12) { setState(f, 'dive', 'Saber_Air_Slash', 0.08); announce(f, 'melee'); break; }
+      if (f.state === 'airfire' && f.st > f.airT) setState(f, 'air', 'Air_Hover', 0.12);
+      if (f.y <= 0.001 && f.st > 0.3) { f.y = 0; f.vy = 0; setState(f, 'land', 'Landing', 0.08); landShock(f, 0.3); } break;
+    case 'dive': { boosting = true; const t = clipT(f); faceTo(f, targetYaw, dt);
+      if (t < 0.33) { f.vy = THREE.MathUtils.lerp(f.vy, t < 0.18 ? 0.2 : -(f.y / Math.max(0.03, 0.33 - t)), 1 - Math.pow(0.0001, dt)); } else { if (f.y > 0) { f.y = 0; landShock(f, 0.36); } f.vy = 0; }
+      doAttack(f, d, dir, fwd, dt); break; }
+    case 'land': skid(f, dt); if (f.st > 0.7) toIdle(f, 0.15, 0.02); break;
     case 'draw': skid(f, dt); if (clipT(f) > 0.22) f.saberOut = true; if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
     case 'sheathe': skid(f, dt); if (clipT(f) > 0.54) f.saberOut = false; if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
-    case 'attack': faceTo(f, targetYaw, dt, clipT(f) < 0.2 ? 0.00005 : 0.3); doAttack(f, d, dir, fwd, dt); break;
-    case 'hit': skid(f, dt); if (clipDone(f) || f.st > 1.3) toIdle(f, 0.12, 0.08); break;
+    case 'attack': faceTo(f, targetYaw, dt, clipT(f) < 0.2 || f.clip === 'Saber_Boost_Slash' && clipT(f) < 0.6 ? 0.00005 : 0.3); doAttack(f, d, dir, fwd, dt);
+      boosting = f.clip === 'Saber_Boost_Slash' && clipT(f) > 0.1 && clipT(f) < 0.8; break;
+    case 'hit': skid(f, dt); if (clipDone(f) || f.st > 1.3) { if (fight && f.boost > 22 && chance(0.55)) { chance(0.5) ? hop(f, 'B') : boostBack(f); } else toIdle(f, 0.12, 0.08); } break;
     case 'hitL': skid(f, dt); if (f.st > 0.55) toIdle(f, 0.1, 0.03); break;
     case 'gunBurst': { skid(f, dt); faceTo(f, targetYaw, dt, 0.0005); const t = clipT(f), ST = [0.18, 0.28, 0.38];
       while (f.shots < 3 && t >= ST[f.shots]) { f.shots++; if (f.gun) fireLaser(f); } if (clipDone(f)) toIdle(f, 0.12, rand(0.05, 0.2)); break; }
@@ -914,7 +1039,11 @@ function updateRobot(f, dt) {
     case 'ko': skid(f, dt); f.koT += dt; break;
   }
   if (f.state === 'ko' && f.koT > 18) { f.sink = (f.sink || 0) + dt * 0.04; }
-  // move, with wrap and a check for deep water / cliffs
+  // vertical: gravity outside the flight states, landing shocks
+  if (!['jump', 'air', 'airfire', 'dive'].includes(f.state) && f.y > 0) f.vy -= 4.5 * dt;
+  f.y = Math.max(0, f.y + f.vy * dt); if (f.y === 0 && f.vy < 0) { if (f.vy < -1.2) landShock(f, 0.22); f.vy = 0; }
+  if (!boosting && f.y === 0) f.boost = Math.min(100, f.boost + 26 * dt); f.boost = Math.max(0, f.boost);
+  f.boosting = boosting;
   tryMove(f, dt);
   // stuck watchdog: if a walking robot makes no progress for a while, give it a new plan
   if (f.state === 'walk') { f.stuckT = (f.stuckT || 0) + dt; if (f.stuckT > 1.5) { const moved = f.lastPos ? wdist2(f.pos.x, f.pos.z, f.lastPos.x, f.lastPos.z) : 1;
@@ -922,9 +1051,17 @@ function updateRobot(f, dt) {
       else f.stuckN = 0;
       f.stuckT = 0; f.lastPos = { x: f.pos.x, z: f.pos.z }; } } else f.stuckT = 0;
   // body vs town: crush whatever the robot moves through
-  const sp = f.vel.length(); if (sp > 0.08) { const base = groundY(f) + f.y; const dv = f.vel.clone().setY(0).normalize();
+  const sp = f.vel.length(); if (sp > 0.08 || f.y > 0) { const base = groundY(f) + f.y; const dv = sp > 0.01 ? f.vel.clone().setY(0).normalize() : null;
     for (const hh of [0.06, 0.22, 0.42]) impact(new THREE.Vector3(f.pos.x, base + hh, f.pos.z), 0.13, dv, 0.4 + sp * 0.7, 'body'); }
 }
+// thrusters: flames + exhaust while boosting or airborne
+function thrusters(f) {
+  const on = f.boosting || f.y > 0.02;
+  f.flames.forEach(m => { const s = on ? rand(0.8, 1.3) : 0.001; m.scale.set(on ? 1 : 0.001, s * (['boost', 'jump', 'burst', 'dive', 'boostStrafe', 'boostBack', 'hop'].includes(f.state) ? 1.5 : 1), on ? 1 : 0.001);
+    if (on && chance(0.5)) { toDemo(m, _fp); near(_fp, f.pos, _fp); const back = new THREE.Vector3(0, -0.2, -1).applyQuaternion(f.nodes.chest.getWorldQuaternion(new THREE.Quaternion())); FX.exhaust(_fp, back, f.col); } });
+  if (on && f.y < 0.2 && chance(0.4)) FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 1, { size: [0.06, 0.35], life: [0.5, 1.0], vel: 0.6, up: 0.04, a: 0.35 });
+}
+
 const _s1 = new THREE.Vector3(), _s2 = new THREE.Vector3(), _s3 = new THREE.Vector3(), _s4 = new THREE.Vector3(), _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _cp = new THREE.Vector3();
 function segDist(p1, q1, p2, q2, out) {
   const d1 = _s1.subVectors(q1, p1), d2 = _s2.subVectors(q2, p2), r = _s3.subVectors(p1, p2);
@@ -947,7 +1084,13 @@ function doAttack(f, d, dir, fwd, dt) {
     if (f.lodge.t <= 0 && f.lodge.release === undefined) { f.act.timeScale = f.lodge.after; f.lodge.release = 0.1; }
     if (f.lodge.release !== undefined) { f.lodge.release -= dt; if (f.lodge.release <= 0) { f.act.timeScale = 1; f.lodge = null; } } }
   if (A.root === 'run') { const i = Math.min(RUN_SLASH_X.length - 2, Math.floor(t * 30)); const v = (RUN_SLASH_X[i + 1] - RUN_SLASH_X[i]) * 30 * (f.act.timeScale > 0 ? 1 : 0); f.vel.copy(fwd).multiplyScalar(d < 0.45 ? v * 0.3 : v); }
-  else skid(f, dt);
+  else if (A.root === 'boost') { const B0 = 0.28, B1 = 0.72;
+    if (t < 0.12) skid(f, dt);
+    else if (t < B0) { f.vel.multiplyScalar(Math.pow(0.001, dt)); if (!f.liftFx) { f.liftFx = 1; FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 14, { size: [0.08, 0.45], vel: 0.9, up: 0.06 }); addShake(0.12, f.pos); } }
+    else if (t < B1) { if (!f.flyV) { f.flyV = clamp(Math.min(d, 4) - 0.36, 0.2, 2.8) / (0.62 - B0); } f.vel.lerp(dir.clone().multiplyScalar(d < 0.5 ? 0 : f.flyV * (f.act.timeScale > 0 ? 1 : 0.05)), 1 - Math.pow(0.0001, dt)); }
+    else if (t < 0.8) { f.vel.multiplyScalar(Math.pow(0.02, dt)); }
+    else { if (!f.landFx) { f.landFx = 1; landShock(f, 0.26); } skid(f, dt); }
+  } else if (f.clip !== 'Saber_Air_Slash') skid(f, dt);
   A.hits.forEach(([t0, t1, dmg, label, w, heavy], i) => {
     if (f.hitDone[i]) return;
     if (t > t1) { f.hitDone[i] = true;                    // whiff: the swing still wrecks whatever is in front
@@ -955,13 +1098,13 @@ function doAttack(f, d, dir, fwd, dt) {
     if (t < t0 || !o) return;
     const rad = weaponSeg(f, w); const ob = groundY(o) + o.y; const op = near(o.pos, f.pos, new THREE.Vector3()); _s1.set(op.x, ob + 0.12, op.z); _s2.set(op.x, ob + 0.8, op.z);
     const p1 = _wa.clone(), q1 = _wb.clone(), dist = segDist(p1, q1, _s1.clone(), _s2.clone(), _cp);
-    if (dist < 0.15 + rad) { f.hitDone[i] = true; const at = _cp.clone(); damage(f, o, dmg, label, !!heavy, dir, at);
-      const blade = w === 'blade'; f.lodge = { t: blade ? 0.15 : 0.07, p: at, blade, after: blade ? 0.55 : 0.8 }; f.act.timeScale = 0;
+    if (dist < 0.15 + rad) { f.hitDone[i] = true; const at = _cp.clone(); const res = damage(f, o, dmg, label, !!heavy, dir, at);
+      const blade = w === 'blade'; f.lodge = { t: res === 'blocked' ? 0.07 : (blade ? 0.15 : 0.07), p: at, blade, after: blade ? 0.55 : 0.8 }; f.act.timeScale = 0;
       FX.sparks(at, blade ? 45 : 18, [1, 0.85, 0.5], blade ? 2.2 : 1.4); FX.flash(at, blade ? 0.3 : 0.15, [1, 0.9, 0.7]); if (blade) FX.sparks(at, 20, f.col, 1.6);
       if (A.hits.length === 1 || heavy) impact(at, 0.2, fwd.clone(), 0.9, 'strike'); }
   });
   if (A.saber && f.nodes.blade.scale.y > 0.5) bladeCut(f);
-  if (clipDone(f)) { if (f.lodge) { f.act.timeScale = 1; f.lodge = null; } toIdle(f, 0.14, rand(0.03, 0.2)); }
+  if (clipDone(f)) { f.flyV = 0; f.liftFx = 0; f.landFx = 0; if (f.lodge) { f.act.timeScale = 1; f.lodge = null; } toIdle(f, 0.14, rand(0.03, 0.2)); }
 }
 const bladeTip = new THREE.Vector3(), bladeBase = new THREE.Vector3();
 function bladeCut(f) { const n = f.nodes.blade; n.updateWorldMatrix(true, false); bladeBase.setFromMatrixPosition(n.matrixWorld).divideScalar(S); bladeTip.set(0, 0.3, 0).applyMatrix4(n.matrixWorld).divideScalar(S);
@@ -993,7 +1136,7 @@ function gunCarry(f, dt) {
 }
 function updateTrail(f) {
   const n = f.nodes.blade; const on = n.scale.y > 0.5 && f.saberOut; const Hh = f.trailHist;
-  const swinging = on && f.state === 'attack' && !f.lodge;
+  const swinging = on && (f.state === 'attack' || f.state === 'dive') && !f.lodge;
   if (swinging) { n.updateWorldMatrix(true, false); const b = new THREE.Vector3().setFromMatrixPosition(n.matrixWorld).divideScalar(S), t = new THREE.Vector3(0, 0.3, 0).applyMatrix4(n.matrixWorld).divideScalar(S);
     if (Hh[0] && Hh[0].t.distanceTo(t) > 0.22) Hh.length = 0; Hh.unshift({ b, t }); } else Hh.length = 0;
   if (Hh.length > 14) Hh.length = 14;
@@ -1047,6 +1190,7 @@ function heliFireMissile(h) {
   const pod = h.pods[h.podI ^= 1]; toDemo(pod, tmpA); near(tmpA, h.pos, tmpA); const m = missiles.find(m => !m.alive); if (!m) return;
   const fwd = new THREE.Vector3(Math.sin(h.yaw), -0.15, Math.cos(h.yaw)).normalize();
   m.alive = true; m.owner = h; m.life = 3.2; m.tgt = h.target; m.age = 0; m.m.visible = true; m.p.copy(tmpA); m.v.copy(fwd).multiplyScalar(1.2).add(h.vel);
+  if (h.target && h.target.kind === 'robot' && h.target.state !== 'ko' && !h.target.pending) { const [a, b] = h.target.p.react; h.target.pending = { type: 'fire', at: rand(a, b) + 0.2, from: null }; }
   FX.flash(tmpA, 0.14, [1, 0.7, 0.4]); FX.smoke(tmpA, 4, { size: [0.04, 0.2], life: [0.6, 1.2], col: [0.55, 0.53, 0.5], a: 0.4, vel: 0.1, up: 0.02 });
 }
 function updateHeliProjectiles(dt) {
@@ -1220,7 +1364,7 @@ const Battle = {
       f.root.visible = f.visible && !(f.sink > 0.9);
       f.root.position.set(dx, groundY(f) + f.y - (f.sink || 0), dz); f.root.rotation.y = f.yaw;
       if (f.visible) { f.mixer.update(dt); weaponOverride(f); headTrack(f, dt); gunCarry(f, dt); f.model.updateMatrixWorld(true); footfalls(f); damageFX(f, dt); gunFX(f, dt); updateTrail(f);
-        const on = false; f.flames.forEach(m => m.scale.set(0.001, 0.001, 0.001)); }
+        thrusters(f); }
       else { f.mixer.update(dt); }
       placeBar(f, dx * S, (groundY(f) + f.y) * S, dz * S, f.visible && f.state !== 'ko');
       if (f.sel && f.state !== 'ko') { const r = ringFor(f); r.visible = true; r.position.set(dx, groundY(f) + 0.01, dz); } else if (f.ring) f.ring.visible = false;
