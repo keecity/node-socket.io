@@ -934,7 +934,7 @@ function buildTreeLibrary() {
       void main(){
         vec4 t = texture2D(uAtlas, vUv);
         if (t.a < .45) discard;
-        vec3 c = t.rgb / max(t.a, .001) * vShade;
+        vec3 c = t.rgb * vShade;                          // atlas colour is stored straight (not premultiplied)
         c = mix(c, uH, smoothstep(uNear, uFar, vDist));
         gl_FragColor = vec4(c, 1.);
         #include <tonemapping_fragment>
