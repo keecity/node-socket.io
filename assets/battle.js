@@ -38,7 +38,7 @@ const GAIT = { Walk_Forward: 0.5279, Walk_Back: 0.3495, Walk_Strafe_L: 0.25, Wal
 
 // ------------------------------------------------------------------ towns & roads (planned before the light bake)
 const TOWN = 6.4, ROADS = [0, -3.2, 3.2], ROAD_W = 0.46, PLAZA_R = 1.35;
-const TOWNS = [];                    // {x,z} centres in demo units, [0] = player HQ, [1] = enemy HQ
+const TOWNS = []; let Battle_roadSegs = [];                    // {x,z} centres in demo units, [0] = player HQ, [1] = enemy HQ
 const RM = 2048;                     // road mask resolution (2 world units per texel)
 const roadMask = new Float32Array(RM * RM), paintMask = new Float32Array(RM * RM);
 let roadTex = null;
@@ -97,20 +97,26 @@ function planTowns() {
       .forEach(({ j }) => { const key = Math.min(i, j) + ':' + Math.max(i, j); if (!links.has(key)) { links.add(key); const u = TOWNS[j]; segs.push([t.x, t.z, t.x + wd(u.x - t.x), t.z + wd(u.z - t.z), false]); } });
   });
   const rhalf = ROAD_W / 2 * S;
+  Battle_roadSegs = segs;
   for (const [x0, z0, x1, z1, town] of segs) {
     const X0 = x0 * S, Z0 = z0 * S, X1 = x1 * S, Z1 = z1 * S, L = Math.hypot(X1 - X0, Z1 - Z0), dx = (X1 - X0) / L, dz = (Z1 - Z0) / L;
     // smoothed height profile along the road, then cut/fill the ground to it
     const n = Math.ceil(L / 4), prof = [];
     for (let k = 0; k <= n; k++) prof.push(hAt(X0 + dx * L * k / n, Z0 + dz * L * k / n));
-    const sm = prof.map((_, k) => { let s2 = 0, c = 0; for (let q = -8; q <= 8; q++) { const v = prof[clamp(k + q, 0, n)]; s2 += v; c++; } return s2 / c; });
+    // smooth the profile twice (wide box filters ≈ gaussian) so grades change gradually
+    let sm = prof; for (let pass = 0; pass < 2; pass++) sm = sm.map((_, k) => { let s2 = 0, c = 0; for (let q = -10; q <= 10; q++) { s2 += sm[clamp(k + q, 0, n)]; c++; } return s2 / c; });
+    const cut = new Map();
     for (let k = 0; k <= n; k++) {
       const px = X0 + dx * L * k / n, pz = Z0 + dz * L * k / n, target = sm[k];
       if (!town && target < 1.5) continue;             // no roads through the sea
       const ci = Math.round(px / CELL), cj = Math.round(pz / CELL);
-      for (let j = -7; j <= 7; j++) for (let i = -7; i <= 7; i++) {
-        const qx = (ci + i) * CELL, qz = (cj + j) * CELL, perp = Math.abs((qx - px) * -dz + (qz - pz) * dx);
-        if (perp > rhalf + 8) continue; const w = perp < rhalf + 1.5 ? 1 : 1 - smooth((perp - rhalf - 1.5) / 6.5);
-        const g = at(ci + i, cj + j); if (!town) H[g] += (target - H[g]) * w * 0.9;
+      if (!town) for (let j = -7; j <= 7; j++) for (let i = -7; i <= 7; i++) {
+        // each ground cell gets ONE target: the profile height at its own position along the road (no per-sample steps)
+        const qx = (ci + i) * CELL, qz = (cj + j) * CELL, perp = Math.abs((qx - X0) * -dz + (qz - Z0) * dx);
+        if (perp > rhalf + 10) continue;
+        const u = clamp(((qx - X0) * dx + (qz - Z0) * dz) / L, 0, 1) * n, k0 = Math.floor(u), k1 = Math.min(n, k0 + 1);
+        const g = at(ci + i, cj + j), tg = sm[k0] + (sm[k1] - sm[k0]) * (u - k0), prev = cut.get(g);
+        if (!prev || perp < prev.perp) cut.set(g, { perp, tg });
       }
       // paint the mask
       const mi = Math.round(mod(px, SIZE) / SIZE * RM), mj = Math.round(mod(pz, SIZE) / SIZE * RM), tx = SIZE / RM;
@@ -120,6 +126,11 @@ function planTowns() {
         const cov = 1 - smooth((perp - rhalf + 1) / 2); if (cov <= 0) continue;
         const g = mod(mj + j, RM) * RM + mod(mi + i, RM); roadMask[g] = Math.max(roadMask[g], cov);
       }
+    }
+    for (const [g, { perp, tg }] of cut) {                  // cut / fill with a soft shoulder
+      if (tg < 1.5) continue;
+      const w = perp < rhalf + 2 ? 1 : 1 - smooth((perp - rhalf - 2) / 8);
+      H[g] += (tg - H[g]) * w;
     }
   }
   const data = new Uint8Array(RM * RM * 4);
@@ -1245,7 +1256,7 @@ const Battle = {
     el.innerHTML = `<b class="t0">Violet</b> ${my.length} robots · ${heliTxt(0)}${towns[0]?.hqDown ? ' · HQ down' : ''}<br><b class="t1">Cobalt</b> ${en.length} robots · ${heliTxt(1)}${towns[1]?.hqDown ? ' · HQ down' : ''}`
       + (sel.length ? `<br>Selected: ${sel.length} · ${sel.map(u => Math.ceil(u.hp / u.maxHp * 100) + '%').slice(0, 8).join(' ')}` : '');
   },
-  robots, helis, towns, TOWNS, get debris() { return debris; },
+  robots, helis, towns, TOWNS, get roadSegs() { return Battle_roadSegs; }, get debris() { return debris; },
 };
 window.Battle = Battle;
 window.planTowns = planTowns;
