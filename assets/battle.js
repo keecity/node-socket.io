@@ -795,7 +795,7 @@ const STEER = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6, 2.2, -2.2];
 // move by (vx, vz) * dt; if the way is blocked, steer to the nearest open direction instead of stopping
 function tryMove(f, dt) {
   const vx = f.vel.x, vz = f.vel.z; if (vx * vx + vz * vz < 1e-8) return;
-  if (!passableD(f.pos.x, f.pos.z)) { f.pos.x = wm(f.pos.x + vx * dt); f.pos.z = wm(f.pos.z + vz * dt); return; }   // already in deep water: always let it wade out
+  if (f.y > 0.25 || !passableD(f.pos.x, f.pos.z)) { f.pos.x = wm(f.pos.x + vx * dt); f.pos.z = wm(f.pos.z + vz * dt); return; }   // already in deep water: always let it wade out
   for (const a of STEER) {
     const c = Math.cos(a), s2 = Math.sin(a), rx = vx * c - vz * s2, rz = vx * s2 + vz * c;
     const nx = f.pos.x + rx * dt, nz = f.pos.z + rz * dt;
@@ -842,6 +842,11 @@ function block(f) { setState(f, 'block', 'Guard_Block', 0.05); }
 function jump(f, plan) { f.cool.jump = 5; f.boost -= 24; f.airPlan = plan; f.strafeDir = chance(.5) ? 1 : -1; setState(f, 'jump', 'Boost_Jump'); }
 function quickstep(f) { f.boost -= 16; const left = chance(0.5); setState(f, 'dodge', left ? 'QuickStep_L' : 'QuickStep_R', 0.05);
   f.vel.set(Math.cos(f.yaw), 0, -Math.sin(f.yaw)).multiplyScalar(2.6 * (left ? 1 : -1)); }
+// ---- thruster flight for long trips: faster than walking, burns the boost meter
+const FLY_SPEED = 2.8, FLY_ALT = 1.0, FLY_MIN_DIST = 4, FLY_BURN = 11;
+function takeOff(f, x, z) { f.flyGoal = { x, z }; f.flyPhase = 'up'; f.path = null; setState(f, 'fly', 'Boost_Jump', 0.1);
+  FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 12, { size: [0.08, 0.45], vel: 0.9, up: 0.06 }); }
+const canFly = (f, d) => d > FLY_MIN_DIST && f.boost > 40 && f.y < 0.02;
 function landShock(f, rad) { const p = new THREE.Vector3(f.pos.x, groundY(f), f.pos.z); FX.dust(p, 18, { size: [0.08, 0.5], life: [0.7, 1.5], vel: 0.9, up: 0.1, a: 0.5 });
   impact(p.clone().setY(p.y + 0.05), rad, null, 1.1, 'land'); addShake(0.25, p); scorchMarks.add(p.x, p.z, f.yaw, 0.3, 0.3); }
 function react(f) {
@@ -873,7 +878,7 @@ function think(f) {
   if (ord && ord.type === 'move') {
     const d = wdist2(f.pos.x, f.pos.z, ord.x, ord.z);
     if (d < 0.25) { f.order = null; }
-    else { if (f.saberOut && d > 3) { setState(f, 'sheathe', 'Saber_Sheathe'); return; } goTo(f, ord.x, ord.z, d > 1.2 ? 'run' : 'walk', 0.1, 3); return; }
+    else { if (f.saberOut && d > 3) { setState(f, 'sheathe', 'Saber_Sheathe'); return; } if (canFly(f, d)) return takeOff(f, ord.x, ord.z); goTo(f, ord.x, ord.z, d > 1.2 ? 'run' : 'walk', 0.1, 3); return; }
   }
   if (ord && ord.type === 'attack') { if (alive(ord.target)) f.target = ord.target; else f.order = null; }
   if (!alive(f.target) || wdist2(f.pos.x, f.pos.z, f.target.pos.x, f.target.pos.z) > SIGHT * 1.3) f.target = null;
@@ -881,7 +886,7 @@ function think(f) {
   const o = f.target;
   if (!o) {
     if (ord && ord.type === 'amove') { const d = wdist2(f.pos.x, f.pos.z, ord.x, ord.z); if (d < 0.5) f.order = null;
-      else { goTo(f, ord.x, ord.z, 'run', 0.3, 2.5); return; } }
+      else { if (canFly(f, d)) return takeOff(f, ord.x, ord.z); goTo(f, ord.x, ord.z, 'run', 0.3, 2.5); return; } }
     if (f.saberOut && chance(0.3)) { setState(f, 'sheathe', 'Saber_Sheathe'); return; }
     return toIdle(f, 0.2, rand(0.4, 0.9));
   }
@@ -895,7 +900,7 @@ function think(f) {
     add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
   } else {
     const rec = isRecovering(o), firing = o.state === 'fire' || o.state === 'airfire', threat = isThreat(o, d), lowHp = f.hp < o.hp * 0.6;
-    if (d > 8) { add('close', 3, () => goTo(f, op.x, op.z, 'run', 4, 2.5)); }   // far away (RTS scale): run in first
+    if (d > 8) { add('close', 3, () => canFly(f, d - 5) ? takeOff(f, op.x - (op.x - f.pos.x) / d * 4, op.z - (op.z - f.pos.z) / d * 4) : goTo(f, op.x, op.z, 'run', 4, 2.5)); }   // far away (RTS scale): run in first
     else if (f.saberOut) {
       add('slash', d < 0.74 && cd('slash') ? 3.0 * P.aggro * (rec ? 1.9 : 1) : 0, () => { f.cool.slash = 1.6; attack(f, pickStrike(f, d, rec)); });
       add('runSlash', d > 0.95 && d < 3.6 && cd('runSlash') ? 1.8 * P.aggro * (rec ? 1.6 : 1) : 0, () => { f.cool.runSlash = 2.2; walkTo(f, op.x, op.z, 'run', 0.6, 2.5); f.onArrive = 'runSlash'; announce(f, 'approach'); });
@@ -1025,6 +1030,26 @@ function updateRobot(f, dt) {
     case 'dive': { boosting = true; const t = clipT(f); faceTo(f, targetYaw, dt);
       if (t < 0.33) { f.vy = THREE.MathUtils.lerp(f.vy, t < 0.18 ? 0.2 : -(f.y / Math.max(0.03, 0.33 - t)), 1 - Math.pow(0.0001, dt)); } else { if (f.y > 0) { f.y = 0; landShock(f, 0.36); } f.vy = 0; }
       doAttack(f, d, dir, fwd, dt); break; }
+    case 'fly': { boosting = true;
+      const g = f.flyGoal, gx = wd(g.x - f.pos.x), gz = wd(g.z - f.pos.z), gd = Math.hypot(gx, gz), gdir = new THREE.Vector3(gx, 0, gz).normalize();
+      if (f.flyPhase === 'up') {                           // lift off
+        const t = clipT(f); if (t < 0.22) skid(f, dt);
+        else { f.vy = THREE.MathUtils.lerp(f.vy, 1.8, 1 - Math.pow(0.001, dt)); f.vel.lerp(gdir.clone().multiplyScalar(FLY_SPEED * 0.5), 1 - Math.pow(0.05, dt)); }
+        faceTo(f, Math.atan2(gx, gz), dt, 0.01);
+        if (f.y > FLY_ALT * 0.8 || clipDone(f)) { f.flyPhase = 'cruise'; play(f, 'Boost_Forward', 0.25); }
+      } else if (f.flyPhase === 'cruise') {                // fly straight at the goal, holding altitude over the terrain
+        f.boost -= FLY_BURN * dt; faceTo(f, Math.atan2(gx, gz), dt, 0.02);
+        f.vel.lerp(gdir.clone().multiplyScalar(FLY_SPEED * (gd < 2 ? 0.5 + gd / 4 : 1)), 1 - Math.pow(0.02, dt));
+        f.vy = THREE.MathUtils.lerp(f.vy, (FLY_ALT - f.y) * 2, 1 - Math.pow(0.01, dt));
+        const overWater = !passableD(f.pos.x, f.pos.z);
+        if ((gd < 1.2 || f.boost <= 4) && !overWater) { f.flyPhase = 'down'; play(f, 'Air_Hover', 0.25); }
+        if (f.boost < 0) f.boost = 0;
+      } else {                                             // descend and land
+        f.vel.multiplyScalar(Math.pow(0.15, dt)); f.vy = THREE.MathUtils.lerp(f.vy, -1.8, 1 - Math.pow(0.02, dt));
+        if (f.y <= 0.001) { f.y = 0; f.vy = 0; setState(f, 'land', 'Landing', 0.08); landShock(f, 0.3); }
+      }
+      if (f.order && f.order.type !== 'move' && f.order.type !== 'amove') { f.flyPhase = 'down'; }
+      break; }
     case 'land': skid(f, dt); if (f.st > 0.7) toIdle(f, 0.15, 0.02); break;
     case 'draw': skid(f, dt); if (clipT(f) > 0.22) f.saberOut = true; if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
     case 'sheathe': skid(f, dt); if (clipT(f) > 0.54) f.saberOut = false; if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
@@ -1042,7 +1067,7 @@ function updateRobot(f, dt) {
   }
   if (f.state === 'ko' && f.koT > 18) { f.sink = (f.sink || 0) + dt * 0.04; }
   // vertical: gravity outside the flight states, landing shocks
-  if (!['jump', 'air', 'airfire', 'dive'].includes(f.state) && f.y > 0) f.vy -= 4.5 * dt;
+  if (!['jump', 'air', 'airfire', 'dive', 'fly'].includes(f.state) && f.y > 0) f.vy -= 4.5 * dt;
   f.y = Math.max(0, f.y + f.vy * dt); if (f.y === 0 && f.vy < 0) { if (f.vy < -1.2) landShock(f, 0.22); f.vy = 0; }
   if (!boosting && f.y === 0) f.boost = Math.min(100, f.boost + 26 * dt); f.boost = Math.max(0, f.boost);
   f.boosting = boosting;
@@ -1059,7 +1084,7 @@ function updateRobot(f, dt) {
 // thrusters: flames + exhaust while boosting or airborne
 function thrusters(f) {
   const on = f.boosting || f.y > 0.02;
-  f.flames.forEach(m => { const s = on ? rand(0.8, 1.3) : 0.001; m.scale.set(on ? 1 : 0.001, s * (['boost', 'jump', 'burst', 'dive', 'boostStrafe', 'boostBack', 'hop'].includes(f.state) ? 1.5 : 1), on ? 1 : 0.001);
+  f.flames.forEach(m => { const s = on ? rand(0.8, 1.3) : 0.001; m.scale.set(on ? 1 : 0.001, s * (['boost', 'jump', 'burst', 'dive', 'boostStrafe', 'boostBack', 'hop', 'fly'].includes(f.state) ? 1.5 : 1), on ? 1 : 0.001);
     if (on && chance(0.5)) { toDemo(m, _fp); near(_fp, f.pos, _fp); const back = new THREE.Vector3(0, -0.2, -1).applyQuaternion(f.nodes.chest.getWorldQuaternion(new THREE.Quaternion())); FX.exhaust(_fp, back, f.col); } });
   if (on && f.y < 0.2 && chance(0.4)) FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 1, { size: [0.06, 0.35], life: [0.5, 1.0], vel: 0.6, up: 0.04, a: 0.35 });
 }
@@ -1353,7 +1378,7 @@ const Battle = {
         const dx = wd(u.pos.x - x), dz = wd(u.pos.z - z), L = Math.hypot(dx, dz) || 1;
         for (let t = 0; t <= L; t += 0.1) { const px = x + dx * t / L, pz = z + dz * t / L; if (passableD(px, pz)) { x = wm(px); z = wm(pz); break; } } }
       if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; }
-      else { u.order = { type: 'move', x, z }; u.target = null; if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; u.thinkT = 0; if (u.state !== 'idle') toIdle(u, 0.12, 0); } } });
+      else { u.order = { type: 'move', x, z }; u.target = null; if (u.state === 'fly') { u.flyGoal = { x, z }; if (u.flyPhase === 'down' && u.y > 0.3 && u.boost > 10) { u.flyPhase = 'cruise'; play(u, 'Boost_Forward', 0.2); } } else if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; u.thinkT = 0; if (u.state !== 'idle') toIdle(u, 0.12, 0); } } });
   },
   update(dt) {
     if (!gltf) return;
