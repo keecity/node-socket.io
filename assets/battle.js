@@ -847,6 +847,17 @@ const FLY_SPEED = 2.8, FLY_ALT = 1.0, FLY_MIN_DIST = 4, FLY_BURN = 11;
 function takeOff(f, x, z) { f.flyGoal = { x, z }; f.flyPhase = 'up'; f.path = null; setState(f, 'fly', 'Boost_Jump', 0.1);
   FX.dust(new THREE.Vector3(f.pos.x, groundY(f), f.pos.z), 12, { size: [0.08, 0.45], vel: 0.9, up: 0.06 }); }
 const canFly = (f, d) => d > FLY_MIN_DIST && f.boost > 40 && f.y < 0.02;
+// wrecked at sea: stays in the water (partly submerged) until a recovery craft exists to fetch it
+function lostAtSea(f) {
+  f.y = 0; f.vy = 0; f.vel.multiplyScalar(0.2);
+  const p = new THREE.Vector3(f.pos.x, 0, f.pos.z);
+  for (let i = 0; i < 70; i++) { const a = rand(0, 6.28), sp = rand(0.3, 1.4);
+    particlesA.emit(p.x, 0.02, p.z, Math.cos(a) * sp * 0.6, rand(1, 2.4), Math.sin(a) * sp * 0.6, rand(0.5, 1.1), rand(0.02, 0.05), 0.01, [0.85, 0.95, 1, 0.9], [0.7, 0.85, 1, 0], 3.2, 0.5); }
+  FX.smoke(p, 14, { size: [0.15, 0.7], life: [1.2, 2.6], col: [0.85, 0.9, 0.95], a: 0.55, vel: 0.4, up: 0.25 }); addShake(0.3, p);
+  setState(f, 'ko', 'Defeat_Shutdown', 0.1); f.koT = 0; f.lost = true; f.sel = false; f.order = null; f.target = null;
+  wrecks.push(f); log(f.team, `<b>${unitName(f)}</b> crashes into the sea — wrecked, awaiting recovery`);
+}
+const wrecks = [];
 function landShock(f, rad) { const p = new THREE.Vector3(f.pos.x, groundY(f), f.pos.z); FX.dust(p, 18, { size: [0.08, 0.5], life: [0.7, 1.5], vel: 0.9, up: 0.1, a: 0.5 });
   impact(p.clone().setY(p.y + 0.05), rad, null, 1.1, 'land'); addShake(0.25, p); scorchMarks.add(p.x, p.z, f.yaw, 0.3, 0.3); }
 function react(f) {
@@ -1043,7 +1054,10 @@ function updateRobot(f, dt) {
         f.vy = THREE.MathUtils.lerp(f.vy, (FLY_ALT - f.y) * 2, 1 - Math.pow(0.01, dt));
         const overWater = !passableD(f.pos.x, f.pos.z);
         if ((gd < 1.2 || f.boost <= 4) && !overWater) { f.flyPhase = 'down'; play(f, 'Air_Hover', 0.25); }
-        if (f.boost < 0) f.boost = 0;
+        if (f.boost <= 0) { f.boost = 0; if (overWater) { f.flyPhase = 'fall'; play(f, 'Defeat_Shutdown', 0.2); log(f.team, `<b>${unitName(f)}</b> runs out of thruster fuel over the sea`); } }
+      } else if (f.flyPhase === 'fall') {                   // out of fuel over water: dead drop into the sea
+        boosting = false; f.vel.multiplyScalar(Math.pow(0.5, dt)); f.vy -= 4.5 * dt;
+        if (f.y <= 0.001) lostAtSea(f);
       } else {                                             // descend and land
         f.vel.multiplyScalar(Math.pow(0.15, dt)); f.vy = THREE.MathUtils.lerp(f.vy, -1.8, 1 - Math.pow(0.02, dt));
         if (f.y <= 0.001) { f.y = 0; f.vy = 0; setState(f, 'land', 'Landing', 0.08); landShock(f, 0.3); }
@@ -1065,7 +1079,8 @@ function updateRobot(f, dt) {
     case 'gunBeam': { const t = clipT(f); if (!f.beamFired && t >= 0.05) { f.beamFired = true; fireBeam(f); } skid(f, dt); if (clipDone(f)) toIdle(f, 0.14, rand(0.1, 0.3)); break; }
     case 'ko': skid(f, dt); f.koT += dt; break;
   }
-  if (f.state === 'ko' && f.koT > 18) { f.sink = (f.sink || 0) + dt * 0.04; }
+  if (f.lost) { f.sink = Math.min(0.5, (f.sink || 0) + dt * 0.12); if (chance(dt * 1.5)) particlesA.emit(f.pos.x + rand(-.1, .1), 0.01, f.pos.z + rand(-.1, .1), 0, rand(0.1, 0.3), 0, rand(0.4, 0.8), 0.02, 0.035, [0.8, 0.9, 1, 0.6], [0.8, 0.9, 1, 0], 0, 0.5); }
+  else if (f.state === 'ko' && f.koT > 18) { f.sink = (f.sink || 0) + dt * 0.04; }
   // vertical: gravity outside the flight states, landing shocks
   if (!['jump', 'air', 'airfire', 'dive', 'fly'].includes(f.state) && f.y > 0) f.vy -= 4.5 * dt;
   f.y = Math.max(0, f.y + f.vy * dt); if (f.y === 0 && f.vy < 0) { if (f.vy < -1.2) landShock(f, 0.22); f.vy = 0; }
@@ -1427,7 +1442,7 @@ const Battle = {
     el.innerHTML = `<b class="t0">Violet</b> ${my.length} robots · ${heliTxt(0)}${towns[0]?.hqDown ? ' · HQ down' : ''}<br><b class="t1">Cobalt</b> ${en.length} robots · ${heliTxt(1)}${towns[1]?.hqDown ? ' · HQ down' : ''}`
       + (sel.length ? `<br>Selected: ${sel.length} · ${sel.map(u => Math.ceil(u.hp / u.maxHp * 100) + '%').slice(0, 8).join(' ')}` : '');
   },
-  robots, helis, towns, TOWNS, get roadSegs() { return Battle_roadSegs; }, get debris() { return debris; },
+  robots, helis, towns, TOWNS, wrecks, get roadSegs() { return Battle_roadSegs; }, get debris() { return debris; },
 };
 window.Battle = Battle;
 window.planTowns = planTowns;
