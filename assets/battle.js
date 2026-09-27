@@ -371,7 +371,7 @@ function buildTown(t, idx) {
   }
   const teamCol = idx === 0 ? 0xff5aa8 : idx === 1 ? 0x46b8ff : null;
   if (idx < 2 && window.PowerPlant) {
-    const PK = 3.8 / 46, px = cx + 6.2, pz = cz + 6.2;              // ~43 world units across, just outside the houses
+    const PK = 2.3 / 46, px = cx + 6.2, pz = cz + 6.2;              // ~43 world units across, just outside the houses
     const plant = PowerPlant.build({ accent: idx === 0 ? 0xe0579c : 0x2f6fd6 });
     plant.group.scale.setScalar(PK); plant.group.position.set(px, Hd(px, pz) - 0.02, pz); plant.group.rotation.y = Math.PI;   // front faces the plaza
     root.add(plant.group); curTown.plant = plant;
