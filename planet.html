@@ -65,9 +65,13 @@ function generate() {
     const cont = fbm(u, v, 2, 5, false);
     const ridge = fbm(u + .23, v + .71, 4, 7, true);
     const hills = fbm(u + .61, v + .13, 8, 6, false);
-    const land = Math.min(1, Math.max(0, (cont - 0.43) / 0.18));
-    let h = (cont - 0.46) * 220;
-    h += land * land * (ridge * 150 + hills * 25);
+    const land = Math.min(1, Math.max(0, (cont - 0.47) / 0.07));
+    // mountains only where a separate low-frequency mask says so; elsewhere plains and rolling hills
+    const mtn = Math.min(1, Math.max(0, (fbm(u + .37, v + .91, 2, 3, false) - 0.56) / 0.12));
+    const plain = fbm(u + .11, v + .47, 3, 3, false);               // flat lowlands vs. hilly country
+    let h = (cont - 0.46) * 110;
+    h += land * (hills * hills * 70 * Math.min(1, Math.max(0.15, (plain - 0.35) * 3)));
+    h += land * mtn * mtn * ridge * 170;
     H[j * N + i] = h / 200;               // erosion runs on normalised heights
   }
   erode(160000);
@@ -139,9 +143,11 @@ const scene = new THREE.Scene();
 const HORIZON = new THREE.Color(0x8d9296).convertSRGBToLinear();
 const ZENITH = new THREE.Color(0x4a4f55).convertSRGBToLinear();
 scene.background = HORIZON;
+const FOG_NEAR0 = 450, FOG_FAR0 = 1250;
+scene.fog = new THREE.Fog(HORIZON, FOG_NEAR0, FOG_FAR0);   // used by trees and units (Lambert); terrain/water shaders fog themselves
 const camera = new THREE.PerspectiveCamera(45, 1, 1, 4000);
 const SUN = new THREE.Vector3(-0.62, 0.42, 0.36).normalize();
-const FOG_NEAR = 450, FOG_FAR = 1250;
+const FOG_NEAR = FOG_NEAR0, FOG_FAR = FOG_FAR0;
 
 // gradient sky dome that follows the camera
 const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), new THREE.ShaderMaterial({
