@@ -709,9 +709,10 @@ function think(f) {
   const o = f.order;
   // plain move order: go there, ignore enemies until arrival
   if (o && o.type === 'move') {
+    f.stuckN = f.stuckN || 0;
     const d = wdist2(f.pos.x, f.pos.z, o.x, o.z);
     if (d < 0.25) { f.order = null; }
-    else { if (f.saberOut && d > 3) { setState(f, 'sheathe', 'Saber_Sheathe'); return; } walkTo(f, f.pos.x + wd(o.x - f.pos.x), f.pos.z + wd(o.z - f.pos.z), d > 1.2 ? 'run' : 'walk', 0.1, 3); return; }
+    else { if (f.saberOut && d > 3) { setState(f, 'sheathe', 'Saber_Sheathe'); return; } goTo(f, o.x, o.z, d > 1.2 ? 'run' : 'walk', 0.1, 3); return; }
   }
   if (o && o.type === 'attack') { if (alive(o.target)) f.target = o.target; else f.order = null; }
   if (!alive(f.target) || wdist2(f.pos.x, f.pos.z, f.target.pos.x, f.target.pos.z) > SIGHT * 1.3) f.target = null;
@@ -719,7 +720,7 @@ function think(f) {
   const T = f.target;
   if (!T) {
     if (o && o.type === 'amove') { const d = wdist2(f.pos.x, f.pos.z, o.x, o.z); if (d < 0.5) f.order = null;
-      else { walkTo(f, f.pos.x + wd(o.x - f.pos.x), f.pos.z + wd(o.z - f.pos.z), 'run', 0.3, 2.5); return; } }
+      else { goTo(f, o.x, o.z, 'run', 0.3, 2.5); return; } }
     if (f.saberOut && chance(0.3)) { setState(f, 'sheathe', 'Saber_Sheathe'); return; }
     return toIdle(f, 0.2, rand(0.4, 0.9));
   }
@@ -730,12 +731,12 @@ function think(f) {
   if (isHeli) {
     add('fire', d < 6 && cd('fire') ? 2 : 0, () => { f.cool.fire = rand(1.2, 2.2); f.fireT = rand(0.8, 1.4); setState(f, 'fire', 'Head_Vulcan_Fire'); });
     if (f.gun && f.gun.energy >= 12) add('gunBurst', d < 6.5 && cd('gunBurst') ? 2 : 0, () => { f.cool.gunBurst = rand(0.9, 1.6); gunBurst(f); });
-    add('close', d > 3.5 ? 1.5 : 0, () => walkTo(f, tx, tz, 'run', 3, 1.5));
+    add('close', d > 3.5 ? 1.5 : 0, () => goTo(f, tx, tz, 'run', 3, 1.5));
     add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
   } else if (f.saberOut) {
     add('slash', d < 0.74 && cd('slash') ? 3.0 : 0, () => { f.cool.slash = 1.4; attack(f, pickStrike(f, d)); });
     add('runSlash', d > 0.95 && d < 3.6 && cd('runSlash') ? 1.8 : 0, () => { f.cool.runSlash = 2.2; walkTo(f, tx, tz, 'run', 0.6, 2.5); f.onArrive = 'runSlash'; });
-    add('close', d > 0.7 ? 1.0 + (d - 0.7) * 0.9 : 0, () => walkTo(f, tx, tz, d > 1.4 ? 'run' : 'walk', 0.55, 1.6));
+    add('close', d > 0.7 ? 1.0 + (d - 0.7) * 0.9 : 0, () => goTo(f, tx, tz, d > 1.4 ? 'run' : 'walk', 0.55, 1.6));
     add('circle', 0.35, () => strafe(f, chance(.5) ? 1 : -1));
     add('sheathe', d > 3.4 ? 1.5 : 0, () => setState(f, 'sheathe', 'Saber_Sheathe'));
     add('hold', 0.2, () => toIdle(f, 0.12, rand(0.2, 0.45)));
@@ -744,7 +745,7 @@ function think(f) {
     add('fire', d > 0.9 && d < 5 && cd('fire') ? (f.gun ? 0.9 : 2.1) * (d > 1.8 ? 1.2 : 0.75) : 0, () => { f.cool.fire = rand(1.6, 3.0); f.fireT = rand(0.8, 1.5); setState(f, 'fire', 'Head_Vulcan_Fire'); });
     add('draw', striker && d < 2.8 && cd('draw') ? 1.8 : 0, () => { f.cool.draw = 3; setState(f, 'draw', 'Saber_Draw'); });
     add('melee', d < 0.58 ? 2.4 : 0, () => attack(f, chance(0.5) ? 'Melee_Punch_Combo' : 'Melee_Boost_Kick'));
-    add('close', d > pref ? 0.8 + (d - pref) * 0.7 : 0, () => walkTo(f, tx, tz, d - pref > 1.2 ? 'run' : 'walk', pref, 2));
+    add('close', d > pref ? 0.8 + (d - pref) * 0.7 : 0, () => goTo(f, tx, tz, d - pref > 1.2 ? 'run' : 'walk', pref, 2));
     add('circle', 0.6, () => strafe(f, chance(.5) ? 1 : -1));
     add('hold', 0.3, () => toIdle(f, 0.12, rand(0.2, 0.5)));
     if (f.gun) { const E = f.gun.energy;
@@ -785,7 +786,76 @@ function footfalls(f) {
   }
 }
 function faceTo(f, target, dt, rate = 0.0002) { let dy = target - f.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); f.yaw += dy * (1 - Math.pow(rate, dt)); return dy; }
-function passableD(x, z) { return heightAt(x * S, z * S) > -5 && slopeAt(x * S, z * S) < 1.3; }
+// mechs climb any slope; only deep water blocks them
+function passableD(x, z) { return heightAt(x * S, z * S) > -5; }
+// ---- pathfinding: A* over a wrapping walkability grid (1 cell = 1 demo unit = 12 world units)
+const PG = Math.floor(W), PC = W / PG; let passGrid = null;
+function buildPassGrid() {
+  passGrid = new Uint8Array(PG * PG);
+  for (let j = 0; j < PG; j++) for (let i = 0; i < PG; i++) {
+    let ok = 1; for (const [a, b] of [[.5, .5], [.15, .15], [.85, .15], [.15, .85], [.85, .85]]) if (!passableD((i + a) * PC, (j + b) * PC)) { ok = 0; break; }
+    passGrid[j * PG + i] = ok; }
+}
+const cellOf = v => ((Math.floor(wm(v) / PC)) % PG + PG) % PG;
+function clearLine(x0, z0, x1, z1) {                      // straight walk possible? (x1,z1 in x0's frame)
+  const L = Math.hypot(x1 - x0, z1 - z0), n = Math.ceil(L / 0.25);
+  for (let k = 1; k <= n; k++) if (!passableD(x0 + (x1 - x0) * k / n, z0 + (z1 - z0) * k / n)) return false;
+  return true;
+}
+function nearestOpenCell(ci, cj) {
+  if (passGrid[cj * PG + ci]) return [ci, cj];
+  for (let r = 1; r < 40; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+    if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue; const i = (ci + di + PG) % PG, j = (cj + dj + PG) % PG; if (passGrid[j * PG + i]) return [i, j]; }
+  return [ci, cj];
+}
+function findPath(sx, sz, gx, gz) {                       // returns waypoints in the start's frame (may lie outside [0,W))
+  if (!passGrid) buildPassGrid();
+  const [si, sj] = nearestOpenCell(cellOf(sx), cellOf(sz)), [gi, gj] = nearestOpenCell(cellOf(gx), cellOf(gz));
+  const N2 = PG * PG, g = new Float32Array(N2).fill(1e9), came = new Int32Array(N2).fill(-1), closed = new Uint8Array(N2);
+  const heap = []; const push = (n, f) => { heap.push([f, n]); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  const hw = (i, j) => { const dx = Math.abs(wdC(gi - i)), dz = Math.abs(wdC(gj - j)); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+  const s0 = sj * PG + si, goal = gj * PG + gi; g[s0] = 0; push(s0, hw(si, sj)); let found = false, iter = 0;
+  while (heap.length && iter++ < 120000) {
+    const [, n] = pop(); if (closed[n]) continue; closed[n] = 1; if (n === goal) { found = true; break; }
+    const i = n % PG, j = (n / PG) | 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { if (!di && !dj) continue;
+      const ni = (i + di + PG) % PG, nj = (j + dj + PG) % PG, m = nj * PG + ni; if (!passGrid[m] || closed[m]) continue;
+      if (di && dj && (!passGrid[j * PG + ni] || !passGrid[nj * PG + i])) continue;          // no corner cutting
+      const ng = g[n] + (di && dj ? 1.414 : 1); if (ng < g[m]) { g[m] = ng; came[m] = n; push(m, ng + hw(ni, nj)); } }
+  }
+  if (!found) return null;
+  const cells = []; for (let n = goal; n !== -1; n = came[n]) cells.push(n); cells.reverse();
+  // unwrap into the start's frame, then keep only the corners needed (line of sight)
+  const pts = []; let px = sx, pz = sz;
+  for (const n of cells) { const cx = (n % PG + 0.5) * PC, cz = (((n / PG) | 0) + 0.5) * PC; px += wd(cx - px); pz += wd(cz - pz); pts.push([px, pz]); }
+  pts[pts.length - 1] = [pts[pts.length - 1][0] + wd(gx - pts[pts.length - 1][0]), pts[pts.length - 1][1] + wd(gz - pts[pts.length - 1][1])];
+  if (!passableD(pts[pts.length - 1][0], pts[pts.length - 1][1])) pts[pts.length - 1] = [pts[pts.length - 1][0] + wd((gi + .5) * PC - pts[pts.length - 1][0]), pts[pts.length - 1][1] + wd((gj + .5) * PC - pts[pts.length - 1][1])];
+  const out = []; let ax = sx, az = sz, k = 0;
+  while (k < pts.length) { let far = k; for (let q = pts.length - 1; q > k; q--) if (clearLine(ax, az, pts[q][0], pts[q][1])) { far = q; break; }
+    out.push(pts[far]); ax = pts[far][0]; az = pts[far][1]; k = far + 1; }
+  return out;
+}
+const wdC = d => d - PG * Math.round(d / PG);
+// walk to (x,z) (any frame): straight if clear, otherwise along an A* path
+function goTo(f, x, z, mode, stopAt, moveT) {
+  const tx = f.pos.x + wd(x - f.pos.x), tz = f.pos.z + wd(z - f.pos.z);
+  f.path = null;
+  if (!clearLine(f.pos.x, f.pos.z, tx, tz)) { const p = findPath(f.pos.x, f.pos.z, tx, tz); if (p && p.length) { f.path = p.slice(1); const w0 = p[0]; walkTo(f, w0[0], w0[1], mode, 0.12, 30); f.pathStop = stopAt; return; } }
+  walkTo(f, tx, tz, mode, stopAt, moveT);
+}
+const STEER = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6, 2.2, -2.2];
+// move by (vx, vz) * dt; if the way is blocked, steer to the nearest open direction instead of stopping
+function tryMove(f, dt) {
+  const vx = f.vel.x, vz = f.vel.z; if (vx * vx + vz * vz < 1e-8) return;
+  if (!passableD(f.pos.x, f.pos.z)) { f.pos.x = wm(f.pos.x + vx * dt); f.pos.z = wm(f.pos.z + vz * dt); return; }   // already in deep water: always let it wade out
+  for (const a of STEER) {
+    const c = Math.cos(a), s2 = Math.sin(a), rx = vx * c - vz * s2, rz = vx * s2 + vz * c;
+    const nx = f.pos.x + rx * dt, nz = f.pos.z + rz * dt;
+    if (passableD(nx + rx * 0.25, nz + rz * 0.25) && passableD(nx, nz)) { f.pos.x = wm(nx); f.pos.z = wm(nz); if (a) f.vel.set(rx, 0, rz); return; }
+  }
+  f.vel.multiplyScalar(0.5);                                          // boxed in: slow down but keep the order
+}
 function updateRobot(f, dt) {
   f.st += dt; for (const k in f.cool) f.cool[k] -= dt;
   const T = alive(f.target) ? f.target : null;
@@ -811,7 +881,8 @@ function updateRobot(f, dt) {
       f.vel.copy(cv).multiplyScalar(cs * ramp);
       const reach = T && f.stopAt > 0.2 && f.order?.type !== 'move' ? d < f.stopAt : dist < Math.max(0.08, f.stopAt);
       if (f.onArrive === 'runSlash' && T && T.kind === 'robot' && d < 0.7 && f.clip === 'Run_Forward' && f.saberOut) { f.onArrive = null; setState(f, 'attack', 'Saber_Run_Slash', 0.08); break; }
-      if (reach || f.st > f.moveT) { f.onArrive = null; f.strafing = false; toIdle(f, 0.2, rand(0.02, 0.12)); }
+      if (f.path && dist < 0.35) { if (f.path.length) { const w = f.path.shift(); f.wp.set(f.pos.x + wd(w[0] - f.pos.x), 0, f.pos.z + wd(w[1] - f.pos.z)); if (!f.path.length) f.stopAt = f.pathStop; f.st = Math.min(f.st, 0.3); break; } f.path = null; }
+      if ((reach && !(f.path && f.path.length)) || f.st > f.moveT) { f.onArrive = null; f.strafing = false; f.path = null; toIdle(f, 0.2, rand(0.02, 0.12)); }
       break; }
     case 'fire': { skid(f, dt); if (T) faceTo(f, targetYaw, dt, 0.002); if (!T) { toIdle(f, 0.1, 0.05); break; }
       f.fireAcc += dt; while (f.fireAcc > 1 / 12) { f.fireAcc -= 1 / 12; fireBullet(f); }
@@ -831,8 +902,12 @@ function updateRobot(f, dt) {
   }
   if (f.state === 'ko' && f.koT > 18) { f.sink = (f.sink || 0) + dt * 0.04; }
   // move, with wrap and a check for deep water / cliffs
-  const nx = f.pos.x + f.vel.x * dt, nz = f.pos.z + f.vel.z * dt;
-  if (passableD(nx, nz)) { f.pos.x = wm(nx); f.pos.z = wm(nz); } else { f.vel.set(0, 0, 0); if (f.state === 'walk') { toIdle(f, 0.2, 0.3); if (f.order?.type === 'move') f.order = null; } }
+  tryMove(f, dt);
+  // stuck watchdog: if a walking robot makes no progress for a while, give it a new plan
+  if (f.state === 'walk') { f.stuckT = (f.stuckT || 0) + dt; if (f.stuckT > 1.5) { const moved = f.lastPos ? wdist2(f.pos.x, f.pos.z, f.lastPos.x, f.lastPos.z) : 1;
+      if (moved < 0.15) { f.stuckN = (f.stuckN || 0) + 1; if (f.stuckN > 4 && f.order && f.order.type !== 'attack') { f.order = null; f.stuckN = 0; } const a = rand(0, 6.28); walkTo(f, f.pos.x + Math.cos(a) * 0.8, f.pos.z + Math.sin(a) * 0.8, 'walk', 0.05, 1.2); }
+      else f.stuckN = 0;
+      f.stuckT = 0; f.lastPos = { x: f.pos.x, z: f.pos.z }; } } else f.stuckT = 0;
   // body vs town: crush whatever the robot moves through
   const sp = f.vel.length(); if (sp > 0.08) { const base = groundY(f) + f.y; const dv = f.vel.clone().setY(0).normalize();
     for (const hh of [0.06, 0.22, 0.42]) impact(new THREE.Vector3(f.pos.x, base + hh, f.pos.z), 0.13, dv, 0.4 + sp * 0.7, 'body'); }
@@ -1114,7 +1189,10 @@ const Battle = {
       log(0, `Attack order: ${sel.length} unit${sel.length > 1 ? 's' : ''} → <b>${unitName(enemy)}</b>`); return; }
     const gx = ground.x / S, gz = ground.z / S;
     sel.forEach((u, i) => { const a = i * 2.4, r = 0.45 * Math.sqrt(i);
-      const x = wm(gx + Math.cos(a) * r), z = wm(gz + Math.sin(a) * r);
+      let x = wm(gx + Math.cos(a) * r), z = wm(gz + Math.sin(a) * r);
+      if (u.kind === 'robot' && !passableD(x, z)) {           // goal in deep water: stop at the last dry ground on the way
+        const dx = wd(u.pos.x - x), dz = wd(u.pos.z - z), L = Math.hypot(dx, dz) || 1;
+        for (let t = 0; t <= L; t += 0.1) { const px = x + dx * t / L, pz = z + dz * t / L; if (passableD(px, pz)) { x = wm(px); z = wm(pz); break; } } }
       if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; }
       else { u.order = { type: 'move', x, z }; u.target = null; if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; u.thinkT = 0; if (u.state !== 'idle') toIdle(u, 0.12, 0); } } });
   },
