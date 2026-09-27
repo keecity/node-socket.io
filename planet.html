@@ -454,16 +454,16 @@ class ProceduralTreeGenerator {
       return null;
     }
 
-    // Visible foliage remains camera-facing textured sprites for clean RTS-distance rendering.
-    // Separate low-poly canopy volumes cast the shadows so there are no rectangular/card shadows.
-    const positions=[],colors=[];
+    // Visible foliage uses textured point sprites, but split into size buckets so
+    // not every leaf cluster is the same size. Shadow cards reuse the sampled
+    // foliage sizes so the canopy and its shadow stay consistent.
+    const leafData=[];
     const maxAnchors=280;
     const step=Math.max(1,Math.ceil(this.foliageAnchors.length/maxAnchors));
     const anchors=this.foliageAnchors.filter((_,i)=>i%step===0);
 
     for(const a of anchors){
       const count=Math.max(3,Math.floor((p.conifer?3.4:5.6)*p.foliageDensity*Math.max(.70,a.scale)));
-
       for(let i=0;i<count;i++){
         const u=randomUnit(rng);
 
@@ -476,55 +476,77 @@ class ProceduralTreeGenerator {
         if(p.conifer){sx*=.78;sz*=.78;sy*=.82;}
 
         const rr=.20+Math.cbrt(rng())*.72;
-        const q=a.pos.clone().add(
-          new THREE.Vector3(u.x*sx*rr,u.y*sy*rr,u.z*sz*rr)
-        );
-
-        positions.push(q.x,q.y,q.z);
+        const q=a.pos.clone().add(new THREE.Vector3(u.x*sx*rr,u.y*sy*rr,u.z*sz*rr));
 
         const h=p.leafHue+randRange(rng,-.025,.025);
         const s=p.leafSat*randRange(rng,.94,1.07);
         const l=p.leafLight*randRange(rng,.90,1.16);
         const c=hslColor(h,s,l);
-        colors.push(c.r,c.g,c.b);
+
+        const baseSize=Math.max(.38,p.canopyRadius*(p.conifer?.74:.98))*Math.max(.72,a.scale);
+        const size=baseSize*randRange(rng,.58,1.38);
+
+        leafData.push({pos:q,color:c,size});
       }
     }
 
-    if(!positions.length){
+    if(!leafData.length){
       this.stats.leafSplats=0;
       return null;
     }
 
     const group=new THREE.Group();
 
-    const g=new THREE.BufferGeometry();
-    g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
-    g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    g.computeBoundingSphere();
+    // 3 buckets keep the visual variation while staying very reliable.
+    const minSize=Math.min(...leafData.map(x=>x.size));
+    const maxSize=Math.max(...leafData.map(x=>x.size));
+    const span=Math.max(1e-4,maxSize-minSize);
+    const buckets=[[],[],[]];
+    for(const leaf of leafData){
+      const t=(leaf.size-minSize)/span;
+      const bi=Math.min(2,Math.floor(t*3));
+      buckets[bi].push(leaf);
+    }
 
-    const spriteSize=Math.max(.48,p.canopyRadius*(p.conifer?.84:1.12));
-    const m=new THREE.PointsMaterial({
-      map:this.leafTexture,
-      size:spriteSize,
-      sizeAttenuation:true,
-      transparent:true,
-      alphaTest:.04,
-      depthTest:true,
-      depthWrite:false,
-      vertexColors:true,
-      opacity:1
-    });
+    for(let bi=0;bi<3;bi++){
+      const bucket=buckets[bi];
+      if(!bucket.length)continue;
+      const positions=[];
+      const colors=[];
+      let avgSize=0;
+      for(const leaf of bucket){
+        positions.push(leaf.pos.x,leaf.pos.y,leaf.pos.z);
+        colors.push(leaf.color.r,leaf.color.g,leaf.color.b);
+        avgSize+=leaf.size;
+      }
+      avgSize/=bucket.length;
 
-    const pts=new THREE.Points(g,m);
-    pts.castShadow=false;
-    pts.receiveShadow=false;
-    pts.frustumCulled=false;
-    pts.renderOrder=2;
-    group.add(pts);
+      const g=new THREE.BufferGeometry();
+      g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+      g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+      g.computeBoundingSphere();
+
+      const m=new THREE.PointsMaterial({
+        map:this.leafTexture,
+        size:avgSize,
+        sizeAttenuation:true,
+        transparent:true,
+        alphaTest:.04,
+        depthTest:true,
+        depthWrite:false,
+        vertexColors:true,
+        opacity:1
+      });
+
+      const pts=new THREE.Points(g,m);
+      pts.castShadow=false;
+      pts.receiveShadow=false;
+      pts.frustumCulled=false;
+      pts.renderOrder=2;
+      group.add(pts);
+    }
 
     // Invisible alpha-cut foliage cards used ONLY for shadows.
-    // These sample the same foliage distribution and texture as the visible sprites,
-    // so the ground shadow reads as leaves instead of round canopy blobs.
     const shadowAspect=702/768;
     const shadowGeo=new THREE.PlaneGeometry(1,shadowAspect);
     const shadowMat=new THREE.MeshBasicMaterial({
@@ -537,7 +559,7 @@ class ProceduralTreeGenerator {
       depthTest:false
     });
 
-    const leafCount=positions.length/3;
+    const leafCount=leafData.length;
     const maxShadowCards=420;
     const shadowStep=Math.max(1,Math.ceil(leafCount/maxShadowCards));
     const shadowCount=Math.ceil(leafCount/shadowStep);
@@ -547,17 +569,14 @@ class ProceduralTreeGenerator {
     const dummy=new THREE.Object3D();
     let si=0;
     for(let i=0;i<leafCount;i+=shadowStep){
-      dummy.position.set(positions[i*3],positions[i*3+1],positions[i*3+2]);
-
-      // Most leaf surfaces are near-horizontal with natural random variation.
-      // That gives the overhead sun a leafy silhouette instead of a card rectangle.
+      const leaf=leafData[i];
+      dummy.position.copy(leaf.pos);
       dummy.rotation.set(
         -Math.PI*.5+randRange(rng,-.42,.42),
         randRange(rng,0,Math.PI*2),
         randRange(rng,-.30,.30)
       );
-
-      const s=spriteSize*randRange(rng,.42,.68);
+      const s=leaf.size*randRange(rng,.56,.82);
       dummy.scale.set(s,s,1);
       dummy.updateMatrix();
       shadowMesh.setMatrixAt(si++,dummy.matrix);
@@ -567,8 +586,6 @@ class ProceduralTreeGenerator {
     shadowMesh.castShadow=true;
     shadowMesh.receiveShadow=false;
     shadowMesh.frustumCulled=false;
-
-    // Force the shadow pass to alpha-cut the real foliage PNG.
     shadowMesh.customDepthMaterial=new THREE.MeshDepthMaterial({
       depthPacking:THREE.RGBADepthPacking,
       map:this.leafTexture,
@@ -577,7 +594,7 @@ class ProceduralTreeGenerator {
     });
     group.add(shadowMesh);
 
-    this.stats.leafSplats=positions.length/3;
+    this.stats.leafSplats=leafData.length;
     return group;
   }
   _applyTexture(){
@@ -835,13 +852,21 @@ function buildTreeLibrary() {
                 canopyScale: 1, foliageDensity: 2.4, splatDetail: 0, maxLevelCap: 2, meshVisible: true, splatsVisible: false, foliageVisible: true });
     const trunkGeo = gen.mesh.geometry.clone();
     const barkMat = barkMats[bark] || (barkMats[bark] = new THREE.MeshStandardMaterial({ map: gen.textures[bark], bumpMap: gen.textures[bark], bumpScale: .055, roughness: .96, metalness: 0 }));
+    // foliage comes in size buckets (one Points object each); merge them with a per-sprite size
+    const LEAF_SCALE = 2.1;                            // bigger clumps: the game view is far further out than the generator's
+    const buckets = gen.foliageSplats ? gen.foliageSplats.children.filter(c => c.isPoints) : [];
     let fGeo = null, fSize = 1;
-    if (gen.foliageSplats) {
-      const pts = gen.foliageSplats.children[0];
+    if (buckets.length) {
+      const P = [], Cc = [], Sz = [];
+      for (const b of buckets) {
+        const bp = b.geometry.attributes.position.array, bc = b.geometry.attributes.color.array, sz = b.material.size * LEAF_SCALE;
+        for (let k = 0; k < bp.length / 3; k++) { P.push(bp[k*3], bp[k*3+1], bp[k*3+2]); Cc.push(bc[k*3], bc[k*3+1], bc[k*3+2]); Sz.push(sz); }
+        fSize = Math.max(fSize, sz);
+      }
       fGeo = new THREE.BufferGeometry();
-      fGeo.setAttribute('position', pts.geometry.attributes.position.clone());
-      fGeo.setAttribute('color', pts.geometry.attributes.color.clone());
-      fSize = pts.material.size * 2.1;                 // bigger clumps: the game view is far further out than the generator's
+      fGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      fGeo.setAttribute('color', new THREE.Float32BufferAttribute(Cc, 3));
+      fGeo.setAttribute('aSize', new THREE.Float32BufferAttribute(Sz, 1));
     }
     // bounds of trunk + foliage
     const box = new THREE.Box3().setFromBufferAttribute(trunkGeo.attributes.position);
@@ -855,7 +880,7 @@ function buildTreeLibrary() {
     let leaves = null;
     if (fGeo) {
       const ig = new THREE.InstancedBufferGeometry();
-      ig.setAttribute('position', fGeo.attributes.position); ig.setAttribute('color', fGeo.attributes.color);
+      ig.setAttribute('position', fGeo.attributes.position); ig.setAttribute('color', fGeo.attributes.color); ig.setAttribute('aSize', fGeo.attributes.aSize);
       ig.setAttribute('aInst', new THREE.InstancedBufferAttribute(new Float32Array(NEAR_CAP * 4), 4));
       ig.setAttribute('aInst2', new THREE.InstancedBufferAttribute(new Float32Array(NEAR_CAP * 2), 2));
       ig.instanceCount = 0;
@@ -865,18 +890,18 @@ function buildTreeLibrary() {
 
     // capture impostor
     const capMesh = new THREE.Mesh(trunkGeo, barkMat); cap.add(capMesh);
-    let capLeaves = null;
-    if (fGeo) {
-      capLeaves = new THREE.Points(fGeo, new THREE.PointsMaterial({ map: leafSRGB, size: fSize * (ATLAS_CELL / (2 * R)) / renderer.getPixelRatio(),
+    const capLeaves = buckets.map(b => {                // one capture Points per size bucket
+      const pts = new THREE.Points(b.geometry.clone(), new THREE.PointsMaterial({ map: leafSRGB,
+        size: b.material.size * LEAF_SCALE * (ATLAS_CELL / (2 * R)) / renderer.getPixelRatio(),
         sizeAttenuation: false, vertexColors: true, alphaTest: .3, transparent: false }));
-      cap.add(capLeaves);
-    }
+      cap.add(pts); return pts;
+    });
     const cam = new THREE.OrthographicCamera(-R, R, R, -R, 0.1, R * 10);
     cam.position.copy(C).add(new THREE.Vector3(0, Math.sin(PITCH), Math.cos(PITCH)).multiplyScalar(R * 4));
     cam.lookAt(C);
     rt.viewport.set(v * ATLAS_CELL, 0, ATLAS_CELL, ATLAS_CELL); rt.scissor.copy(rt.viewport); rt.scissorTest = true;
     renderer.setRenderTarget(rt); renderer.clear(); renderer.render(cap, cam);
-    cap.remove(capMesh); if (capLeaves) cap.remove(capLeaves);
+    cap.remove(capMesh); capLeaves.forEach(pl => cap.remove(pl));
     treeLib.push({ trunk, leaves, C, R });
   });
   renderer.setRenderTarget(null);
@@ -921,7 +946,7 @@ function makeLeafMaterial(tex, size) {
   return new THREE.ShaderMaterial({
     uniforms: { map: { value: tex }, uSize: { value: size }, uScale: { value: 400 }, uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR } },
     vertexShader: `
-      attribute vec3 color; attribute vec4 aInst; attribute vec2 aInst2;
+      attribute vec3 color; attribute float aSize; attribute vec4 aInst; attribute vec2 aInst2;
       uniform float uSize, uScale;
       varying vec3 vCol; varying float vDist;
       void main(){
@@ -930,7 +955,7 @@ function makeLeafMaterial(tex, size) {
         p = vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z) + aInst.xyz;
         vec4 mv = modelViewMatrix * vec4(p, 1.);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = uSize * aInst.w * uScale / -mv.z;
+        gl_PointSize = aSize * aInst.w * uScale / -mv.z;
         vCol = color * aInst2.y; vDist = -mv.z;
       }`,
     fragmentShader: `
