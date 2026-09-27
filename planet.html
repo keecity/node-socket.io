@@ -622,6 +622,9 @@ return { ProceduralTreeGenerator, PRESETS };
 
 <script>
 // ================= World =================
+// Fog by true distance (like the terrain/water shaders) instead of view depth, so buildings, robots and trees
+// fade out exactly where the ground does and never show up floating in the far fog.
+THREE.ShaderChunk.fog_vertex = THREE.ShaderChunk.fog_vertex.replace('fogDepth = - mvPosition.z;', 'fogDepth = length( mvPosition.xyz );');
 const N = 2048;           // heightmap resolution (periodic)
 const SIZE = 4096;        // world size in units
 const CELL = SIZE / N;

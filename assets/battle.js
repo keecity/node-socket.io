@@ -1419,7 +1419,7 @@ const Battle = {
       if (h.sel && h.alive) { const r = ringFor(h); r.visible = true; r.position.set(dx, Math.max(Hd(h.pos.x, h.pos.z), 0) + 0.01, dz); } else if (h.ring) h.ring.visible = false; }
     for (let i = helis.length - 1; i >= 0; i--) { const h = helis[i]; if (!h.alive && !h.falling) { battleRoot.remove(h.root); scene.remove(h.bar.g); if (h.ring) battleRoot.remove(h.ring); helis.splice(i, 1); } }
     for (const t of towns) { const sx = W * Math.round((c.x - t.x) / W), sz = W * Math.round((c.z - t.z) / W); t.root.position.set(sx, 0, sz);
-      t.root.visible = Math.hypot(t.x + sx - c.x, t.z + sz - c.z) * S < FOG_FAR + TOWN * S; }
+      t.root.visible = Math.hypot(t.x + sx - camera.position.x / S, t.z + sz - camera.position.z / S) * S < FOG_FAR + TOWN * S; }
     updateBullets(dt); updateLasers(dt); updateBeams(dt); updateHeliProjectiles(dt); updateDebris(dt);
     for (const p of PARTS) p.update(dt);
     teamUpdate(dt); checkVictory();
