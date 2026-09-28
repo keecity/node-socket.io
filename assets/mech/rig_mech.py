@@ -198,6 +198,8 @@ P = rig.pose.bones
 # Bone-local axes (roll aligned forward): for bones pointing down, +X rotation
 # swings the tail forward (-Y); for Hips/Spine/Head (pointing up), +X tips forward too.
 
+STAB = 0.9   # how much of the body's pitch the head cancels (1.0 = perfectly level)
+
 def idle(p):
     br = 0.5 - 0.5 * math.cos(p)                                   # breath 0..1
     P['Hips'].location.y = -0.012 * br
@@ -208,7 +210,8 @@ def idle(p):
     P['Foot_L'].rotation_euler.x = P['Foot_R'].rotation_euler.x = rad(4 * br)
     P['Spine'].rotation_euler.x = rad(-1.5 * math.sin(p))
     P['Spine'].rotation_euler.z = rad(-0.5 * math.sin(p + 0.7))
-    P['Head'].rotation_euler.x = rad(1.5 * math.sin(p - 0.6))      # nod trails the chest
+    body_pitch = P['Hips'].rotation_euler.x + P['Spine'].rotation_euler.x
+    P['Head'].rotation_euler.x = -STAB * body_pitch + rad(0.5 * math.sin(p - 0.6))  # stabilized
     P['Head'].rotation_euler.y = rad(6 * math.sin(p))
     for s, sg in (('L', 1), ('R', -1)):
         P[f'Shoulder_{s}'].rotation_euler.z = rad(sg * -1.2 * br)  # shoulders lift on the breath
@@ -230,10 +233,13 @@ def walk(p):
     P['Spine'].rotation_euler.x = rad(4 + 1.5 * math.cos(2 * p - 0.5))  # lean forward + absorb
     P['Spine'].rotation_euler.y = rad(-3 * math.sin(p))            # counter twist
     P['Spine'].rotation_euler.z = rad(-0.6 * math.cos(p))
-    # head bounce: nods after each strike, settles before the next
-    P['Head'].rotation_euler.x = rad(-1 + 3 * math.cos(2 * p - 0.9))
+    # head stabilizer: counter-rotate (tilt up) against the hips + spine pitch so
+    # the gaze stays level through the lean and the step bounce; only a small
+    # residual nod that trails each strike is left
+    body_pitch = P['Hips'].rotation_euler.x + P['Spine'].rotation_euler.x
+    P['Head'].rotation_euler.x = -STAB * body_pitch + rad(0.6 * math.cos(2 * p - 1.2))
     P['Head'].rotation_euler.y = rad(1.5 * math.sin(p))
-    P['Head'].rotation_euler.z = rad(0.8 * math.sin(p - 0.4))
+    P['Head'].rotation_euler.z = rad(0.4 * math.sin(p - 0.4))
     for s, ph, sg in (('L', 0.0, 1), ('R', math.pi, -1)):
         q = p + ph
         thigh = 26 * math.sin(q)
