@@ -184,6 +184,13 @@ def finger_rig(obj, side):
         nxt = min(tfree, key=lambda q: (q['c'] - cur).length); tch.append(nxt); tfree.remove(nxt); cur = nxt['c']
     for q in free:   # anything unchained joins the nearest segment
         near = min([s for ch in chains for s in ch], key=lambda s: (s['c'] - q['c']).length); near['v'] += q['v']
+    # palm facing: thinnest axis of the palm plate, signed toward the side
+    # the fingers already lean to (the open side of the hand)
+    import numpy as np
+    pc = np.array([c[:] for c in palm['co']]); pc -= pc.mean(0)
+    palm_n = Vector(np.linalg.svd(pc, full_matrices=False)[2][2])
+    lean = sum((bot(ch[-1]) - top(ch[0]) for ch in chains), Vector())
+    if palm_n.dot(lean) < 0: palm_n = -palm_n
     out = []
     for name, ch in [('Thumb', tch)] + list(zip(['Index', 'Middle', 'Ring', 'Pinky'], chains)):
         prev = palm
@@ -202,7 +209,7 @@ def finger_rig(obj, side):
         if name == 'Thumb':
             curl = palm['c'] - joints[0][0]
         else:
-            curl = joints[-1][1] - joints[0][0]
+            curl = palm_n          # fold straight into the palm
         curl = (curl - d0 * curl.dot(d0)).normalized()
         for k, (h, t, q) in enumerate(joints):
             bn = f'{name}{k + 1}_{side}'
@@ -329,9 +336,9 @@ P = rig.pose.bones
 # Bone-local axes (roll aligned forward): for bones pointing down, +X rotation
 # swings the tail forward (-Y); for Hips/Spine/Head (pointing up), +X tips forward too.
 
-FIST = {'Index': (75, 85, 60), 'Middle': (75, 85, 60), 'Ring': (75, 90),
-        'Pinky': (75, 85, 60), 'Thumb': (20, 35, 40)}
-GRIP_WRIST = (-11.7, -63.6, 2.2)   # solved: fist closes over the shield's grip bar
+FIST = {'Index': (85, 100, 80), 'Middle': (85, 100, 80), 'Ring': (85, 110),
+        'Pinky': (85, 100, 80), 'Thumb': (30, 45, 50)}
+GRIP_WRIST = (-12.5, -66.6, 2.2)   # solved: fist closes over the shield's grip bar
 RELAX = {'Index': (12, 18, 12), 'Middle': (16, 22, 14), 'Ring': (20, 26),
          'Pinky': (24, 28, 18), 'Thumb': (8, 10, 8)}
 
