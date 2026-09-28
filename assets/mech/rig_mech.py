@@ -147,6 +147,7 @@ def loose_parts(me):
 def mean(vs): return sum(vs, Vector()) / len(vs)
 
 def finger_rig(obj, side):
+    import numpy as np
     me = obj.data
     P_ = [{'v': c, 'co': [me.vertices[i].co.copy() for i in c]} for c in loose_parts(me)]
     for q in P_:
@@ -196,13 +197,15 @@ def finger_rig(obj, side):
         prev = palm
         joints = []
         for k, q in enumerate(ch):
-            kd = KDTree(len(prev['co']))
-            for i, c in enumerate(prev['co']): kd.insert(c, i)
-            kd.balance()
-            ds = sorted(q['co'], key=lambda c: kd.find(c)[2])
-            head = mean(ds[:max(3, len(ds) // 7)])
-            far = sorted(q['co'], key=lambda c: -(c - head).length)
-            tail = mean(far[:max(3, len(far) // 7)])
+            # hinge on the segment's own long axis: centre of the end facing the
+            # previous piece, inset a little so the knuckle rotates in place
+            a = np.array([c[:] for c in q['co']]); m = a.mean(0)
+            ax = Vector(np.linalg.svd(a - m, full_matrices=False)[2][0])
+            if ax.dot(q['c'] - prev['c']) < 0: ax = -ax
+            t = [(c - q['c']).dot(ax) for c in q['co']]
+            t0, t1 = min(t), max(t); L = t1 - t0
+            head = mean([c for c, tt in zip(q['co'], t) if tt < t0 + 0.15 * L]) + ax * 0.12 * L
+            tail = mean([c for c, tt in zip(q['co'], t) if tt > t1 - 0.15 * L])
             joints.append((head, tail, q))
             prev = q
         d0 = (joints[0][1] - joints[0][0]).normalized()
@@ -336,9 +339,9 @@ P = rig.pose.bones
 # Bone-local axes (roll aligned forward): for bones pointing down, +X rotation
 # swings the tail forward (-Y); for Hips/Spine/Head (pointing up), +X tips forward too.
 
-FIST = {'Index': (85, 100, 80), 'Middle': (85, 100, 80), 'Ring': (85, 110),
-        'Pinky': (85, 100, 80), 'Thumb': (30, 45, 50)}
-GRIP_WRIST = (-12.5, -66.6, 2.2)   # solved: fist closes over the shield's grip bar
+FIST = {'Index': (60, 70, 50), 'Middle': (60, 70, 50), 'Ring': (60, 80),
+        'Pinky': (60, 70, 50), 'Thumb': (20, 30, 30)}
+GRIP_WRIST = (-5.7, -67.0, -0.8)   # solved: fist closes over the shield's grip bar
 RELAX = {'Index': (12, 18, 12), 'Middle': (16, 22, 14), 'Ring': (20, 26),
          'Pinky': (24, 28, 18), 'Thumb': (8, 10, 8)}
 
