@@ -17,7 +17,7 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
   outside of the left forearm (bound to `ForeArm_L`).
 - `_L` / `_R` are the mech's own left and right (left = +X in glTF, on the
   viewer's right when it faces you).
-- 51 bones (23 body + 14 finger bones per hand), Y-up, model faces **+Z**,
+- 54 bones (23 body + 14 finger bones per hand + 3 saber bones), Y-up, model faces **+Z**,
   about 2.8 units tall:
 
   ```
@@ -38,7 +38,34 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
   that flexes with the arm swing.
 - Hard-surface binding: every armor part follows exactly one bone at weight
   1.0, so nothing bends or stretches.
-- Animation clips (30 fps, in place, loopable): `Idle` (2 s) and `Walk` (1 s).
+- Animation clips (30 fps, in place):
+
+  | Clip | Length | Loop | What happens |
+  | --- | --- | --- | --- |
+  | `Idle` | 2 s | yes | saber stored on the shield, blade off |
+  | `Walk` | 1 s | yes | saber stored, blade off |
+  | `SaberDraw` | 1.5 s | no | shield swings across, right hand pulls the saber, blade ignites |
+  | `SaberIdle` | 2 s | yes | saber held at the ready, blade humming |
+  | `SaberWalk` | 1 s | yes | walk with the saber held |
+  | `SaberSheathe` | 1.5 s | no | `SaberDraw` in reverse: blade off, saber back on the shield |
+
+  Chain them in an Anim State Graph: `Idle/Walk` → `SaberDraw` → `SaberIdle/SaberWalk`
+  → `SaberSheathe` → `Idle/Walk`. Draw/Sheathe should not loop and should use
+  exit time 1.0 so the handover frames play fully.
+
+## Beam saber
+
+![Draw sequence](saber_draw.png)
+
+- The hilt is stored on the shield's inner front edge. Its `Saber` bone is a child of
+  `ForeArm_L`, so in the plain clips it rides along with the shield.
+- `SaberBlade` scales the blade: 0.001 = off (collapsed into the emitter), 1 = lit.
+  The blade is a white emissive core plus a translucent pink glow shell.
+- `SaberGrip` is a socket inside the right fist (child of `Hand_R`) if you want to
+  attach other props there at runtime.
+- In the draw, the right arm pose at the grab is solved so the fist lands exactly on
+  the stored hilt; from that frame the saber follows the hand. Everything is baked to
+  plain keyframes, so no constraints are needed in PlayCanvas.
 
 Cleanup done on the source: 9 duplicate parts that were stacked on top of
 each other were removed, mirrored parts had their inside-out faces fixed, and

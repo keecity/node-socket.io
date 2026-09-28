@@ -316,6 +316,116 @@ body.parent = rig
 mod = body.modifiers.new('Armature', 'ARMATURE')
 mod.object = rig
 
+# --- 6b. Beam saber: hilt stored on the shield's inner face, drawn by the right hand
+FIST = {'Index': (60, 70, 50), 'Middle': (60, 70, 50), 'Ring': (60, 80),
+        'Pinky': (60, 70, 50), 'Thumb': (20, 30, 30)}
+SABER = bool(SHIELD)
+BLADE_OFF = 0.001
+if SABER:
+    import bmesh
+    # stored on the shield's inner front edge, tilted toward the right hand for a
+    # cross-body draw (placement found by searching reachable, natural poses)
+    HOLSTER = Vector((0.625, 0.131, 1.314))
+    HOLSTER_TILT = (14.4, 19.3)        # deg about X, Z: emitter up, leaning toward the right hand
+    HOLSTER_ROLL = 113.5               # spin of the hilt about its own axis
+    HILT_LEN, BLADE_LEN = 0.30, 1.45
+
+    # right-fist socket: where the hilt sits when the fingers are closed
+    bpy.context.view_layer.objects.active = rig
+    for pb in rig.pose.bones:
+        pb.rotation_mode = 'XYZ'
+    for f, angs in FIST.items():
+        for k, a in enumerate(angs):
+            rig.pose.bones[f'{f}{k + 1}_R'].rotation_euler.x = math.radians(a)
+    bpy.context.view_layer.update()
+    ev = body.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh()
+    gname = {g.index: g.name for g in body.vertex_groups}
+    def gcen(ns):
+        vs = [ev.vertices[v.index].co for v in body.data.vertices if v.groups and gname[v.groups[0].group] in ns]
+        return sum(vs, Vector()) / len(vs)
+    palmc = gcen({'Hand_R'})
+    midc = gcen({'Index2_R', 'Middle2_R', 'Ring2_R', 'Pinky2_R'})
+    g_ctr = (gcen({'Index1_R', 'Middle1_R', 'Ring1_R', 'Pinky1_R'}) + midc
+             + gcen({'Index3_R', 'Middle3_R', 'Pinky3_R'}) + palmc) / 4
+    g_y = (gcen({'Index1_R'}) - gcen({'Pinky1_R'})).normalized()        # blade leaves the thumb side
+    g_z = (midc - palmc); g_z = (g_z - g_y * g_z.dot(g_y)).normalized()
+    body.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh_clear()
+    for pb in rig.pose.bones:
+        pb.rotation_euler = (0, 0, 0)
+    bpy.context.view_layer.update()
+
+    def frame(o, y, z):
+        x = y.cross(z).normalized(); z = x.cross(y).normalized()
+        m = Matrix((x, y.normalized(), z)).transposed().to_4x4(); m.translation = o
+        return m
+    M_GRIP = frame(g_ctr, g_y, g_z)
+    from mathutils import Euler
+    hy = Euler((math.radians(HOLSTER_TILT[0]), 0, math.radians(HOLSTER_TILT[1]))).to_matrix() @ Vector((0, 0, 1))
+    M_HOLST = frame(HOLSTER, hy, Vector((0, 1, 0))) @ Matrix.Rotation(math.radians(HOLSTER_ROLL), 4, 'Y')
+
+    # model (local frame: +Y toward the emitter, origin at hilt centre)
+    sm = bpy.data.meshes.new('Saber'); bm = bmesh.new()
+    def cyl(y0, y1, r0, r1, mat, grp, seg=20):
+        res = bmesh.ops.create_cone(bm, cap_ends=True, segments=seg, radius1=r0, radius2=r1, depth=y1 - y0)
+        vs = res['verts']
+        bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-90), 3, 'X'))
+        bmesh.ops.translate(bm, verts=vs, vec=(0, (y0 + y1) / 2, 0))
+        for f in {f for v in vs for f in v.link_faces}:
+            f.material_index = mat; f.smooth = True
+        for v in vs: v[dl][grp] = 1.0
+    dl = bm.verts.layers.deform.verify()
+    h = HILT_LEN / 2
+    cyl(-h, -h + 0.03, 0.036, 0.038, 0, 0)                  # pommel
+    cyl(-h + 0.03, h - 0.07, 0.030, 0.030, 0, 0)            # grip
+    for i in range(5):                                      # grip rings
+        y = -h + 0.05 + i * 0.035
+        cyl(y, y + 0.012, 0.034, 0.034, 0, 0)
+    cyl(h - 0.07, h - 0.02, 0.036, 0.040, 0, 0)             # guard
+    cyl(h - 0.02, h, 0.040, 0.030, 1, 0)                    # emitter (glows faintly)
+    cyl(h, h + BLADE_LEN - 0.08, 0.020, 0.018, 2, 1, 16)    # blade core
+    cyl(h + BLADE_LEN - 0.08, h + BLADE_LEN, 0.018, 0.004, 2, 1, 16)
+    cyl(h - 0.01, h + BLADE_LEN + 0.03, 0.048, 0.040, 3, 1, 16)   # glow shell
+    bm.to_mesh(sm); bm.free()
+    so = bpy.data.objects.new('Saber', sm); scene.collection.objects.link(so)
+    so.vertex_groups.new(name='Saber'); so.vertex_groups.new(name='SaberBlade')
+    sm.uv_layers.new(name='UVMap')
+    def mat(name, base, metal, rough, emit=None, strength=0.0, alpha=1.0):
+        m = bpy.data.materials.new(name); m.use_nodes = True
+        b = m.node_tree.nodes['Principled BSDF']
+        b.inputs['Base Color'].default_value = (*base, 1)
+        b.inputs['Metallic'].default_value = metal; b.inputs['Roughness'].default_value = rough
+        if emit:
+            b.inputs['Emission Color'].default_value = (*emit, 1)
+            b.inputs['Emission Strength'].default_value = strength
+        if alpha < 1:
+            b.inputs['Alpha'].default_value = alpha
+            m.surface_render_method = 'BLENDED'
+        return m
+    for m in (mat('SaberHilt', (0.40, 0.41, 0.44), 0.85, 0.35),
+              mat('SaberEmitter', (0.9, 0.3, 0.6), 0.2, 0.3, (1.0, 0.25, 0.6), 2.0),
+              mat('SaberBladeCore', (1.0, 0.85, 0.95), 0.0, 0.2, (1.0, 0.8, 0.92), 8.0),
+              mat('SaberBladeGlow', (1.0, 0.15, 0.55), 0.0, 0.5, (1.0, 0.15, 0.55), 4.0, alpha=0.35)):
+        sm.materials.append(m)
+    sm.transform(M_HOLST)
+    bpy.ops.object.select_all(action='DESELECT')
+    so.select_set(True); body.select_set(True); bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+
+    # bones: Saber (stored on the shield), SaberBlade (scale = ignite), SaberGrip (fist socket),
+    
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    E = arm_data.edit_bones
+    def bone(name, m, length, parent, deform=True):
+        eb = E.new(name); eb.head = m.translation; eb.tail = m.translation + m.to_3x3().col[1] * length
+        eb.align_roll(m.to_3x3().col[2]); eb.parent = E[parent]; eb.use_deform = deform
+        return eb
+    bone('Saber', M_HOLST, 0.15, 'ForeArm_L')
+    mb = M_HOLST.copy(); mb.translation = M_HOLST @ Vector((0, HILT_LEN / 2, 0))
+    bone('SaberBlade', mb, BLADE_LEN, 'Saber')
+    bone('SaberGrip', M_GRIP, 0.15, 'Hand_R', deform=False)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
 # --- 7. Animation clips (in place, loopable)
 def rad(d): return math.radians(d)
 
@@ -328,11 +438,13 @@ def key_pose(action_name, frames, pose_fn):
         pb.rotation_mode = 'XYZ'
     for f in range(frames + 1):
         for pb in rig.pose.bones:
-            pb.location = (0, 0, 0); pb.rotation_euler = (0, 0, 0)
+            pb.location = (0, 0, 0); pb.rotation_euler = (0, 0, 0); pb.scale = (1, 1, 1)
         pose_fn(f / frames * 2 * math.pi)
         for pb in rig.pose.bones:
             pb.keyframe_insert('location', frame=f + 1)
             pb.keyframe_insert('rotation_euler', frame=f + 1)
+            if pb.name == 'SaberBlade':
+                pb.keyframe_insert('scale', frame=f + 1)
     act.frame_range = (1, frames + 1)
     return act
 
@@ -340,8 +452,6 @@ P = rig.pose.bones
 # Bone-local axes (roll aligned forward): for bones pointing down, +X rotation
 # swings the tail forward (-Y); for Hips/Spine/Head (pointing up), +X tips forward too.
 
-FIST = {'Index': (60, 70, 50), 'Middle': (60, 70, 50), 'Ring': (60, 80),
-        'Pinky': (60, 70, 50), 'Thumb': (20, 30, 30)}
 GRIP_WRIST = (-5.7, -67.0, -0.8)   # hand pose approved by the user; shield placed around it
 RELAX = {'Index': (12, 18, 12), 'Middle': (16, 22, 14), 'Ring': (20, 26),
          'Pinky': (24, 28, 18), 'Thumb': (8, 10, 8)}
@@ -360,6 +470,8 @@ def hands(p, squeeze, relax_wave):
     fingers('R', RELAX, relax_wave)
     if not SHIELD:
         fingers('L', RELAX, relax_wave)
+    if SABER:
+        P['SaberBlade'].scale = (BLADE_OFF,) * 3                  # stored: blade off
 
 STAB = 0.9   # how much of the body's pitch the head cancels (1.0 = perfectly level)
 
@@ -432,6 +544,194 @@ def walk(p):
     hands(p, 2.5 * (0.5 + 0.5 * math.cos(2 * p - 0.4)), 10 * math.sin(p + math.pi - 0.9))
 
 acts = [key_pose('Idle', 60, idle), key_pose('Walk', 30, walk)]
+# --- 7b. Saber clips: draw (baked from IK + a shield->hand handover), hold, walk, sheathe
+if SABER:
+    import json
+    TUNE = json.loads(os.environ.get('SABER_TUNE', '{}'))
+    def T(k, d): return TUNE.get(k, d)
+
+    def smooth(a, b, t):
+        t = min(1.0, max(0.0, (t - a) / (b - a))); return t * t * (3 - 2 * t)
+
+    def capture(fn, *a):
+        for pb in rig.pose.bones:
+            pb.location = (0, 0, 0); pb.rotation_euler = (0, 0, 0); pb.scale = (1, 1, 1)
+        fn(*a)
+        return {pb.name: (pb.location.copy(), pb.rotation_euler.copy(), pb.scale.copy()) for pb in rig.pose.bones}
+
+    def apply_mix(A, B, t):
+        for pb in rig.pose.bones:
+            la, ra, sa = A[pb.name]; lb, rb, sb = B[pb.name]
+            pb.location = la.lerp(lb, t)
+            pb.rotation_euler = tuple(x + (y - x) * t for x, y in zip(ra, rb))
+            pb.scale = sa.lerp(sb, t)
+
+    def ready(p=0.0, bob=0.0):
+        # right arm: saber held up and forward; left arm: shield a little forward
+        P['UpperArm_R'].rotation_euler = (rad(T('ua_x', 30) + 2 * math.sin(p)), 0, rad(T('ua_z', -14)))
+        P['ForeArm_R'].rotation_euler = (rad(T('fa_x', 70) + 3 * math.sin(p - 0.5) + bob), rad(T('fa_y', 0)), 0)
+        P['Hand_R'].rotation_euler = (rad(T('h_x', -20)), rad(T('h_y', 0)), rad(T('h_z', 0)))
+        fingers('R', FIST, 1.5 * math.sin(p))
+        P['SaberBlade'].scale = (1 + 0.04 * math.sin(9 * p), 1.0, 1 + 0.04 * math.sin(9 * p))  # hum
+
+    def saber_idle(p):
+        idle(p)
+        P['UpperArm_L'].rotation_euler.x += rad(10); P['ForeArm_L'].rotation_euler.x += rad(20)
+        ready(p)
+
+    def saber_walk(p):
+        walk(p)
+        P['UpperArm_L'].rotation_euler.x = rad(10); P['ForeArm_L'].rotation_euler.x = rad(30)
+        ready(p, bob=2.5 * math.cos(2 * p - 0.4))
+
+    def reach():
+        idle(0)
+        P['Hips'].rotation_euler.y = rad(T('hip_twist', 8))
+        P['Spine'].rotation_euler = (rad(T('sp_x', 10)), rad(T('sp_twist', 20)), 0)
+        # cross-body draw: left upper arm rolls so the shield comes upright across the
+        # front of the body; the right hand reaches over to the hilt in front of the chest
+        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', 7.1)), rad(T('ual_y', 57.1)), rad(T('ual_z', -12.1)))
+        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 29.0))
+        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', -8.8)), 0, rad(T('shr_z', 6.2)))
+        fingers('R', {k: tuple(0 for _ in v) for k, v in FIST.items()})   # open hand
+        P['SaberBlade'].scale = (BLADE_OFF,) * 3
+
+    hold = P['Saber'].constraints.new('COPY_TRANSFORMS')
+    hold.target = rig; hold.subtarget = 'SaberGrip'; hold.influence = 0.0
+
+    POSE_IDLE0 = capture(idle, 0.0)
+    POSE_REACH = capture(reach)
+
+    # right arm for the grab: find a natural reach (small twists, elbow bending
+    # forward) that brings the fist to the holster spot, then turn the stored hilt
+    # to match that fist, so the handover is exact without contorting the wrist
+    import random
+    from mathutils import Euler
+    rig.animation_data.action = None          # else the last clip re-poses the rig on update
+    for n, (l, r_, sc) in POSE_REACH.items():
+        P[n].location, P[n].rotation_euler, P[n].scale = l, r_, sc
+    bpy.context.view_layer.update()
+    Bn = rig.data.bones
+    CH = ('UpperArm_R', 'ForeArm_R', 'Hand_R')
+    rel = {b: Bn[b].parent.matrix_local.inverted() @ Bn[b].matrix_local for b in CH}
+    base = P['Shoulder_R'].matrix.copy()
+    g_loc = Bn['Hand_R'].matrix_local.inverted() @ Bn['SaberGrip'].matrix_local
+    D = P['ForeArm_L'].matrix @ Bn['ForeArm_L'].matrix_local.inverted()     # shield motion
+    Di = D.inverted()
+    target = D @ HOLSTER
+    print(f"GRAB dbg: shoulder->target {(P['UpperArm_R'].head - target).length:.3f} m, target {tuple(round(x, 3) for x in target)}, "
+          f"fist at rest pose {tuple(round(x, 3) for x in (base @ rel['UpperArm_R'] @ rel['ForeArm_R'] @ rel['Hand_R'] @ g_loc).translation)}")
+    def fk(a):
+        m = base
+        for i, b in enumerate(CH):
+            m = m @ rel[b] @ Euler(a[3 * i:3 * i + 3], 'XYZ').to_matrix().to_4x4()
+        return m @ g_loc
+    def cost(a):
+        m = fk(a)
+        axis_rest = (Di.to_3x3() @ m.to_3x3().col[1]).normalized()      # hilt axis once stored
+        return (float(os.environ.get('REACH_W', '300')) * (m.translation - target).length
+                + 0.15 * (a[1] ** 2 + a[4] ** 2 + a[7] ** 2)             # twists
+                + 0.03 * sum(x * x for x in a)
+                + 0.5 * max(0.0, -a[3])                                  # elbow bends forward
+                + 0.6 * (1 - axis_rest.z))                               # stored hilt ~upright
+    rng = random.Random(5); best = None
+    for trial in range(120):
+        a = [rng.uniform(-1.2, 1.2) for _ in range(9)]; c = cost(a); step = 0.4
+        while step > 1e-4:
+            improved = False
+            for i in range(9):
+                for d in (step, -step):
+                    b = list(a); b[i] += d; cb = cost(b)
+                    if cb < c: a, c, improved = b, cb, True
+            if not improved: step *= 0.5
+        if best is None or c < best[0]: best = (c, a)
+    a = best[1]; m = fk(a)
+    print(f"GRAB reach: {(m.translation - target).length * 100:.2f} cm from holster spot, arm "
+          f"{[round(math.degrees(x)) for x in a]}")
+    for i, b in enumerate(CH):
+        l, _, sc = POSE_REACH[b]; POSE_REACH[b] = (l, Euler(a[3 * i:3 * i + 3], 'XYZ'), sc)
+    # re-seat the stored saber (mesh + bones) to the orientation the fist arrives with
+    new_h = Di @ m
+    C = new_h @ M_HOLST.inverted()
+    sg = {body.vertex_groups['Saber'].index, body.vertex_groups['SaberBlade'].index}
+    for v in body.data.vertices:
+        if v.groups and v.groups[0].group in sg:
+            v.co = C @ v.co
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    for bnm in ('Saber', 'SaberBlade'):
+        eb = arm_data.edit_bones[bnm]; eb.matrix = C @ eb.matrix
+    bpy.ops.object.mode_set(mode='OBJECT')
+    M_HOLST = new_h
+    ax = new_h.to_3x3().col[1]
+    print(f"HOLSTER re-seated: axis {tuple(round(x, 2) for x in ax)}")
+
+    POSE_READY = capture(saber_idle, 0.0)
+    N_DRAW, GRAB = 46, 14
+
+    def key_frames(name, n, fn):
+        act = bpy.data.actions.new(name); act.use_fake_user = True
+        rig.animation_data.action = act
+        for f in range(n + 1):
+            _, hi = fn(f)
+            hold.influence = hi
+            for pb in rig.pose.bones:
+                for path in ('location', 'rotation_euler', 'scale'):
+                    pb.keyframe_insert(path, frame=f + 1)
+            hold.keyframe_insert('influence', frame=f + 1)
+        act.frame_range = (1, n + 1)
+        bpy.ops.object.mode_set(mode='POSE')
+        bpy.ops.pose.select_all(action='SELECT')
+        bpy.ops.nla.bake(frame_start=1, frame_end=n + 1, only_selected=False, visual_keying=True,
+                         clear_constraints=False, use_current_action=True, bake_types={'POSE'},
+                         channel_types={'LOCATION', 'ROTATION', 'SCALE'})
+        bpy.ops.object.mode_set(mode='OBJECT')
+        for fc in [fc for fc in act.fcurves if 'constraints' in fc.data_path]:
+            act.fcurves.remove(fc)
+        return act
+
+    def draw_frame(f):
+        if f <= GRAB:                       # reach across, open hand, IK onto the hilt
+            t = smooth(0, GRAB - 2, f); apply_mix(POSE_IDLE0, POSE_REACH, t)
+            return smooth(0, GRAB - 2, f), 0.0
+        # close the fist, hand over, pull out to the ready pose, ignite
+        apply_mix(POSE_REACH, POSE_READY, smooth(GRAB + 3, 32, f))
+        c = smooth(GRAB, GRAB + 3, f)
+        for fn_, angs in FIST.items():
+            for k, a in enumerate(angs):
+                P[f'{fn_}{k + 1}_R'].rotation_euler.x = rad(a) * max(c, smooth(GRAB + 3, 32, f))
+        ig = smooth(28, 34, f)
+        s = BLADE_OFF + (1 - BLADE_OFF) * ig * (1 + 0.08 * math.sin(math.pi * ig))
+        P['SaberBlade'].scale = (s, s, s)
+        return 1.0 - smooth(GRAB + 3, 32, f), 1.0
+
+    def loop_frame(fn, n):
+        def g(f):
+            for pb in rig.pose.bones:
+                pb.location = (0, 0, 0); pb.rotation_euler = (0, 0, 0); pb.scale = (1, 1, 1)
+            fn(f / n * 2 * math.pi); return 0.0, 1.0
+        return g
+
+    a_draw = key_frames('SaberDraw', N_DRAW, draw_frame)
+    a_idle = key_frames('SaberIdle', 60, loop_frame(saber_idle, 60))
+    a_walk = key_frames('SaberWalk', 30, loop_frame(saber_walk, 30))
+    a_sheathe = a_draw.copy(); a_sheathe.name = 'SaberSheathe'; a_sheathe.use_fake_user = True
+    end = N_DRAW + 2
+    for fc in a_sheathe.fcurves:                   # the draw, played backwards
+        pts = [(end - k.co.x, k.co.y) for k in fc.keyframe_points]
+        fc.keyframe_points.clear()
+        fc.keyframe_points.add(len(pts))
+        for k, (x, y) in zip(fc.keyframe_points, sorted(pts)):
+            k.co = (x, y); k.interpolation = 'LINEAR'
+    # handover check: fist and hilt should coincide at the grab frame
+    rig.animation_data.action = a_draw; hold.influence = 0; scene.frame_set(GRAB + 1)
+    bpy.context.view_layer.update()
+    gw = rig.matrix_world @ P['SaberGrip'].matrix; sw = rig.matrix_world @ P['Saber'].matrix
+    ang = math.degrees((gw.to_quaternion().rotation_difference(sw.to_quaternion())).angle)
+    print(f"HANDOVER gap {(gw.translation - sw.translation).length * 100:.1f} cm, {ang:.1f} deg")
+    P['Saber'].constraints.remove(hold)
+    acts += [a_draw, a_idle, a_walk, a_sheathe]
+
 for a in acts:  # push to NLA so both export as separate clips
     tr = rig.animation_data.nla_tracks.new(); tr.name = a.name
     tr.strips.new(a.name, 1, a)
