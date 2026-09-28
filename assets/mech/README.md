@@ -57,8 +57,8 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
 
 ![Draw sequence](saber_draw.png)
 
-- The hilt is stored upright, sunk 1.5 cm into the back (inner face) of the shield by the left
-  fist; its grip uses the grey sampled from the shield's back side. Its `Saber` bone is a child of
+- The hilt is stored upright in the gap between the left forearm and the shield,
+  touching both; its grip uses the grey sampled from the shield's back side. Its `Saber` bone is a child of
   `ForeArm_L`, so in the plain clips it rides along with the shield.
 - `SaberBlade` scales the blade: 0.001 = off (collapsed into the emitter), 1 = lit.
   The blade is a white emissive core plus a translucent pink glow shell.
