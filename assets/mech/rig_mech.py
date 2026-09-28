@@ -607,12 +607,12 @@ if SABER:
         idle(0)
         P['Hips'].rotation_euler.y = rad(T('hip_twist', 8))
         P['Spine'].rotation_euler = (rad(T('sp_x', 10)), rad(T('sp_twist', 20)), 0)
-        # cross-body draw: left shoulder rolls forward and the upper arm turns so the
-        # forearm/shield gap (where the hilt is stored) faces the right hand
-        P['Shoulder_L'].rotation_euler = (rad(T('shl_x', 39.7)), 0, rad(T('shl_z', -21.7)))
-        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', -7.5)), rad(T('ual_y', 99.8)), rad(T('ual_z', -2.5)))
-        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 28.7))
-        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', 12.8)), 0, rad(T('shr_z', 22.0)))
+        # cross-body draw: the shield stays sideways (face out, upright); the left arm
+        # just lifts it toward the chest so the right hand can reach the stored hilt
+        P['Shoulder_L'].rotation_euler = (rad(T('shl_x', -21.9)), 0, rad(T('shl_z', 35.1)))
+        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', 3.7)), rad(T('ual_y', 66.8)), rad(T('ual_z', -56.2)))
+        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 7.8))
+        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', -4.3)), 0, rad(T('shr_z', 28.4)))
         fingers('R', {k: tuple(0 for _ in v) for k, v in FIST.items()})   # open hand
         P['SaberBlade'].scale = (BLADE_OFF,) * 3
 

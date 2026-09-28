@@ -44,7 +44,7 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
   | --- | --- | --- | --- |
   | `Idle` | 2 s | yes | saber stored on the shield, blade off |
   | `Walk` | 1 s | yes | saber stored, blade off |
-  | `SaberDraw` | 1.5 s | no | shield swings across, right hand pulls the saber, blade ignites |
+  | `SaberDraw` | 1.5 s | no | shield stays sideways and lifts slightly, right hand reaches across and pulls the saber, blade ignites |
   | `SaberIdle` | 2 s | yes | saber held at the ready, blade humming |
   | `SaberWalk` | 1 s | yes | walk with the saber held |
   | `SaberSheathe` | 1.5 s | no | `SaberDraw` in reverse: blade off, saber back on the shield |
