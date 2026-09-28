@@ -38,9 +38,10 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
   that flexes with the arm swing.
 - Hard-surface binding: every armor part follows exactly one bone at weight
   1.0, so nothing bends or stretches.
-- Animation clips (30 fps, in place): the demo game's 52 moves, in the same order and
-  with the same names, retargeted from its robot (`source_moves.glb`) onto this rig,
-  plus two extras. Clips marked **ours** are the ones built for this mech.
+- Animation clips (30 fps, in place): the game's 52 move names, in the game's order and
+  lengths, hand-animated for this mech (`moves_spec.py`), plus two extras. Attack
+  clips hit inside the game's damage windows. The shield arm uses poses solved from
+  the shield geometry, so the shield always stays upright with its face out.
 
   | # | Clip | # | Clip | # | Clip |
   | --- | --- | --- | --- | --- | --- |
@@ -63,14 +64,7 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
   | 17 | Saber_Draw (**ours**) | 35 | Run_Forward | 53 | Walk (**ours**, extra) |
   | 18 | Saber_Idle (**ours**) | 36 | Turn_L_45 | 54 | Saber_Walk (**ours**, extra) |
 
-  Retargeting notes: bone rotations are transferred in world space, body movement is
-  scaled ~3x to this mech and the feet are re-grounded; the left fist always keeps its
-  grip on the shield; the demo's open-hand/fist swaps drive the right fingers; in saber
-  clips the saber rides in the right fist with the blade aimed where the demo's blade
-  points; the five `Gun_*` clips are mirrored so the rifle is in the right hand (the
-  left hand holds the shield).
-
-![Demo robot (left) vs this mech (right), same clip and time](moves_compare.png)
+![Key frames from the move set, rendered in PlayCanvas](moves_compare.png)
 
 ## Weapons and sockets
 

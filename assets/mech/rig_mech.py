@@ -913,161 +913,229 @@ if SABER:
     acts += [a_draw, a_idle, a_walk, a_sheathe]
 
 
-# --- 7c. Game move set: retarget the demo robot's 52 clips onto this rig
-if SABER and MOVES_OK:
-    from mathutils import Quaternion, Euler
-    def sample_clip(an):
-        chans = {}
-        for ch in an['channels']:
-            smp = an['samplers'][ch['sampler']]
-            chans[(ch['target']['node'], ch['target']['path'])] = (acc_data(smp['input'])[:, 0], acc_data(smp['output']), smp.get('interpolation', 'LINEAR'))
-        dur = max(float(v[0][-1]) for v in chans.values())
-        def at(t):
-            local = {}
-            for i in range(len(NODES)):
-                vals = {}
-                for path in ('translation', 'rotation', 'scale'):
-                    c = chans.get((i, path))
-                    if c is None: continue
-                    ts, vs, ip = c
-                    k = int(np.searchsorted(ts, t, side='right')) - 1
-                    if k < 0: v = vs[0]
-                    elif k >= len(ts) - 1 or ip == 'STEP': v = vs[min(k, len(ts) - 1)]
-                    else:
-                        u = (t - ts[k]) / max(1e-9, ts[k + 1] - ts[k])
-                        if path == 'rotation':
-                            qa = Quaternion((vs[k][3], *vs[k][:3])); qb = Quaternion((vs[k + 1][3], *vs[k + 1][:3]))
-                            qq = qa.slerp(qb, u); v = [qq.x, qq.y, qq.z, qq.w]
-                        else: v = vs[k] * (1 - u) + vs[k + 1] * u
-                    vals[path] = list(v)
-                local[i] = trs(i, vals.get('translation'), vals.get('rotation'), vals.get('scale'))
-            W = {}
-            def world(i):
-                if i in W: return W[i]
-                W[i] = (world(PARENT[i]) @ local[i]) if i in PARENT else local[i]
-                return W[i]
-            for i in range(len(NODES)): world(i)
-            return W, local
-        return dur, at
-    MAP = {'Hips': 'Pelvis', 'Spine': 'Chest', 'Head': 'Head',
-           'Shoulder_L': 'Shoulder.L', 'UpperArm_L': 'UpperArm.L', 'ForeArm_L': 'Forearm.L',
-           'Shoulder_R': 'Shoulder.R', 'UpperArm_R': 'UpperArm.R', 'ForeArm_R': 'Forearm.R', 'Hand_R': 'Hand.R',
-           'SkirtSide_L': 'HipArmor.L', 'SkirtSide_R': 'HipArmor.R',
-           'UpperLeg_L': 'Thigh.L', 'LowerLeg_L': 'Shin.L', 'Foot_L': 'Foot.L',
-           'UpperLeg_R': 'Thigh.R', 'LowerLeg_R': 'Shin.R', 'Foot_R': 'Foot.R'}
-    swapLR = lambda n: n.replace('.L', '.TMP').replace('.R', '.L').replace('.TMP', '.R')
+# --- 7c. Game move set: hand-authored clips for this mech (names/order/timing match the game)
+MOVES_SPEC = os.environ.get('MECH_MOVES_SPEC', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'moves_spec.py'))
+if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
+    import numpy as np, random
+    from mathutils import Euler, Quaternion
+    SPEC = {}
+    exec(open(MOVES_SPEC).read(), SPEC)
+    CLIPS_A, GAITS = SPEC['CLIPS'], SPEC['GAITS']
     Bn = rig.data.bones
-    order = sorted(Bn, key=lambda b: len(b.parent_recursive))
+    ORDER = sorted(Bn, key=lambda b: len(b.parent_recursive))
     REST_O = {b.name: b.matrix_local.copy() for b in Bn}
     REL = {b.name: (b.parent.matrix_local.inverted() @ b.matrix_local) if b.parent else b.matrix_local.copy() for b in Bn}
-    S_SC = Bn['Hips'].head_local.z / (CG @ _rest(NID['Pelvis']).translation).z
-    def rot3(m): return m.to_3x3().normalized()
-    # saber aim: correction on the right hand so our blade points where theirs does
-    G_rel = rot3(REST_O['Hand_R']).inverted() @ rot3(REST_O['SaberGrip'])
-    def rest_rot(i):     # world rest rotation from the node quaternions only (the saber rests at scale 0)
-        q = NODES[i].get('rotation', [0, 0, 0, 1]); m = Quaternion((q[3], q[0], q[1], q[2])).to_matrix()
-        return (rest_rot(PARENT[i]) @ m) if i in PARENT else m
-    K_SABER = rot3(REST_O['Hand_R']).inverted() @ (rot3(CG) @ rest_rot(NID['BeamSaber']) @ rot3(CG).inverted()) @ G_rel.inverted()
-    ank0 = {s: Bn[f'Foot_{s}'].head_local.z for s in 'LR'}
-    src_ank0 = min((CG @ _rest(NID[f'Foot.{s}'])).translation.z for s in 'LR')
+    FINGER_BONES = [f'{f}{k + 1}_{s}' for f, a in FIST.items() for k in range(len(a)) for s in 'LR']
+    # sole / knee points used to keep the mech on the ground
+    gname = {g.index: g.name for g in body.vertex_groups}
+    SOLE = {}
+    for bn_ in ('Foot_L', 'Foot_R', 'LowerLeg_L', 'LowerLeg_R'):
+        vs = [v.co.copy() for v in body.data.vertices if v.groups and gname[v.groups[0].group] == bn_]
+        vs.sort(key=lambda c: c.z)
+        pick = vs[:40] if bn_.startswith('Foot') else vs[:12]
+        SOLE[bn_] = [REST_O[bn_].inverted() @ c for c in pick]
+    D2R = math.radians
 
-    def retarget(name, mirror=False, frames=None):
-        an = next(a for a in GJ['animations'] if a['name'] == name)
-        dur, at = sample_clip(an)
-        n = frames or max(2, round(dur * 30))
+    def full(p):
+        """fill a key pose with defaults"""
+        q = {k: v for k, v in p.items()}
+        q.setdefault('fistR', 0.4); q.setdefault('blade', 0.0); q.setdefault('saber', 0); q.setdefault('gun', 0)
+        q.setdefault('lift', 0.0)
+        return q
+
+    def fk(pose, hips_off=Vector()):
+        W = {}
+        for b in ORDER:
+            nm = b.name
+            par = W[b.parent.name] if b.parent else Matrix.Identity(4)
+            e = pose.get(nm, (0, 0, 0))
+            basis = Euler(tuple(D2R(a) for a in e), 'XYZ').to_matrix().to_4x4()
+            if nm == 'Hips': basis.translation = Vector((hips_off.x, hips_off.z, -hips_off.y))
+            W[nm] = par @ REL[nm] @ basis
+        return W
+
+    def ground_off(pose, lift):
+        W = fk(pose)
+        low = min((W[b] @ c).z for b, pts in SOLE.items() for c in pts[::4])   # pts are bone-local
+        return Vector((0, 0, -low + lift))
+
+    G_LOC = REST_O['Hand_R'].inverted() @ REST_O['SaberGrip']
+    _W0 = fk({})
+    _m = _W0['UpperArm_R']
+    for _b in ('UpperArm_R', 'ForeArm_R', 'Hand_R'):
+        pass
+    REACH = 0.82 * ((REST_O['ForeArm_R'].translation - REST_O['UpperArm_R'].translation).length
+                    + (REST_O['Hand_R'].translation - REST_O['ForeArm_R'].translation).length
+                    + (REST_O['SaberGrip'].translation - REST_O['Hand_R'].translation).length)
+    print("REACH", round(REACH, 3))
+    CHR = ('UpperArm_R', 'ForeArm_R', 'Hand_R')
+
+    def solve_saber(pose, ground):
+        """arm angles that put the hilt at pos with the blade along dir"""
+        pos, d = pose['sab']
+        pos = Vector(pos); d = Vector(d).normalized()
+        off = ground_off(pose, pose.get('lift', 0)) if ground else Vector((0, 0, pose.get('lift', 0)))
+        W = fk(pose, off)
+        base = W['Shoulder_R']
+        sh = W['UpperArm_R'].translation
+        pos = pos + off                           # spec positions are relative to the grounded mech
+        v = pos - sh
+        if v.length > REACH: pos = sh + v.normalized() * REACH   # keep targets inside the arm's reach
+        def fkarm(a):
+            m = base
+            for i, b in enumerate(CHR):
+                m = m @ REL[b] @ Euler(a[3 * i:3 * i + 3], 'XYZ').to_matrix().to_4x4()
+            return m @ G_LOC
+        def cost(a):
+            m = fkarm(a)
+            return (60 * (m.translation - pos).length + 3 * m.to_3x3().col[1].angle(d)
+                    + 0.25 * (a[1] ** 2 + a[4] ** 2 + a[7] ** 2) + 0.4 * (a[6] ** 2 + a[8] ** 2)
+                    + 0.05 * sum(x * x for x in a) + 0.6 * max(0.0, -a[3]))
+        def descend(a, c):
+            step = 0.3
+            while step > 2e-4:
+                imp = False
+                for i in range(9):
+                    for dd in (step, -step):
+                        b_ = list(a); b_[i] += dd; cb = cost(b_)
+                        if cb < c: a, c, imp = b_, cb, True
+                if not imp: step *= 0.5
+            return a, c
+        seed = [D2R(x) for b in CHR for x in pose.get(b, (0, 0, 0))]
+        best = descend(seed, cost(seed)); rng = random.Random(3)
+        for _ in range(25):
+            x0 = [s + rng.gauss(0, 0.7) for s in seed]
+            r_ = descend(x0, cost(x0))
+            if r_[1] < best[1]: best = r_
+        a = best[0]; m = fkarm(a)
+        err = ((m.translation - pos).length, math.degrees(m.to_3x3().col[1].angle(d)))
+        out = dict(pose)
+        for i, b in enumerate(CHR): out[b] = tuple(math.degrees(x) for x in a[3 * i:3 * i + 3])
+        return out, err
+
+    def gait(kind, u):
+        p2 = 2 * math.pi * u
+        base = SPEC['M'](SPEC['SH_READY'], SPEC['R_GUARD'], {'Spine': (5, -6, 0), 'Head': (-3, 5, 0)})
+        pose = dict(base)
+        hit = math.cos(2 * p2)
+        if kind in ('fwd', 'back', 'run'):
+            sgn = 1 if kind != 'back' else -1
+            amp, kn, lean, bob = (40, 85, 14, 0.07) if kind == 'run' else (26, 45, 4, 0.035)
+            for s, ph in (('L', 0.0), ('R', math.pi)):
+                q = sgn * p2 + ph
+                th = amp * math.sin(q)
+                kneeb = -(8 + kn * max(0.0, math.cos(q)) ** 1.5)
+                pose[f'UpperLeg_{s}'] = (th, 0, 3 if s == 'L' else -4)
+                pose[f'LowerLeg_{s}'] = (kneeb, 0, 0)
+                pose[f'Foot_{s}'] = (-(th + kneeb) + 8 * math.sin(q), 0, 0)
+            arm = -(28 if kind == 'run' else 10) * math.sin(sgn * p2 + math.pi)
+            pose['UpperArm_R'] = (22 + arm, 0, -12); pose['ForeArm_R'] = (78 + 0.4 * arm, 0, 0)
+            ua, fa = SPEC['SH_READY']['UpperArm_L'], SPEC['SH_READY']['ForeArm_L']
+            pose['UpperArm_L'] = (ua[0] - 0.25 * arm, ua[1], ua[2]); pose['ForeArm_L'] = fa
+            pose['Spine'] = (5 + lean + 1.5 * hit, -6 - 3 * math.sin(p2) * sgn, 0)
+            pose['Head'] = (-3 - 0.9 * (lean + 1.5 * hit), 5 + 1.5 * math.sin(p2), 0)
+            pose['Hips'] = (1.0 * hit + (6 if kind == 'run' else 0), 2 * math.sin(p2) * sgn, 0.8 * math.cos(p2))
+            pose['lift'] = (bob * (0.5 + 0.5 * math.cos(2 * p2)) if kind == 'run' else 0) - (0 if kind == 'run' else bob * (0.5 + 0.5 * hit))
+        else:   # strafe: sidestep toward the mech's left (L) or right (R)
+            sg = 1 if kind == 'L' else -1
+            for s, ph in (('L', 0.0), ('R', math.pi)):
+                q = p2 + ph
+                lift_ = max(0.0, math.sin(q))
+                ab = 9 * math.sin(p2 + (0 if s == 'L' else math.pi)) * sg
+                pose[f'UpperLeg_{s}'] = (10 + 22 * lift_, 0, (3 if s == 'L' else -4) + ab)
+                pose[f'LowerLeg_{s}'] = (-16 - 40 * lift_, 0, 0)
+                pose[f'Foot_{s}'] = (6 + 18 * lift_, 0, -ab)
+            pose['Hips'] = (2, 0, 3 * math.sin(2 * p2) * sg)
+            pose['Spine'] = (5, -6, -2 * math.sin(2 * p2) * sg)
+            pose['lift'] = -0.02 * (0.5 + 0.5 * hit)
+        pose['fistR'] = 1
+        return pose
+
+    def author(name):
+        if name in GAITS:
+            dur, kind = GAITS[name]; keys = None; loop = True; fx = None; ground = True
+        else:
+            c = CLIPS_A[name]; dur, keys, loop, fx, ground = c['dur'], c['keys'], c['loop'], c['fx'], c['ground']
+            solved = []
+            for t, p in keys:
+                p = full(p)
+                if 'sab' in p:
+                    p, err = solve_saber(p, ground)
+                    if err[0] > 0.03 or err[1] > 8:
+                        print(f"  sab {name} t={t}: miss {err[0] * 100:.1f} cm / {err[1]:.0f} deg")
+                solved.append((t, p))
+            keys = solved
+        n = max(2, round(dur * 30))
         act = bpy.data.actions.new(name); act.use_fake_user = True
         curves = {}
-        def src_world(W, nm):
-            i = NID[swapLR(nm) if mirror else nm]
-            m = W[i]; r = _rest(i)
-            if mirror: m = MIR @ m @ MIR; r = MIR @ r @ MIR
-            return m, r
-        prev_eul = {}
+        prev = {}
         for f in range(n + 1):
-            t = min(dur, f / 30.0)
-            W, L = at(t)
-            pose = {}
-            sab_on = (W[NID['BeamSaber']].to_scale().length > 0.5) and not mirror
-            blade = W[NID['BeamSaber_Blade']].to_scale().y / max(1e-6, W[NID['BeamSaber']].to_scale().y) if sab_on else 0.0
-            gun_on = W[NID['BeamRifle']].to_scale().length > 0.1
-            fist_R = (L[NID[swapLR('HandFist.R') if mirror else 'HandFist.R']].to_scale().length > 0.5) or sab_on or (gun_on and mirror)
-            # grounding: lowest source ankle vs rest, scaled
-            src_low = min((CG @ src_world(W, f'Foot.{s}')[0]).translation.z for s in 'LR')
-            for b in order:
-                nm = b.name
-                par = pose[b.parent.name] if b.parent else Matrix.Identity(4)
-                fk = par @ REL[nm]
-                if nm in MAP:
-                    m, r = src_world(W, MAP[nm])
-                    D = rot3(CG) @ (rot3(m) @ rot3(r).inverted()) @ rot3(CG).inverted()
-                    R = D @ rot3(REST_O[nm])
-                    if nm == 'Hand_R' and sab_on: R = R @ K_SABER
-                    w = R.to_4x4(); w.translation = fk.translation
-                    if nm == 'Hips':
-                        dv = CG.to_3x3() @ (m.translation - r.translation) * S_SC
-                        w.translation = REST_O['Hips'].translation + dv
-                    pose[nm] = w
+            t = min(dur, f / 30.0); u = t / dur
+            if keys is None:
+                pose = full(gait(kind, u))
+            else:
+                k = max(i for i, (tk, _) in enumerate(keys) if tk <= t + 1e-9) if t >= keys[0][0] else 0
+                if k >= len(keys) - 1: pose = dict(keys[-1][1])
                 else:
-                    pose[nm] = fk
-            # ground the feet
-            our_low = min(pose[f'Foot_{s}'].translation.z for s in 'LR')
-            want = min(ank0.values()) + (src_low - src_ank0) * S_SC
-            dz = want - our_low
-            for k in pose:
-                if pose[k] is not None: pose[k] = Matrix.Translation((0, 0, dz)) @ pose[k]
-            if sab_on:      # saber rides in the right fist
-                pose['Saber'] = pose['SaberGrip'].copy()
-                pose['SaberBlade'] = pose['Saber'] @ REL['SaberBlade']
-            # local bases
-            for b in order:
-                nm = b.name
-                par = pose[b.parent.name] if b.parent else Matrix.Identity(4)
-                try:
-                    basis = (par @ REL[nm]).inverted() @ pose[nm]
-                except ValueError:
-                    print("SINGULAR", name, f, nm, b.parent.name if b.parent else '-', [round(x, 3) for x in par.to_scale()], [round(x, 3) for x in pose[nm].to_scale()]); raise
-                loc = basis.translation; e = basis.to_euler('XYZ', prev_eul.get(nm, Euler())); prev_eul[nm] = e
-                sc = [1, 1, 1]
-                if nm == 'SaberBlade': sc = [max(BLADE_OFF, blade)] * 3
-                if nm == 'Gun': sc = [1.0 if (gun_on and mirror) else 0.001] * 3
-                if nm == 'Saber' and not sab_on: loc = Vector(); e = Euler()
-                for path, vals in (('location', loc), ('rotation_euler', e), ('scale', sc)):
-                    for k in range(3):
-                        curves.setdefault((nm, path, k), []).append((f + 1, vals[k]))
-            # fingers / left grip / skirts are set on top as rotations
-            for fb, angs in FIST.items():
-                for k, a in enumerate(angs):
-                    curves[(f'{fb}{k + 1}_L', 'rotation_euler', 0)][-1] = (f + 1, rad(a))
-                    target = a if fist_R else a * 0.25
-                    curves[(f'{fb}{k + 1}_R', 'rotation_euler', 0)][-1] = (f + 1, rad(target))
-            for k in range(3):
-                curves[('Hand_L', 'rotation_euler', k)][-1] = (f + 1, rad(GRIP_WRIST[k]))
+                    (t0, A), (t1, B) = keys[k], keys[k + 1]
+                    w = (t - t0) / max(1e-6, t1 - t0); w = w * w * (3 - 2 * w)
+                    pose = {}
+                    for kk in set(A) | set(B):
+                        if kk == 'sab': continue
+                        a_ = A.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift') else full({})[kk])
+                        b_ = B.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift') else full({})[kk])
+                        if kk in ('saber', 'gun'): pose[kk] = max(a_, b_) if (a_ and b_) or w < 0.5 else b_
+                        elif isinstance(a_, tuple): pose[kk] = tuple(x + (y - x) * w for x, y in zip(a_, b_))
+                        else: pose[kk] = a_ + (b_ - a_) * w
+                if fx: fx(u, pose)
+            # skirts follow the thighs, left hand holds the shield grip
             for s in 'LR':
-                th = curves[(f'UpperLeg_{s}', 'rotation_euler', 0)][-1][1]
-                curves[(f'SkirtFront_{s}', 'rotation_euler', 0)][-1] = (f + 1, max(0.0, th) * 0.8)
-            thb = max(curves[('UpperLeg_L', 'rotation_euler', 0)][-1][1], curves[('UpperLeg_R', 'rotation_euler', 0)][-1][1])
-            curves[('SkirtBack', 'rotation_euler', 0)][-1] = (f + 1, -max(0.0, -min(curves[('UpperLeg_L', 'rotation_euler', 0)][-1][1], curves[('UpperLeg_R', 'rotation_euler', 0)][-1][1])) * 0.5)
-        for (nm, path, k), pts in curves.items():
-            fc = act.fcurves.new(f'pose.bones["{nm}"].{path}', index=k, action_group=nm)
+                th = pose.get(f'UpperLeg_{s}', (0, 0, 0))
+                pose[f'SkirtFront_{s}'] = (max(0.0, th[0]) * 0.8, 0, 0)
+                pose[f'SkirtSide_{s}'] = (0.25 * th[0], 0, (1 if s == 'L' else -1) * (3 + max(0.0, abs(th[2]) - 3) * 0.5))
+            back = min(pose.get('UpperLeg_L', (0, 0, 0))[0], pose.get('UpperLeg_R', (0, 0, 0))[0])
+            pose['SkirtBack'] = (-max(0.0, -back) * 0.5, 0, 0)
+            pose['Hand_L'] = GRIP_WRIST
+            fr = pose.get('fistR', 0.4)
+            for fb, angs in FIST.items():
+                for kk, a in enumerate(angs):
+                    pose[f'{fb}{kk + 1}_L'] = (a, 0, 0)
+                    pose[f'{fb}{kk + 1}_R'] = (RELAX[fb][kk] + (a - RELAX[fb][kk]) * fr, 0, 0)
+            hip = Vector(pose.get('hips', (0, 0, 0)))
+            off = (ground_off(pose, pose.get('lift', 0)) if (keys is None or ground) else Vector((0, 0, pose.get('lift', 0)))) + hip
+            W = fk(pose, off)
+            held = pose.get('saber', 0) > 0.5
+            if held:
+                W['Saber'] = W['SaberGrip'].copy(); W['SaberBlade'] = W['Saber'] @ REL['SaberBlade']
+            for b in ORDER:
+                nm = b.name
+                par = W[b.parent.name] if b.parent else Matrix.Identity(4)
+                basis = (par @ REL[nm]).inverted() @ W[nm]
+                loc = basis.translation; e = basis.to_euler('XYZ', prev.get(nm, Euler())); prev[nm] = e
+                sc = (1, 1, 1)
+                if nm == 'SaberBlade': sc = (max(BLADE_OFF, pose.get('blade', 0) if held else 0),) * 3
+                if nm == 'Gun': sc = (1.0 if pose.get('gun', 0) > 0.5 else 0.001,) * 3
+                if nm == 'Saber' and not held: loc, e = Vector(), Euler()
+                for path, vals in (('location', loc), ('rotation_euler', e), ('scale', sc)):
+                    for kk in range(3):
+                        curves.setdefault((nm, path, kk), []).append((f + 1, vals[kk]))
+        for (nm, path, kk), pts in curves.items():
+            fc = act.fcurves.new(f'pose.bones["{nm}"].{path}', index=kk, action_group=nm)
             fc.keyframe_points.add(len(pts))
-            fc.keyframe_points.foreach_set('co', [c for p in pts for c in p])
+            fc.keyframe_points.foreach_set('co', [c for pt in pts for c in pt])
             for kp in fc.keyframe_points: kp.interpolation = 'LINEAR'
         act.frame_range = (1, n + 1)
         return act
 
-    # final clip list: the game's 52 moves in order (ours replace its saber draw/idle/sheathe
-    # and its idle), then our extras
+    GAME_ORDER = [a['name'] for a in GJ['animations']]
     OURS = {'Idle': 'Idle', 'Saber_Draw': 'SaberDraw', 'Saber_Idle': 'SaberIdle', 'Saber_Sheathe': 'SaberSheathe'}
-    GUN_CLIPS = {'Gun_Idle', 'Gun_Pickup', 'Gun_Burst', 'Gun_Charge', 'Gun_Charge_Shot'}
     by_name = {a.name: a for a in acts}
     final = []
-    for an in GJ['animations']:
-        nm = an['name']
+    for nm in GAME_ORDER:
         if nm in OURS:
             a = by_name[OURS[nm]]; a.name = nm; final.append(a)
         else:
-            final.append(retarget(nm, mirror=nm in GUN_CLIPS))
-            print("RETARGET", nm)
+            final.append(author(nm)); print("AUTHORED", nm)
     by_name['Walk'].name = 'Walk'; final.append(by_name['Walk'])
     by_name['SaberWalk'].name = 'Saber_Walk'; final.append(by_name['SaberWalk'])
     acts = final
