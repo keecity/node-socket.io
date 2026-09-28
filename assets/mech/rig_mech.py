@@ -278,7 +278,7 @@ if SHIELD:
     S_SCALE = 0.0155
     sh.scale = (S_SCALE,) * 3
     # placed so the grip bar on its back sits in the left fist (see GRIP_WRIST)
-    SHIFT = Vector((-0.020, -0.12, 0.039))   # forward so it sits beside, not behind, the forearm
+    SHIFT = Vector((0.030, -0.12, 0.079))   # forward so it sits beside, not behind, the forearm
     sh.location = Vector((0.60 + 12.0 * S_SCALE, 0.41, 1.98 - 99.6 * S_SCALE)) + SHIFT
     bpy.ops.object.select_all(action='DESELECT'); sh.select_set(True)
     bpy.context.view_layer.objects.active = sh
@@ -342,7 +342,7 @@ P = rig.pose.bones
 
 FIST = {'Index': (60, 70, 50), 'Middle': (60, 70, 50), 'Ring': (60, 80),
         'Pinky': (60, 70, 50), 'Thumb': (20, 30, 30)}
-GRIP_WRIST = (53.5, -42.9, -58.6)   # solved: fist closes over the shield's grip bar
+GRIP_WRIST = (-5.7, -67.0, -0.8)   # hand pose approved by the user; shield placed around it
 RELAX = {'Index': (12, 18, 12), 'Middle': (16, 22, 14), 'Ring': (20, 26),
          'Pinky': (24, 28, 18), 'Thumb': (8, 10, 8)}
 
