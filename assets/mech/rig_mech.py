@@ -124,6 +124,103 @@ for s in 'LR':
     B[f'SkirtFront_{s}'] = ((skf[s].x, 0.30, 1.55), (skf[s].x, 0.24, 1.25), 'Hips')
     B[f'SkirtSide_{s}']  = ((sks[s].x, 0.49, 1.60), (sks[s].x + sgn * 0.06, 0.49, 1.15), 'Hips')
 
+
+# --- 4b. Fingers: each hand is a palm plus separate finger segments; chain them
+from mathutils.kdtree import KDTree
+
+def loose_parts(me):
+    adj = [[] for _ in me.vertices]
+    for e in me.edges:
+        a, b = e.vertices; adj[a].append(b); adj[b].append(a)
+    seen, parts = set(), []
+    for i in range(len(me.vertices)):
+        if i in seen: continue
+        stack, comp = [i], []
+        seen.add(i)
+        while stack:
+            x = stack.pop(); comp.append(x)
+            for y in adj[x]:
+                if y not in seen: seen.add(y); stack.append(y)
+        parts.append(comp)
+    return parts
+
+def mean(vs): return sum(vs, Vector()) / len(vs)
+
+def finger_rig(obj, side):
+    me = obj.data
+    P_ = [{'v': c, 'co': [me.vertices[i].co.copy() for i in c]} for c in loose_parts(me)]
+    for q in P_:
+        q['c'] = mean(q['co'])
+        q['mn'] = Vector([min(c[i] for c in q['co']) for i in range(3)])
+        q['mx'] = Vector([max(c[i] for c in q['co']) for i in range(3)])
+    P_.sort(key=lambda q: -len(q['co']))
+    palm, rest = P_[0], P_[1:]
+    # small caps sitting inside a bigger segment ride with that segment
+    segs = []
+    for q in rest:
+        host = next((h for h in segs if all(h['mn'][i] - 0.005 <= q['c'][i] <= h['mx'][i] + 0.005 for i in range(3))), None)
+        if host: host['v'] += q['v']
+        else: segs.append(q)
+    pd = abs(palm['c'].x - cx)
+    thumb = [q for q in segs if abs(q['c'].x - cx) < pd - 0.04 and q['mn'].z > palm['mn'].z - 0.05]
+    fing = [q for q in segs if q not in thumb]
+    def top(q): return mean([c for c in q['co'] if c.z > q['mx'].z - 0.02])
+    def bot(q): return mean([c for c in q['co'] if c.z < q['mn'].z + 0.02])
+    prox = sorted(fing, key=lambda q: -q['mx'].z)[:4]
+    free = [q for q in fing if q not in prox]
+    chains = [[q] for q in sorted(prox, key=lambda q: q['c'].y)]   # front (index) to back (pinky)
+    grew = True
+    while grew and free:
+        grew = False
+        for ch in chains:
+            if not free: break
+            b_ = bot(ch[-1]); best = min(free, key=lambda q: (top(q) - b_).length)
+            if (top(best) - b_).length < 0.06:
+                ch.append(best); free.remove(best); grew = True
+    tch = []
+    cur = palm['c']
+    tfree = list(thumb)
+    while tfree:
+        nxt = min(tfree, key=lambda q: (q['c'] - cur).length); tch.append(nxt); tfree.remove(nxt); cur = nxt['c']
+    for q in free:   # anything unchained joins the nearest segment
+        near = min([s for ch in chains for s in ch], key=lambda s: (s['c'] - q['c']).length); near['v'] += q['v']
+    out = []
+    for name, ch in [('Thumb', tch)] + list(zip(['Index', 'Middle', 'Ring', 'Pinky'], chains)):
+        prev = palm
+        joints = []
+        for k, q in enumerate(ch):
+            kd = KDTree(len(prev['co']))
+            for i, c in enumerate(prev['co']): kd.insert(c, i)
+            kd.balance()
+            ds = sorted(q['co'], key=lambda c: kd.find(c)[2])
+            head = mean(ds[:max(3, len(ds) // 7)])
+            far = sorted(q['co'], key=lambda c: -(c - head).length)
+            tail = mean(far[:max(3, len(far) // 7)])
+            joints.append((head, tail, q))
+            prev = q
+        d0 = (joints[0][1] - joints[0][0]).normalized()
+        if name == 'Thumb':
+            curl = palm['c'] - joints[0][0]
+        else:
+            curl = joints[-1][1] - joints[0][0]
+        curl = (curl - d0 * curl.dot(d0)).normalized()
+        for k, (h, t, q) in enumerate(joints):
+            bn = f'{name}{k + 1}_{side}'
+            par = f'Hand_{side}' if k == 0 else f'{name}{k}_{side}'
+            out.append((bn, h, t, par, curl, q['v']))
+    return out
+
+FINGERS = {}   # side -> list of (bone, head, tail, parent, curl_dir, vertex indices)
+HAND_OBJ = {'L': alias.get('tripo_node_9dcdae010', 'tripo_node_9dcdae010'),
+            'R': alias.get('tripo_node_9dcdae07', 'tripo_node_9dcdae07')}
+for sd, on in HAND_OBJ.items():
+    FINGERS[sd] = finger_rig(bpy.data.objects[on], sd)
+    print("FINGERS", sd, [(b, len(v)) for b, *_, v in FINGERS[sd]])
+ROLL = {}
+for sd, lst in FINGERS.items():
+    for bn, h, t, par, curl, _ in lst:
+        B[bn] = (tuple(h), tuple(t), par); ROLL[bn] = curl
+
 arm_data = bpy.data.armatures.new('MechSkeleton')
 rig = bpy.data.objects.new('MechRig', arm_data)
 scene.collection.objects.link(rig)
@@ -132,7 +229,7 @@ bpy.ops.object.mode_set(mode='EDIT')
 for name, (h, t, _) in B.items():
     eb = arm_data.edit_bones.new(name)
     eb.head, eb.tail = Vector(h), Vector(t)
-    eb.align_roll(Vector((0, -1, 0)))  # local Z faces forward on every bone
+    eb.align_roll(ROLL.get(name, Vector((0, -1, 0))))  # local Z forward; fingers: Z toward the curl
     if name == 'Root':
         eb.align_roll(Vector((0, -1, 0)))
 for name, (_, _, p) in B.items():
@@ -170,7 +267,8 @@ if SHIELD:
     # source is ~100 units tall (cm), face along +X, grip bar at the top (+Z)
     S_SCALE = 0.0155
     sh.scale = (S_SCALE,) * 3
-    sh.location = (0.64 + 12.0 * S_SCALE, 0.47, 1.90 - 99.6 * S_SCALE)  # back mount against forearm, top 1.90
+    # placed so the grip bar on its back sits in the left fist (see GRIP_WRIST)
+    sh.location = (0.60 + 12.0 * S_SCALE, 0.41, 1.98 - 99.6 * S_SCALE)
     bpy.ops.object.select_all(action='DESELECT'); sh.select_set(True)
     bpy.context.view_layer.objects.active = sh
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
@@ -184,6 +282,11 @@ for o in meshes:
     o.data.uv_layers[0].name = 'UVMap'
     vg = o.vertex_groups.new(name=part_bone[o.name])
     vg.add(list(range(len(o.data.vertices))), 1.0, 'REPLACE')
+    for sd, on in HAND_OBJ.items():
+        if o.name == on:
+            for bn, *_, vids in FINGERS[sd]:
+                vg.remove(vids)
+                o.vertex_groups.new(name=bn).add(vids, 1.0, 'REPLACE')
 
 bpy.ops.object.select_all(action='DESELECT')
 for o in meshes:
@@ -220,6 +323,27 @@ P = rig.pose.bones
 # Bone-local axes (roll aligned forward): for bones pointing down, +X rotation
 # swings the tail forward (-Y); for Hips/Spine/Head (pointing up), +X tips forward too.
 
+FIST = {'Index': (75, 85, 60), 'Middle': (75, 85, 60), 'Ring': (75, 90),
+        'Pinky': (75, 85, 60), 'Thumb': (20, 35, 40)}
+GRIP_WRIST = (-12.5, -42.1, 4.1)   # solved: fist closes over the shield's grip bar
+RELAX = {'Index': (12, 18, 12), 'Middle': (16, 22, 14), 'Ring': (20, 26),
+         'Pinky': (24, 28, 18), 'Thumb': (8, 10, 8)}
+
+def fingers(side, pose, extra=0.0):
+    for f, angs in pose.items():
+        for k, a in enumerate(angs):
+            P[f'{f}{k + 1}_{side}'].rotation_euler.x = rad(a + extra * (k + 1) / len(angs))
+
+def hands(p, squeeze, relax_wave):
+    # left: wrist locked on the grip, fingers tighten a touch on each impact
+    # right: loose half-curl that breathes / flexes with the swing
+    if SHIELD:
+        P['Hand_L'].rotation_euler = tuple(rad(a) for a in GRIP_WRIST)
+        fingers('L', FIST, squeeze)
+    fingers('R', RELAX, relax_wave)
+    if not SHIELD:
+        fingers('L', RELAX, relax_wave)
+
 STAB = 0.9   # how much of the body's pitch the head cancels (1.0 = perfectly level)
 
 def idle(p):
@@ -245,6 +369,7 @@ def idle(p):
         P[f'SkirtFront_{s}'].rotation_euler.x = rad(1.2 * math.sin(p - 0.5))
         P[f'SkirtSide_{s}'].rotation_euler.z = rad(-sg * (1 + 0.8 * math.sin(p - 0.5)))
     P['SkirtBack'].rotation_euler.x = rad(-1.2 * math.sin(p - 0.5))
+    hands(p, 1.5 * math.sin(p), 6 * math.sin(p - 0.8))
 
 def walk(p):
     hit = math.cos(2 * p)                  # +1 at each foot strike (p = 0, pi)
@@ -287,6 +412,7 @@ def walk(p):
         P[f'SkirtSide_{s}'].rotation_euler.z = rad(-sg * (3 + 2.5 * (0.5 + 0.5 * math.cos(2 * p - 0.6))))
     P['SkirtBack'].rotation_euler.x = rad(-max(0.0, -26 * math.sin(p), -26 * math.sin(p + math.pi)) * 0.5
                                           - 2 * math.cos(2 * p - 0.6))
+    hands(p, 2.5 * (0.5 + 0.5 * math.cos(2 * p - 0.4)), 10 * math.sin(p + math.pi - 0.9))
 
 acts = [key_pose('Idle', 60, idle), key_pose('Walk', 30, walk)]
 for a in acts:  # push to NLA so both export as separate clips
