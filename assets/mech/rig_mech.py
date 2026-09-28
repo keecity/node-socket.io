@@ -104,6 +104,7 @@ skf = {'R': centroid('Object015'), 'L': centroid('Object007')}
 sks = {'R': centroid('Object014'), 'L': centroid('Object013')}
 skb = centroid('Object009')
 
+SOCKET_OFF = {'L': (-0.248, 0.003, -0.035), 'R': (0.155, 0.015, -0.03)}
 B = {  # name: (head, tail, parent)
     'Root':  ((cx, Y, 0.0), (cx, Y, 0.3), None),
     'Hips':  ((cx, Y, 1.40), (cx, Y, 1.60), 'Root'),
@@ -114,8 +115,12 @@ B = {  # name: (head, tail, parent)
 for s in 'LR':
     ax, lx = armx[s], legx[s]
     sgn = 1 if s == 'L' else -1          # mech faces -Y: its left is +X
-    B[f'Shoulder_{s}'] = ((cx + sgn * 0.15, 0.47, 2.10), (ax, 0.49, 2.10), 'Spine')
-    B[f'UpperArm_{s}'] = ((ax, 0.49, 2.10), (ax, 0.485, 1.88), f'Shoulder_{s}')
+    # upper-arm pivot at the centre of the shoulder socket (found by testing which
+    # pivot keeps the shoulder armour seated on the torso through wide rotations)
+    po = SOCKET_OFF[s]
+    sock = (ax + po[0], 0.49 + po[1], 2.10 + po[2])
+    B[f'Shoulder_{s}'] = ((cx + sgn * 0.15, 0.47, 2.10), sock, 'Spine')
+    B[f'UpperArm_{s}'] = (sock, (sock[0], sock[1] - 0.005, sock[2] - 0.22), f'Shoulder_{s}')
     B[f'ForeArm_{s}']  = ((ax, 0.485, 1.88), (ax, 0.40, 1.44), f'UpperArm_{s}')
     B[f'Hand_{s}']     = ((ax, 0.40, 1.44), (ax, 0.34, 1.12), f'ForeArm_{s}')
     B[f'UpperLeg_{s}'] = ((lx, Y, 1.35), (lx, Y, 0.95), 'Hips')
@@ -325,7 +330,7 @@ if SABER:
     import bmesh
     # stored on the shield's inner front edge, tilted toward the right hand for a
     # cross-body draw (placement found by searching reachable, natural poses)
-    HOLSTER = Vector((0.625, 0.131, 1.253))  # front edge of the shield's back (slid onto it below)
+    HOLSTER = Vector((0.625, 0.131, 1.437))  # front edge of the shield's back (slid onto it below)
     HOLSTER_TILT = (14.4, 19.3)        # deg about X, Z: emitter up, leaning toward the right hand
     HOLSTER_ROLL = 113.5               # spin of the hilt about its own axis
     HS = 0.85                          # handle scale
@@ -610,10 +615,10 @@ if SABER:
         P['Spine'].rotation_euler = (rad(T('sp_x', 10)), rad(T('sp_twist', 20)), 0)
         # cross-body draw: the shield stays sideways (face out, upright); the left arm
         # brings it in a little so the right hand can reach the hilt on its front edge
-        P['Shoulder_L'].rotation_euler = (rad(T('shl_x', -31.9)), 0, rad(T('shl_z', -5.9)))
-        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', -12.2)), rad(T('ual_y', 81.2)), rad(T('ual_z', -18.8)))
-        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 25.0))
-        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', 0.5)), 0, rad(T('shr_z', 28.8)))
+        P['Shoulder_L'].rotation_euler = (rad(T('shl_x', -6.8)), 0, rad(T('shl_z', -0.2)))
+        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', -14.2)), rad(T('ual_y', 58.6)), rad(T('ual_z', 5.5)))
+        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 57.6))
+        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', 9.9)), 0, rad(T('shr_z', -7.9)))
         fingers('R', {k: tuple(0 for _ in v) for k, v in FIST.items()})   # open hand
         P['SaberBlade'].scale = (BLADE_OFF,) * 3
 
