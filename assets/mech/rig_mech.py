@@ -8,7 +8,7 @@ skinned mesh to keep draw calls down (one per material).
 """
 import sys, os, math
 import bpy, mathutils
-from mathutils import Vector
+from mathutils import Vector, Matrix
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else "mech-build-01.fbx"
 OUT = sys.argv[2] if len(sys.argv) > 2 else "."
@@ -272,6 +272,12 @@ if SHIELD:
     bpy.ops.object.select_all(action='DESELECT'); sh.select_set(True)
     bpy.context.view_layer.objects.active = sh
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    # the source shield is yawed ~29 deg in plan; turn it parallel to the body's
+    # side (face straight out), pivoting on the grip so it stays in the fist
+    SHIELD_YAW = 29.1
+    pivot = Vector((0.576, 0.37, 1.30))
+    sh.data.transform(Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(SHIELD_YAW), 4, 'Z')
+                      @ Matrix.Translation(-pivot))
     sh.name = 'Shield'
     meshes.append(sh); part_bone[sh.name] = 'ForeArm_L'
 
@@ -325,7 +331,7 @@ P = rig.pose.bones
 
 FIST = {'Index': (75, 85, 60), 'Middle': (75, 85, 60), 'Ring': (75, 90),
         'Pinky': (75, 85, 60), 'Thumb': (20, 35, 40)}
-GRIP_WRIST = (-12.5, -42.1, 4.1)   # solved: fist closes over the shield's grip bar
+GRIP_WRIST = (-11.7, -63.6, 2.2)   # solved: fist closes over the shield's grip bar
 RELAX = {'Index': (12, 18, 12), 'Middle': (16, 22, 14), 'Ring': (20, 26),
          'Pinky': (24, 28, 18), 'Thumb': (8, 10, 8)}
 
