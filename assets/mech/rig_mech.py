@@ -401,7 +401,26 @@ if SABER:
             b.inputs['Alpha'].default_value = alpha
             m.surface_render_method = 'BLENDED'
         return m
-    for m in (mat('SaberHilt', (0.22, 0.22, 0.24), 0.0, 0.85),
+    # handle colour: average of the shield texture over its back (inner) faces
+    shm_i = [i for i, mt in enumerate(body.data.materials) if 'ff7b5edd' in mt.name][0]
+    timg = next(n.image for n in body.data.materials[shm_i].node_tree.nodes    # the colour (sRGB) map
+                if n.type == 'TEX_IMAGE' and n.image and n.image.colorspace_settings.name == 'sRGB')
+    W_, H_ = timg.size; px = timg.pixels[:]
+    uvl = body.data.uv_layers['UVMap'].data; acc = [0.0, 0.0, 0.0]; nacc = 0
+    for pp in body.data.polygons:
+        if pp.material_index == shm_i and pp.normal.x < -0.6:
+            for li in pp.loop_indices:
+                u, v = uvl[li].uv
+                ix = min(W_ - 1, max(0, int((u % 1) * W_))); iy = min(H_ - 1, max(0, int((v % 1) * H_)))
+                k = (iy * W_ + ix) * 4
+                for c in range(3):
+                    acc[c] += px[k + c]
+                nacc += 1
+    srgb = [c / nacc for c in acc]
+    to_lin = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    HILT_RGB = tuple(to_lin(c) for c in srgb) if timg.colorspace_settings.name == 'sRGB' and not timg.is_float else tuple(srgb)
+    print("HILT colour from shield back (sRGB):", tuple(round(c, 3) for c in srgb))
+    for m in (mat('SaberHilt', HILT_RGB, 0.0, 0.85),
               mat('SaberEmitter', (0.9, 0.3, 0.6), 0.0, 0.7, (1.0, 0.25, 0.6), 2.0),
               mat('SaberBladeCore', (1.0, 0.85, 0.95), 0.0, 0.2, (1.0, 0.8, 0.92), 8.0),
               mat('SaberBladeGlow', (1.0, 0.15, 0.55), 0.0, 0.5, (1.0, 0.15, 0.55), 4.0, alpha=0.35)):
@@ -634,7 +653,7 @@ if SABER:
                 + 0.03 * sum(x * x for x in a)
                 + 0.5 * max(0.0, -a[3])                                  # elbow bends forward
                 + 12 * abs(axis_rest.x)                                  # lies along the shield face
-                + 3 * (1 - axis_rest.z))                                 # upright on the shield
+                + 25 * (1 - axis_rest.z))                                # upright on the shield
     from mathutils.bvhtree import BVHTree
     me_ = body.data
     shi = [i for i, mt in enumerate(me_.materials) if 'ff7b5edd' in mt.name][0]
@@ -665,8 +684,9 @@ if SABER:
             if not improved: step *= 0.5
         return a, c
 
+    SINK = -0.015                     # hilt sits 1.5 cm into the shield's back
     rng = random.Random(5); a = None
-    for it in range(4):
+    for it in range(2):
         target = D @ HOLSTER
         if a is None:
             best = None
@@ -679,14 +699,15 @@ if SABER:
             a = descend(a, cost(a))[0]
         m = fk(a)
         reseat((Di @ m) @ M_HOLST.inverted())            # stored hilt takes the fist's orientation
-        # slide it along +X until it rests on the shield's inner face (2 mm clearance)
-        gap = min(h for h in (sh_bvh.ray_cast(me_.vertices[i].co, Vector((1, 0, 0)), 1.0)[3]
-                              for i in hilt_idx) if h is not None)
-        print(f"HOLSTER pass {it}: grab err {(m.translation - target).length * 100:.2f} cm, gap to shield {gap * 100:.1f} cm")
-        if abs(gap - 0.002) < 0.002:
-            break
-        reseat(Matrix.Translation(Vector((gap - 0.002, 0, 0))))
-        HOLSTER = M_HOLST.translation.copy()
+        print(f"HOLSTER pass {it}: grab err {(m.translation - target).length * 100:.2f} cm")
+        if it == 0:
+            # measured once while the hilt is still clear of the shield: slide along +X
+            # until it rests on the inner face, then sink it SINK further
+            gap = min(h for h in (sh_bvh.ray_cast(me_.vertices[i].co, Vector((1, 0, 0)), 1.0)[3]
+                                  for i in hilt_idx) if h is not None)
+            reseat(Matrix.Translation(Vector((gap - SINK, 0, 0))))
+            HOLSTER = M_HOLST.translation.copy()
+            print(f"HOLSTER: {gap * 100:.1f} cm to the shield, sunk {-SINK * 100:.1f} cm")
     for i, b in enumerate(CH):
         l, _, sc = POSE_REACH[b]; POSE_REACH[b] = (l, Euler(a[3 * i:3 * i + 3], 'XYZ'), sc)
     print(f"GRAB arm {[round(math.degrees(x)) for x in a]}")
