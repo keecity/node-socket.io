@@ -401,8 +401,8 @@ if SABER:
             b.inputs['Alpha'].default_value = alpha
             m.surface_render_method = 'BLENDED'
         return m
-    for m in (mat('SaberHilt', (0.40, 0.41, 0.44), 0.85, 0.35),
-              mat('SaberEmitter', (0.9, 0.3, 0.6), 0.2, 0.3, (1.0, 0.25, 0.6), 2.0),
+    for m in (mat('SaberHilt', (0.22, 0.22, 0.24), 0.0, 0.85),
+              mat('SaberEmitter', (0.9, 0.3, 0.6), 0.0, 0.7, (1.0, 0.25, 0.6), 2.0),
               mat('SaberBladeCore', (1.0, 0.85, 0.95), 0.0, 0.2, (1.0, 0.8, 0.92), 8.0),
               mat('SaberBladeGlow', (1.0, 0.15, 0.55), 0.0, 0.5, (1.0, 0.15, 0.55), 4.0, alpha=0.35)):
         sm.materials.append(m)
@@ -633,37 +633,64 @@ if SABER:
                 + 0.15 * (a[1] ** 2 + a[4] ** 2 + a[7] ** 2)             # twists
                 + 0.03 * sum(x * x for x in a)
                 + 0.5 * max(0.0, -a[3])                                  # elbow bends forward
-                + 0.6 * (1 - axis_rest.z))                               # stored hilt ~upright
-    rng = random.Random(5); best = None
-    for trial in range(120):
-        a = [rng.uniform(-1.2, 1.2) for _ in range(9)]; c = cost(a); step = 0.4
+                + 12 * abs(axis_rest.x)                                  # lies along the shield face
+                + 3 * (1 - axis_rest.z))                                 # upright on the shield
+    from mathutils.bvhtree import BVHTree
+    me_ = body.data
+    shi = [i for i, mt in enumerate(me_.materials) if 'ff7b5edd' in mt.name][0]
+    sh_bvh = BVHTree.FromPolygons([v.co for v in me_.vertices],
+                                  [list(pp.vertices) for pp in me_.polygons if pp.material_index == shi])
+    sg = {body.vertex_groups['Saber'].index, body.vertex_groups['SaberBlade'].index}
+    hilt_idx = [v.index for v in me_.vertices if v.groups and v.groups[0].group == body.vertex_groups['Saber'].index]
+
+    def reseat(C):
+        global M_HOLST
+        for v in me_.vertices:
+            if v.groups and v.groups[0].group in sg:
+                v.co = C @ v.co
+        bpy.ops.object.mode_set(mode='EDIT')
+        for bnm in ('Saber', 'SaberBlade'):
+            eb = arm_data.edit_bones[bnm]; eb.matrix = C @ eb.matrix
+        bpy.ops.object.mode_set(mode='OBJECT')
+        M_HOLST = C @ M_HOLST
+
+    def descend(a, c):
+        step = 0.4
         while step > 1e-4:
             improved = False
             for i in range(9):
-                for d in (step, -step):
-                    b = list(a); b[i] += d; cb = cost(b)
-                    if cb < c: a, c, improved = b, cb, True
+                for d_ in (step, -step):
+                    b_ = list(a); b_[i] += d_; cb = cost(b_)
+                    if cb < c: a, c, improved = b_, cb, True
             if not improved: step *= 0.5
-        if best is None or c < best[0]: best = (c, a)
-    a = best[1]; m = fk(a)
-    print(f"GRAB reach: {(m.translation - target).length * 100:.2f} cm from holster spot, arm "
-          f"{[round(math.degrees(x)) for x in a]}")
+        return a, c
+
+    rng = random.Random(5); a = None
+    for it in range(4):
+        target = D @ HOLSTER
+        if a is None:
+            best = None
+            for trial in range(120):
+                x0 = [rng.uniform(-1.2, 1.2) for _ in range(9)]
+                r_ = descend(x0, cost(x0))
+                if best is None or r_[1] < best[1]: best = r_
+            a = best[0]
+        else:
+            a = descend(a, cost(a))[0]
+        m = fk(a)
+        reseat((Di @ m) @ M_HOLST.inverted())            # stored hilt takes the fist's orientation
+        # slide it along +X until it rests on the shield's inner face (2 mm clearance)
+        gap = min(h for h in (sh_bvh.ray_cast(me_.vertices[i].co, Vector((1, 0, 0)), 1.0)[3]
+                              for i in hilt_idx) if h is not None)
+        print(f"HOLSTER pass {it}: grab err {(m.translation - target).length * 100:.2f} cm, gap to shield {gap * 100:.1f} cm")
+        if abs(gap - 0.002) < 0.002:
+            break
+        reseat(Matrix.Translation(Vector((gap - 0.002, 0, 0))))
+        HOLSTER = M_HOLST.translation.copy()
     for i, b in enumerate(CH):
         l, _, sc = POSE_REACH[b]; POSE_REACH[b] = (l, Euler(a[3 * i:3 * i + 3], 'XYZ'), sc)
-    # re-seat the stored saber (mesh + bones) to the orientation the fist arrives with
-    new_h = Di @ m
-    C = new_h @ M_HOLST.inverted()
-    sg = {body.vertex_groups['Saber'].index, body.vertex_groups['SaberBlade'].index}
-    for v in body.data.vertices:
-        if v.groups and v.groups[0].group in sg:
-            v.co = C @ v.co
-    bpy.context.view_layer.objects.active = rig
-    bpy.ops.object.mode_set(mode='EDIT')
-    for bnm in ('Saber', 'SaberBlade'):
-        eb = arm_data.edit_bones[bnm]; eb.matrix = C @ eb.matrix
-    bpy.ops.object.mode_set(mode='OBJECT')
-    M_HOLST = new_h
-    ax = new_h.to_3x3().col[1]
+    print(f"GRAB arm {[round(math.degrees(x)) for x in a]}")
+    ax = M_HOLST.to_3x3().col[1]
     print(f"HOLSTER re-seated: axis {tuple(round(x, 2) for x in ax)}")
 
     POSE_READY = capture(saber_idle, 0.0)
