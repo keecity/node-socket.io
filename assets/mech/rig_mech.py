@@ -387,7 +387,8 @@ if SABER:
         y = -h + (0.05 + i * 0.035) * HS
         cyl(y, y + 0.012 * HS, 0.034 * HS, 0.034 * HS, 0, 0)
     cyl(h - 0.07 * HS, h - 0.02 * HS, 0.036 * HS, 0.040 * HS, 0, 0)        # guard
-    cyl(h - 0.02 * HS, h, 0.040 * HS, 0.030 * HS, 1, 0)                    # emitter (glows faintly)
+    cyl(h - 0.02 * HS, h, 0.040 * HS, 0.030 * HS, 1, 0)                    # emitter (unlit)
+    cyl(h - 0.004, h + 0.004, 0.029 * HS, 0.027 * HS, 2, 1, 16)           # emitter glow: part of the blade
     cyl(h, h + BLADE_LEN - 0.08, 0.020, 0.018, 2, 1, 16)    # blade core
     cyl(h + BLADE_LEN - 0.08, h + BLADE_LEN, 0.018, 0.004, 2, 1, 16)
     cyl(h - 0.01, h + BLADE_LEN + 0.03, 0.048, 0.040, 3, 1, 16)   # glow shell
@@ -427,7 +428,7 @@ if SABER:
     HILT_RGB = tuple(to_lin(c) for c in srgb) if timg.colorspace_settings.name == 'sRGB' and not timg.is_float else tuple(srgb)
     print("HILT colour from shield back (sRGB):", tuple(round(c, 3) for c in srgb))
     for m in (mat('SaberHilt', HILT_RGB, 0.0, 0.85),
-              mat('SaberEmitter', (0.9, 0.3, 0.6), 0.0, 0.7, (1.0, 0.25, 0.6), 2.0),
+              mat('SaberEmitter', tuple(c * 0.6 for c in HILT_RGB), 0.0, 0.8),
               mat('SaberBladeCore', (1.0, 0.85, 0.95), 0.0, 0.2, (1.0, 0.8, 0.92), 8.0),
               mat('SaberBladeGlow', (1.0, 0.15, 0.55), 0.0, 0.5, (1.0, 0.15, 0.55), 4.0, alpha=0.35)):
         sm.materials.append(m)
