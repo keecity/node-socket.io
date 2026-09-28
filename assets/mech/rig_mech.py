@@ -717,6 +717,43 @@ if SABER:
             reseat(Matrix.Translation(Vector((gap - SINK, 0, 0))))
             HOLSTER = M_HOLST.translation.copy()
             print(f"HOLSTER: {gap * 100:.1f} cm to the shield, sunk {-SINK * 100:.1f} cm")
+    # conform: lay the stored hilt exactly along the shield's long axis, then re-solve
+    # the arm (from the current pose) to meet that exact orientation
+    import numpy as np
+    sv = np.array([me_.vertices[i].co[:] for pp in me_.polygons if pp.material_index == shi for i in pp.vertices])
+    long_ax = Vector(np.linalg.svd(sv - sv.mean(0), full_matrices=False)[2][0])
+    if long_ax.z < 0: long_ax = -long_ax
+    cur_y = M_HOLST.to_3x3().col[1]
+    rot = cur_y.rotation_difference(long_ax).to_matrix().to_4x4()
+    piv = M_HOLST.translation.copy()
+    reseat(Matrix.Translation(piv) @ rot @ Matrix.Translation(-piv))
+    goalM = D @ M_HOLST; gq_ = goalM.to_quaternion()
+    def cost_full(a_):
+        m_ = fk(a_)
+        return (4000 * (m_.translation - goalM.translation).length
+                + 60 * m_.to_3x3().col[1].angle(goalM.to_3x3().col[1])      # axis only; spin is free
+                + 0.1 * (a_[1] ** 2 + a_[4] ** 2 + a_[7] ** 2) + 0.02 * sum(x * x for x in a_))
+    def desc2(a_, c_, step=0.3):
+        while step > 1e-5:
+            imp = False
+            for i in range(9):
+                for d_ in (step, -step):
+                    b_ = list(a_); b_[i] += d_; cb = cost_full(b_)
+                    if cb < c_: a_, c_, imp = b_, cb, True
+            if not imp: step *= 0.5
+        return a_, c_
+    a2, c2 = desc2(list(a), cost_full(a))
+    rng2 = random.Random(9)
+    for trial in range(150):                         # global: many starts near natural poses
+        x0 = [x + rng2.gauss(0, 0.6) for x in a]
+        r2 = desc2(x0, cost_full(x0))
+        if r2[1] < c2: a2, c2 = r2
+    m2 = fk(a2); a = a2
+    print(f"CONFORM: hilt along shield axis {tuple(round(x, 2) for x in long_ax)}; grab err "
+          f"{(m2.translation - goalM.translation).length * 100:.2f} cm, "
+          f"axis off {math.degrees(m2.to_3x3().col[1].angle(goalM.to_3x3().col[1])):.2f} deg")
+    # the stored hilt stays exactly on the shield axis; the fist lands on its centre and
+    # the remaining tilt is blended into the hand over the first frames of the pull
     for i, b in enumerate(CH):
         l, _, sc = POSE_REACH[b]; POSE_REACH[b] = (l, Euler(a[3 * i:3 * i + 3], 'XYZ'), sc)
     print(f"GRAB arm {[round(math.degrees(x)) for x in a]}")
@@ -760,7 +797,7 @@ if SABER:
         ig = smooth(28, 34, f)
         s = BLADE_OFF + (1 - BLADE_OFF) * ig * (1 + 0.08 * math.sin(math.pi * ig))
         P['SaberBlade'].scale = (s, s, s)
-        return 1.0 - smooth(GRAB + 3, 32, f), 1.0
+        return 0.0, smooth(GRAB, GRAB + 6, f)
 
     def loop_frame(fn, n):
         def g(f):
