@@ -212,11 +212,11 @@ def idle(p):
 
 def walk(p):
     P['Hips'].location.y = -0.035 * (0.5 + 0.5 * math.cos(2 * p))   # dip on each step
-    P['Hips'].rotation_euler.y = rad(5 * math.sin(p))              # hip twist
-    P['Hips'].rotation_euler.z = rad(3 * math.cos(p))              # hip sway
-    P['Spine'].rotation_euler.y = rad(-8 * math.sin(p))            # counter twist
+    P['Hips'].rotation_euler.y = rad(2 * math.sin(p))              # hip twist
+    P['Hips'].rotation_euler.z = rad(0.8 * math.cos(p))              # hip sway
+    P['Spine'].rotation_euler.y = rad(-3 * math.sin(p))            # counter twist
     P['Spine'].rotation_euler.x = rad(4)                           # lean forward
-    P['Head'].rotation_euler.y = rad(4 * math.sin(p))
+    P['Head'].rotation_euler.y = rad(1.5 * math.sin(p))
     for s, ph in (('L', 0.0), ('R', math.pi)):
         q = p + ph
         thigh = 26 * math.sin(q)
