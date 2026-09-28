@@ -325,10 +325,11 @@ if SABER:
     import bmesh
     # stored on the shield's inner front edge, tilted toward the right hand for a
     # cross-body draw (placement found by searching reachable, natural poses)
-    HOLSTER = Vector((0.705, 0.42, 1.62))   # in the gap between the left forearm and the shield
+    HOLSTER = Vector((0.625, 0.131, 1.253))  # front edge of the shield's back (slid onto it below)
     HOLSTER_TILT = (14.4, 19.3)        # deg about X, Z: emitter up, leaning toward the right hand
     HOLSTER_ROLL = 113.5               # spin of the hilt about its own axis
-    HILT_LEN, BLADE_LEN = 0.30, 1.45
+    HS = 0.85                          # handle scale
+    HILT_LEN, BLADE_LEN = 0.30 * HS, 1.45
 
     # right-fist socket: where the hilt sits when the fingers are closed
     bpy.context.view_layer.objects.active = rig
@@ -375,13 +376,13 @@ if SABER:
         for v in vs: v[dl][grp] = 1.0
     dl = bm.verts.layers.deform.verify()
     h = HILT_LEN / 2
-    cyl(-h, -h + 0.03, 0.036, 0.038, 0, 0)                  # pommel
-    cyl(-h + 0.03, h - 0.07, 0.030, 0.030, 0, 0)            # grip
-    for i in range(5):                                      # grip rings
-        y = -h + 0.05 + i * 0.035
-        cyl(y, y + 0.012, 0.034, 0.034, 0, 0)
-    cyl(h - 0.07, h - 0.02, 0.036, 0.040, 0, 0)             # guard
-    cyl(h - 0.02, h, 0.040, 0.030, 1, 0)                    # emitter (glows faintly)
+    cyl(-h, -h + 0.03 * HS, 0.036 * HS, 0.038 * HS, 0, 0)                  # pommel
+    cyl(-h + 0.03 * HS, h - 0.07 * HS, 0.030 * HS, 0.030 * HS, 0, 0)       # grip
+    for i in range(5):                                                     # grip rings
+        y = -h + (0.05 + i * 0.035) * HS
+        cyl(y, y + 0.012 * HS, 0.034 * HS, 0.034 * HS, 0, 0)
+    cyl(h - 0.07 * HS, h - 0.02 * HS, 0.036 * HS, 0.040 * HS, 0, 0)        # guard
+    cyl(h - 0.02 * HS, h, 0.040 * HS, 0.030 * HS, 1, 0)                    # emitter (glows faintly)
     cyl(h, h + BLADE_LEN - 0.08, 0.020, 0.018, 2, 1, 16)    # blade core
     cyl(h + BLADE_LEN - 0.08, h + BLADE_LEN, 0.018, 0.004, 2, 1, 16)
     cyl(h - 0.01, h + BLADE_LEN + 0.03, 0.048, 0.040, 3, 1, 16)   # glow shell
@@ -608,11 +609,11 @@ if SABER:
         P['Hips'].rotation_euler.y = rad(T('hip_twist', 8))
         P['Spine'].rotation_euler = (rad(T('sp_x', 10)), rad(T('sp_twist', 20)), 0)
         # cross-body draw: the shield stays sideways (face out, upright); the left arm
-        # just lifts it toward the chest so the right hand can reach the stored hilt
-        P['Shoulder_L'].rotation_euler = (rad(T('shl_x', -21.9)), 0, rad(T('shl_z', 35.1)))
-        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', 3.7)), rad(T('ual_y', 66.8)), rad(T('ual_z', -56.2)))
-        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 7.8))
-        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', -4.3)), 0, rad(T('shr_z', 28.4)))
+        # brings it in a little so the right hand can reach the hilt on its front edge
+        P['Shoulder_L'].rotation_euler = (rad(T('shl_x', -31.9)), 0, rad(T('shl_z', -5.9)))
+        P['UpperArm_L'].rotation_euler = (rad(T('ual_x', -12.2)), rad(T('ual_y', 81.2)), rad(T('ual_z', -18.8)))
+        P['ForeArm_L'].rotation_euler.x = rad(T('fal_x', 25.0))
+        P['Shoulder_R'].rotation_euler = (rad(T('shr_x', 0.5)), 0, rad(T('shr_z', 28.8)))
         fingers('R', {k: tuple(0 for _ in v) for k, v in FIST.items()})   # open hand
         P['SaberBlade'].scale = (BLADE_OFF,) * 3
 
@@ -686,7 +687,7 @@ if SABER:
         return a, c
 
     SINK = -0.015                     # hilt sits 1.5 cm into the shield's back (when sliding)
-    SLIDE_TO_SHIELD = False           # stored between forearm and shield: keep the measured spot
+    SLIDE_TO_SHIELD = True            # slide onto the shield's inner face, then sink
     rng = random.Random(5); a = None
     for it in range(2):
         target = D @ HOLSTER
