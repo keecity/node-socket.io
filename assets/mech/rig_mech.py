@@ -698,7 +698,7 @@ if SABER:
 
     def reach():
         idle(0)
-        P['Hips'].rotation_euler.y = rad(T('hip_twist', 8))
+        P['Hips'].rotation_euler.y = rad(T('hip_twist', 0))   # hips stay square: feet don't slide
         P['Spine'].rotation_euler = (rad(T('sp_x', 10)), rad(T('sp_twist', 20)), 0)
         # cross-body draw: the shield stays sideways (face out, upright); the left arm
         # brings it in a little so the right hand can reach the hilt on its front edge
@@ -970,7 +970,7 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
     print("REACH", round(REACH, 3))
     CHR = ('UpperArm_R', 'ForeArm_R', 'Hand_R')
 
-    def solve_saber(pose, ground):
+    def solve_saber(pose, ground, prev=None, restarts=25, cw=1.2):
         """arm angles that put the hilt at pos with the blade along dir"""
         pos, d = pose['sab']
         pos = Vector(pos); d = Vector(d).normalized()
@@ -988,9 +988,10 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
             return m @ G_LOC
         def cost(a):
             m = fkarm(a)
-            return (60 * (m.translation - pos).length + 3 * m.to_3x3().col[1].angle(d)
-                    + 0.25 * (a[1] ** 2 + a[4] ** 2 + a[7] ** 2) + 0.4 * (a[6] ** 2 + a[8] ** 2)
-                    + 0.05 * sum(x * x for x in a) + 0.6 * max(0.0, -a[3]))
+            return (60 * (m.translation - pos).length + 40 * m.to_3x3().col[1].angle(d)
+                    + 1.5 * (a[1] ** 2 + a[4] ** 2 + a[7] ** 2) + 0.8 * (a[6] ** 2 + a[8] ** 2)
+                    + 0.05 * sum(x * x for x in a) + 0.6 * max(0.0, -a[3])
+                    + (cw * sum((x - y) ** 2 for x, y in zip(a, prev)) if prev else 0.0))
         def descend(a, c):
             step = 0.3
             while step > 2e-4:
@@ -1001,10 +1002,10 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
                         if cb < c: a, c, imp = b_, cb, True
                 if not imp: step *= 0.5
             return a, c
-        seed = [D2R(x) for b in CHR for x in pose.get(b, (0, 0, 0))]
+        seed = list(prev) if prev else [D2R(x) for b in CHR for x in pose.get(b, (0, 0, 0))]
         best = descend(seed, cost(seed)); rng = random.Random(3)
-        for _ in range(25):
-            x0 = [s + rng.gauss(0, 0.7) for s in seed]
+        for _ in range(restarts):
+            x0 = [s + rng.gauss(0, 0.25 if prev else 0.7) for s in seed]
             r_ = descend(x0, cost(x0))
             if r_[1] < best[1]: best = r_
         a = best[0]; m = fkarm(a)
@@ -1056,11 +1057,19 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
             dur, kind = GAITS[name]; keys = None; loop = True; fx = None; ground = True
         else:
             c = CLIPS_A[name]; dur, keys, loop, fx, ground = c['dur'], c['keys'], c['loop'], c['fx'], c['ground']
-            solved = []
+            solved = []; prev_arm = None
             for t, p in keys:
                 p = full(p)
+                if 'sab' not in p and p.get('saber'):
+                    prev_arm = [D2R(x) for b in CHR for x in p.get(b, (0, 0, 0))]
+                if 'sab' not in p and p.get('saber'):
+                    off_ = ground_off(p, p.get('lift', 0)) if ground else Vector((0, 0, p.get('lift', 0)))
+                    g_ = fk(p, off_)['SaberGrip']
+                    p['_sab'] = (g_.translation - off_, g_.to_3x3().col[1].normalized())
                 if 'sab' in p:
-                    p, err = solve_saber(p, ground)
+                    p['_sab'] = (Vector(p['sab'][0]), Vector(p['sab'][1]).normalized())
+                    p, err = solve_saber(p, ground, prev_arm)   # continuous with the previous key
+                    prev_arm = [D2R(x) for b in CHR for x in p[b]]
                     if err[0] > 0.03 or err[1] > 8:
                         print(f"  sab {name} t={t}: miss {err[0] * 100:.1f} cm / {err[1]:.0f} deg")
                 solved.append((t, p))
@@ -1069,25 +1078,39 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
         act = bpy.data.actions.new(name); act.use_fake_user = True
         curves = {}
         prev = {}
+        arm_prev = None
         for f in range(n + 1):
             t = min(dur, f / 30.0); u = t / dur
             if keys is None:
                 pose = full(gait(kind, u))
             else:
                 k = max(i for i, (tk, _) in enumerate(keys) if tk <= t + 1e-9) if t >= keys[0][0] else 0
-                if k >= len(keys) - 1: pose = dict(keys[-1][1])
+                if k >= len(keys) - 1:
+                    pose = dict(keys[-1][1])
+                    if '_sab' in pose and arm_prev:
+                        pa, da = pose['_sab']; pose['sab'] = (tuple(pa), tuple(da))
+                        pose, _ = solve_saber(pose, ground, arm_prev, restarts=0, cw=25.0)
+                        pose.pop('sab', None)
                 else:
                     (t0, A), (t1, B) = keys[k], keys[k + 1]
                     w = (t - t0) / max(1e-6, t1 - t0); w = w * w * (3 - 2 * w)
                     pose = {}
                     for kk in set(A) | set(B):
-                        if kk == 'sab': continue
+                        if kk in ('sab', '_sab'): continue
                         a_ = A.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift') else full({})[kk])
                         b_ = B.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift') else full({})[kk])
                         if kk in ('saber', 'gun'): pose[kk] = max(a_, b_) if (a_ and b_) or w < 0.5 else b_
                         elif isinstance(a_, tuple): pose[kk] = tuple(x + (y - x) * w for x, y in zip(a_, b_))
                         else: pose[kk] = a_ + (b_ - a_) * w
+                    if '_sab' in A and '_sab' in B:
+                        pa, da = A['_sab']; pb, db = B['_sab']
+                        dd = (da * (1 - w) + db * w)
+                        if dd.length < 1e-3: dd = db
+                        pose['sab'] = (tuple(pa.lerp(pb, w)), tuple(dd.normalized()))
+                        pose, _ = solve_saber(pose, ground, arm_prev, restarts=0 if arm_prev else 8, cw=25.0)
+                        pose.pop('sab', None)
                 if fx: fx(u, pose)
+                if pose.get('saber', 0) > 0.5: arm_prev = [D2R(x) for b in CHR for x in pose.get(b, (0, 0, 0))]
             # skirts follow the thighs, left hand holds the shield grip
             for s in 'LR':
                 th = pose.get(f'UpperLeg_{s}', (0, 0, 0))

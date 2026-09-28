@@ -38,7 +38,7 @@ SH_CARRY = {'Shoulder_L': (4.4, -5.0, -0.7), 'UpperArm_L': (-13.5, -3.2, 0.0), '
 SH_READY = {'Shoulder_L': (10.2, -8.8, 8.9), 'UpperArm_L': (-10.6, 14.2, -10.6), 'ForeArm_L': (0.0, 0, 0)}
 SH_BRACE = {'Shoulder_L': (11.4, -9.9, 7.3), 'UpperArm_L': (-51.9, 47.5, -9.6), 'ForeArm_L': (45.9, 0, 0)}
 SH_BASH = {'Shoulder_L': (11.3, -4.8, 10.3), 'UpperArm_L': (-13.0, 61.8, 34.2), 'ForeArm_L': (51.8, 0, 0)}
-SH_BLOCK = SH_BASH                                       # shield held square in front of the chest
+SH_BLOCK = {'Shoulder_L': (7.2, 2.0, 11.0), 'UpperArm_L': (-15.7, 50.5, 20.6), 'ForeArm_L': (74.1, 0, 0)}  # shield across the chest
 SH_BACK = {'Shoulder_L': (-10.2, -2.1, -7.2), 'UpperArm_L': (-46.0, -0.9, 7.6), 'ForeArm_L': (55.4, 0, 0)}
 
 R_GUARD = {'UpperArm_R': (22, 0, -12), 'ForeArm_R': (78, 0, 0), 'Hand_R': (0, 0, 0), 'fistR': 1}
@@ -235,7 +235,7 @@ clip('Melee_Boost_Kick', 1.0, [
 # 25-26 guard
 BLOCK = M(legs(22, -36, -8, -24), SH_BLOCK, R_GUARD, Spine=(10, -18, 0), Head=(-8, 14, 0))
 clip('Guard_Block', 0.8, [(0.0, BATTLE), (0.06, BLOCK), (0.64, BLOCK), (0.8, BATTLE)])
-clip('Guard_Block_Hit', 0.4, [(0.0, BLOCK), (0.06, M(BLOCK, Spine=(0, -14, 0), Hips=(-6, 0, 0), UpperArm_L=(-17, 62, 36), ForeArm_L=(56, 0, 0))),
+clip('Guard_Block_Hit', 0.4, [(0.0, BLOCK), (0.06, M(BLOCK, Spine=(0, -14, 0), Hips=(-6, 0, 0), UpperArm_L=(-19, 52, 23), ForeArm_L=(78, 0, 0))),
                               (0.4, BLOCK)])
 
 # 27-28 hit reactions
@@ -372,3 +372,12 @@ clip('Gun_Charge_Shot', 1.1, [(0.0, BRACE), (0.05, BRACE),
 # 31-35 locomotion loops are generated from gait functions (see GAITS)
 GAITS = {'Walk_Forward': (1.1, 'fwd'), 'Walk_Back': (1.2, 'back'), 'Walk_Strafe_L': (1.0, 'L'),
          'Walk_Strafe_R': (1.0, 'R'), 'Run_Forward': (0.72, 'run')}
+
+# thrusts: turn the body side-on (right shoulder leading, head on target) so the arm
+# drives straight out without twisting
+_TH = SB_THRUST['sab']
+for _c in CLIPS.values():
+    for _t, _p in _c['keys']:
+        if _p.get('sab') == _TH:
+            _p['sab'] = ((-0.30, -0.78, 1.98), (0.0, -1.0, 0.03))
+            _p['Hips'] = (0, 22, 0); _p['Spine'] = (10, 26, 0); _p['Head'] = (-6, -40, 0)
