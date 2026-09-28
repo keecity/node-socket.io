@@ -141,7 +141,7 @@ clip('Battle_Idle', 3.0, [(0.0, BATTLE), (1.5, M(BATTLE, legs(18, -32, -4, -24),
      loop=True, fx=breathe(1.2))
 
 # 4-8 boosting (loops): thrusters carry the mech, legs trail
-BOOST_F = M(legs(-14, -36, -24, -52, fl=18, fr=24), SH_BRACE, R_BACK,
+BOOST_F = M(legs(-14, -36, -24, -52, fl=-36, fr=-42), SH_BRACE, R_BACK,
             Hips=(14, 0, 0), Spine=(16, -6, 0), Head=(-26, 5, 0), lift=0.05)
 clip('Boost_Forward', 0.8, [(0, BOOST_F), (0.4, M(BOOST_F, Hips=(16, 0, 1.5))), (0.8, BOOST_F)], loop=True,
      fx=jitter(10, (0.8, 0.5)), ground=False)
@@ -168,10 +168,10 @@ for side, sg in (('L', 1), ('R', -1)):
 
 # 11 Boost_Jump: crouch, thrust off at 0.22, tuck into the hover
 CROUCH = M(legs(40, -70, 34, -62), SH_BRACE, R_GUARD, Spine=(16, -6, 0), Head=(-14, 5, 0))
-HOVER = M(legs(22, -48, 8, -30, fl=20, fr=22), SH_READY, R_GUARD, Spine=(4, -6, 0), Head=(-3, 6, 0))
-clip('Boost_Jump', 1.0, [(0.0, BATTLE), (0.2, CROUCH), (0.3, M(legs(-4, -6, -6, -8, fl=30, fr=30), SH_READY, R_BACK, Spine=(-4, 0, 0), lift=0.25)),
+HOVER = M(legs(22, -48, 8, -30, fl=-38, fr=-40), SH_READY, R_GUARD, Spine=(4, -6, 0), Head=(-3, 6, 0))
+clip('Boost_Jump', 1.0, [(0.0, BATTLE), (0.2, CROUCH), (0.3, M(legs(-4, -6, -6, -8, fl=-48, fr=-48), SH_READY, R_BACK, Spine=(-4, 0, 0), lift=0.25)),
                          (0.62, M(HOVER, lift=0.9)), (1.0, M(HOVER, lift=1.2))], ground=True)
-clip('Air_Hover', 1.2, [(0.0, M(HOVER, lift=1.2)), (0.6, M(HOVER, legs(26, -54, 10, -34, fl=20, fr=22), lift=1.24)), (1.2, M(HOVER, lift=1.2))],
+clip('Air_Hover', 1.2, [(0.0, M(HOVER, lift=1.2)), (0.6, M(HOVER, legs(26, -54, 10, -34, fl=-38, fr=-40), lift=1.24)), (1.2, M(HOVER, lift=1.2))],
      loop=True, fx=jitter(6, (0.6, 0.4)), ground=True)
 clip('Landing', 0.9, [(0.0, M(HOVER, lift=0.25)), (0.08, M(legs(44, -86, 38, -80), SH_BRACE, R_GUARD, Spine=(20, -6, 0), Head=(-18, 5, 0))),
                       (0.35, M(legs(30, -56, 18, -44), SH_READY, R_GUARD, Spine=(10, -8, 0))), (0.9, BATTLE)])
@@ -281,13 +281,13 @@ clip('Saber_Run_Slash', 1.0, [
 clip('Saber_Boost_Slash', 1.35, [
     (0.00, M(READY_LEGS, SH_READY, S_READY, TORSO_READY)),
     (0.26, M(CROUCH, SB_TRAIL, Spine=(16, -20, 0), Head=(-12, 16, 0))),
-    (0.48, M(legs(-14, -36, -24, -52, fl=18, fr=24), SH_BRACE, SB_TRAIL, Hips=(14, 0, 0), Spine=(18, -24, 0), Head=(-26, 18, 0), lift=0.05)),
+    (0.48, M(legs(-14, -36, -24, -52, fl=-36, fr=-42), SH_BRACE, SB_TRAIL, Hips=(14, 0, 0), Spine=(18, -24, 0), Head=(-26, 18, 0), lift=0.05)),
     (0.76, M(legs(30, -50, -12, -22), SH_BACK, SB_UPCUT_L, Spine=(6, 26, 0), Head=(-4, -16, 0))),
     (0.95, M(legs(34, -60, -10, -30), SH_READY, SB_UPCUT_L, Spine=(8, 22, 0))),
     (1.35, M(READY_LEGS, SH_READY, S_READY, TORSO_READY))])
 
 # 40-42 hops (small boosted hops; the game moves the root)
-HOP_TUCK = M(legs(34, -66, 28, -60, fl=12, fr=12), SH_READY, R_GUARD, Spine=(6, -8, 0))
+HOP_TUCK = M(legs(34, -66, 28, -60, fl=-30, fr=-30), SH_READY, R_GUARD, Spine=(6, -8, 0))
 for name, extra in (('Boost_Hop_Back', dict(Hips=(-8, 0, 0), Spine=(-4, -8, 0))),
                     ('Boost_Hop_L', dict(Hips=(0, 0, -10), Spine=(4, -8, 8))),
                     ('Boost_Hop_R', dict(Hips=(0, 0, 10), Spine=(4, -8, -8)))):
