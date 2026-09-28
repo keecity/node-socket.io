@@ -452,6 +452,90 @@ if SABER:
     bone('SaberGrip', M_GRIP, 0.15, 'Hand_R', deform=False)
     bpy.ops.object.mode_set(mode='OBJECT')
 
+
+# --- 6c. Gun (right hand) + head-vulcan muzzle sockets, placed from the source move set
+MOVES_SRC = os.environ.get('MECH_MOVES', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'source_moves.glb'))
+GUN_SRC = os.environ.get('MECH_GUN', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gun', 'gun.glb'))
+MOVES_OK = SABER and os.path.exists(MOVES_SRC)
+if MOVES_OK:
+    import json, struct
+    import numpy as np
+    from mathutils import Quaternion, Euler
+    raw = open(MOVES_SRC, 'rb').read()
+    jl = struct.unpack('<I', raw[12:16])[0]; GJ = json.loads(raw[20:20 + jl])
+    bin_off = 20 + jl + 8
+    def acc_data(i):
+        a = GJ['accessors'][i]; bv = GJ['bufferViews'][a['bufferView']]
+        n = {'SCALAR': 1, 'VEC3': 3, 'VEC4': 4}[a['type']]
+        off = bin_off + bv.get('byteOffset', 0) + a.get('byteOffset', 0)
+        return np.frombuffer(raw, dtype=np.float32, count=a['count'] * n, offset=off).reshape(a['count'], n)
+    NODES = GJ['nodes']; NID = {n['name']: i for i, n in enumerate(NODES)}
+    PARENT = {}
+    for i, n in enumerate(NODES):
+        for c in n.get('children', []): PARENT[c] = i
+    def trs(i, T=None, R=None, S_=None):
+        n = NODES[i]
+        t = Vector(T if T is not None else n.get('translation', [0, 0, 0]))
+        q = R if R is not None else n.get('rotation', [0, 0, 0, 1])
+        s_ = S_ if S_ is not None else n.get('scale', [1, 1, 1])
+        m = Quaternion((q[3], q[0], q[1], q[2])).to_matrix().to_4x4()
+        for k in range(3): m.col[k] *= s_[k]
+        m.translation = t
+        return m
+    CG = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))   # glTF (Y up) -> Blender (Z up)
+    MIR = Matrix.Diagonal((-1, 1, 1, 1))
+    # rest (bind) pose of the source
+    _rw = {}
+    def _rest(i):
+        if i in _rw: return _rw[i]
+        _rw[i] = (_rest(PARENT[i]) @ trs(i)) if i in PARENT else trs(i)
+        return _rw[i]
+    for i in range(len(NODES)): _rest(i)
+
+    S_SC = rig.data.bones['Hips'].head_local.z / (CG @ _rest(NID['Pelvis']).translation).z
+    def mapped(nm_src, nm_anchor_src, anchor_our, mirror=False):
+        """source rest node -> our space: rotation mapped, position scaled around an anchor bone"""
+        m = _rest(NID[nm_src]); a = _rest(NID[nm_anchor_src])
+        if mirror: m = MIR @ m @ MIR; a = MIR @ a @ MIR
+        lin = (CG @ m @ CG.inverted()).to_3x3()
+        pos = rig.data.bones[anchor_our].head_local + (CG.to_3x3() @ (m.translation - a.translation)) * S_SC
+        M = (lin * S_SC).to_4x4(); M.translation = pos
+        return M
+    HAS_GUN = os.path.exists(GUN_SRC)
+    before = set(bpy.data.objects)
+    if HAS_GUN:
+        bpy.ops.import_scene.gltf(filepath=GUN_SRC)
+        newo = [o for o in bpy.data.objects if o not in before]
+        go = next(o for o in newo if o.type == 'MESH')
+        mw = go.matrix_world.copy(); go.parent = None; go.matrix_world = mw
+        for o in newo:
+            if o is not go: bpy.data.objects.remove(o)
+        bpy.context.view_layer.objects.active = go; bpy.ops.object.select_all(action='DESELECT'); go.select_set(True)
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        # the demo's rifle is this same model: rifle (left hand) mirrored into the right hand
+        M_GUN = mapped('BeamRifle', 'Hand.L', 'Hand_R', mirror=True)
+        go.data.transform(M_GUN)
+        go.data.uv_layers[0].name = 'UVMap'
+        go.vertex_groups.new(name='Gun').add(list(range(len(go.data.vertices))), 1.0, 'REPLACE')
+        bpy.ops.object.select_all(action='DESELECT'); go.select_set(True); body.select_set(True)
+        bpy.context.view_layer.objects.active = body; bpy.ops.object.join()
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    E = arm_data.edit_bones
+    def sock(name, M, parent, length=0.1, deform=False):
+        eb = E.new(name); r3 = M.to_3x3().normalized()
+        eb.head = M.translation; eb.tail = M.translation + r3.col[1] * length
+        eb.align_roll(r3.col[2]); eb.parent = E[parent]; eb.use_deform = deform
+    if HAS_GUN:
+        sock('Gun', M_GUN, 'Hand_R', 0.2, deform=True)
+        mz = M_GUN @ Vector((-0.53, 0.0, 0.235))
+        sock('Gun_Muzzle', Matrix.Translation(mz) @ M_GUN.to_3x3().normalized().to_4x4(), 'Gun')
+    for s in 'LR':     # muzzle points of the head vulcans (source flashes rest at scale 0: use position only)
+        fl = mapped(f'HeadTurret_Flash.{s}', 'Head', 'Head')
+        fwd = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))              # bone Y -> forward (-Y)
+        sock(f'Vulcan_{s}', Matrix.Translation(fl.translation) @ fwd.to_4x4(), 'Head', 0.08)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
 # --- 7. Animation clips (in place, loopable)
 def rad(d): return math.radians(d)
 
@@ -469,7 +553,7 @@ def key_pose(action_name, frames, pose_fn):
         for pb in rig.pose.bones:
             pb.keyframe_insert('location', frame=f + 1)
             pb.keyframe_insert('rotation_euler', frame=f + 1)
-            if pb.name == 'SaberBlade':
+            if pb.name in ('SaberBlade', 'Gun'):
                 pb.keyframe_insert('scale', frame=f + 1)
     act.frame_range = (1, frames + 1)
     return act
@@ -498,6 +582,8 @@ def hands(p, squeeze, relax_wave):
         fingers('L', RELAX, relax_wave)
     if SABER:
         P['SaberBlade'].scale = (BLADE_OFF,) * 3                  # stored: blade off
+    if 'Gun' in P:
+        P['Gun'].scale = (0.001,) * 3                             # gun only shows in the Gun clips
 
 STAB = 0.9   # how much of the body's pitch the head cancels (1.0 = perfectly level)
 
@@ -825,6 +911,166 @@ if SABER:
     print(f"HANDOVER gap {(gw.translation - sw.translation).length * 100:.1f} cm, {ang:.1f} deg")
     P['Saber'].constraints.remove(hold)
     acts += [a_draw, a_idle, a_walk, a_sheathe]
+
+
+# --- 7c. Game move set: retarget the demo robot's 52 clips onto this rig
+if SABER and MOVES_OK:
+    from mathutils import Quaternion, Euler
+    def sample_clip(an):
+        chans = {}
+        for ch in an['channels']:
+            smp = an['samplers'][ch['sampler']]
+            chans[(ch['target']['node'], ch['target']['path'])] = (acc_data(smp['input'])[:, 0], acc_data(smp['output']), smp.get('interpolation', 'LINEAR'))
+        dur = max(float(v[0][-1]) for v in chans.values())
+        def at(t):
+            local = {}
+            for i in range(len(NODES)):
+                vals = {}
+                for path in ('translation', 'rotation', 'scale'):
+                    c = chans.get((i, path))
+                    if c is None: continue
+                    ts, vs, ip = c
+                    k = int(np.searchsorted(ts, t, side='right')) - 1
+                    if k < 0: v = vs[0]
+                    elif k >= len(ts) - 1 or ip == 'STEP': v = vs[min(k, len(ts) - 1)]
+                    else:
+                        u = (t - ts[k]) / max(1e-9, ts[k + 1] - ts[k])
+                        if path == 'rotation':
+                            qa = Quaternion((vs[k][3], *vs[k][:3])); qb = Quaternion((vs[k + 1][3], *vs[k + 1][:3]))
+                            qq = qa.slerp(qb, u); v = [qq.x, qq.y, qq.z, qq.w]
+                        else: v = vs[k] * (1 - u) + vs[k + 1] * u
+                    vals[path] = list(v)
+                local[i] = trs(i, vals.get('translation'), vals.get('rotation'), vals.get('scale'))
+            W = {}
+            def world(i):
+                if i in W: return W[i]
+                W[i] = (world(PARENT[i]) @ local[i]) if i in PARENT else local[i]
+                return W[i]
+            for i in range(len(NODES)): world(i)
+            return W, local
+        return dur, at
+    MAP = {'Hips': 'Pelvis', 'Spine': 'Chest', 'Head': 'Head',
+           'Shoulder_L': 'Shoulder.L', 'UpperArm_L': 'UpperArm.L', 'ForeArm_L': 'Forearm.L',
+           'Shoulder_R': 'Shoulder.R', 'UpperArm_R': 'UpperArm.R', 'ForeArm_R': 'Forearm.R', 'Hand_R': 'Hand.R',
+           'SkirtSide_L': 'HipArmor.L', 'SkirtSide_R': 'HipArmor.R',
+           'UpperLeg_L': 'Thigh.L', 'LowerLeg_L': 'Shin.L', 'Foot_L': 'Foot.L',
+           'UpperLeg_R': 'Thigh.R', 'LowerLeg_R': 'Shin.R', 'Foot_R': 'Foot.R'}
+    swapLR = lambda n: n.replace('.L', '.TMP').replace('.R', '.L').replace('.TMP', '.R')
+    Bn = rig.data.bones
+    order = sorted(Bn, key=lambda b: len(b.parent_recursive))
+    REST_O = {b.name: b.matrix_local.copy() for b in Bn}
+    REL = {b.name: (b.parent.matrix_local.inverted() @ b.matrix_local) if b.parent else b.matrix_local.copy() for b in Bn}
+    S_SC = Bn['Hips'].head_local.z / (CG @ _rest(NID['Pelvis']).translation).z
+    def rot3(m): return m.to_3x3().normalized()
+    # saber aim: correction on the right hand so our blade points where theirs does
+    G_rel = rot3(REST_O['Hand_R']).inverted() @ rot3(REST_O['SaberGrip'])
+    def rest_rot(i):     # world rest rotation from the node quaternions only (the saber rests at scale 0)
+        q = NODES[i].get('rotation', [0, 0, 0, 1]); m = Quaternion((q[3], q[0], q[1], q[2])).to_matrix()
+        return (rest_rot(PARENT[i]) @ m) if i in PARENT else m
+    K_SABER = rot3(REST_O['Hand_R']).inverted() @ (rot3(CG) @ rest_rot(NID['BeamSaber']) @ rot3(CG).inverted()) @ G_rel.inverted()
+    ank0 = {s: Bn[f'Foot_{s}'].head_local.z for s in 'LR'}
+    src_ank0 = min((CG @ _rest(NID[f'Foot.{s}'])).translation.z for s in 'LR')
+
+    def retarget(name, mirror=False, frames=None):
+        an = next(a for a in GJ['animations'] if a['name'] == name)
+        dur, at = sample_clip(an)
+        n = frames or max(2, round(dur * 30))
+        act = bpy.data.actions.new(name); act.use_fake_user = True
+        curves = {}
+        def src_world(W, nm):
+            i = NID[swapLR(nm) if mirror else nm]
+            m = W[i]; r = _rest(i)
+            if mirror: m = MIR @ m @ MIR; r = MIR @ r @ MIR
+            return m, r
+        prev_eul = {}
+        for f in range(n + 1):
+            t = min(dur, f / 30.0)
+            W, L = at(t)
+            pose = {}
+            sab_on = (W[NID['BeamSaber']].to_scale().length > 0.5) and not mirror
+            blade = W[NID['BeamSaber_Blade']].to_scale().y / max(1e-6, W[NID['BeamSaber']].to_scale().y) if sab_on else 0.0
+            gun_on = W[NID['BeamRifle']].to_scale().length > 0.1
+            fist_R = (L[NID[swapLR('HandFist.R') if mirror else 'HandFist.R']].to_scale().length > 0.5) or sab_on or (gun_on and mirror)
+            # grounding: lowest source ankle vs rest, scaled
+            src_low = min((CG @ src_world(W, f'Foot.{s}')[0]).translation.z for s in 'LR')
+            for b in order:
+                nm = b.name
+                par = pose[b.parent.name] if b.parent else Matrix.Identity(4)
+                fk = par @ REL[nm]
+                if nm in MAP:
+                    m, r = src_world(W, MAP[nm])
+                    D = rot3(CG) @ (rot3(m) @ rot3(r).inverted()) @ rot3(CG).inverted()
+                    R = D @ rot3(REST_O[nm])
+                    if nm == 'Hand_R' and sab_on: R = R @ K_SABER
+                    w = R.to_4x4(); w.translation = fk.translation
+                    if nm == 'Hips':
+                        dv = CG.to_3x3() @ (m.translation - r.translation) * S_SC
+                        w.translation = REST_O['Hips'].translation + dv
+                    pose[nm] = w
+                else:
+                    pose[nm] = fk
+            # ground the feet
+            our_low = min(pose[f'Foot_{s}'].translation.z for s in 'LR')
+            want = min(ank0.values()) + (src_low - src_ank0) * S_SC
+            dz = want - our_low
+            for k in pose:
+                if pose[k] is not None: pose[k] = Matrix.Translation((0, 0, dz)) @ pose[k]
+            if sab_on:      # saber rides in the right fist
+                pose['Saber'] = pose['SaberGrip'].copy()
+                pose['SaberBlade'] = pose['Saber'] @ REL['SaberBlade']
+            # local bases
+            for b in order:
+                nm = b.name
+                par = pose[b.parent.name] if b.parent else Matrix.Identity(4)
+                try:
+                    basis = (par @ REL[nm]).inverted() @ pose[nm]
+                except ValueError:
+                    print("SINGULAR", name, f, nm, b.parent.name if b.parent else '-', [round(x, 3) for x in par.to_scale()], [round(x, 3) for x in pose[nm].to_scale()]); raise
+                loc = basis.translation; e = basis.to_euler('XYZ', prev_eul.get(nm, Euler())); prev_eul[nm] = e
+                sc = [1, 1, 1]
+                if nm == 'SaberBlade': sc = [max(BLADE_OFF, blade)] * 3
+                if nm == 'Gun': sc = [1.0 if (gun_on and mirror) else 0.001] * 3
+                if nm == 'Saber' and not sab_on: loc = Vector(); e = Euler()
+                for path, vals in (('location', loc), ('rotation_euler', e), ('scale', sc)):
+                    for k in range(3):
+                        curves.setdefault((nm, path, k), []).append((f + 1, vals[k]))
+            # fingers / left grip / skirts are set on top as rotations
+            for fb, angs in FIST.items():
+                for k, a in enumerate(angs):
+                    curves[(f'{fb}{k + 1}_L', 'rotation_euler', 0)][-1] = (f + 1, rad(a))
+                    target = a if fist_R else a * 0.25
+                    curves[(f'{fb}{k + 1}_R', 'rotation_euler', 0)][-1] = (f + 1, rad(target))
+            for k in range(3):
+                curves[('Hand_L', 'rotation_euler', k)][-1] = (f + 1, rad(GRIP_WRIST[k]))
+            for s in 'LR':
+                th = curves[(f'UpperLeg_{s}', 'rotation_euler', 0)][-1][1]
+                curves[(f'SkirtFront_{s}', 'rotation_euler', 0)][-1] = (f + 1, max(0.0, th) * 0.8)
+            thb = max(curves[('UpperLeg_L', 'rotation_euler', 0)][-1][1], curves[('UpperLeg_R', 'rotation_euler', 0)][-1][1])
+            curves[('SkirtBack', 'rotation_euler', 0)][-1] = (f + 1, -max(0.0, -min(curves[('UpperLeg_L', 'rotation_euler', 0)][-1][1], curves[('UpperLeg_R', 'rotation_euler', 0)][-1][1])) * 0.5)
+        for (nm, path, k), pts in curves.items():
+            fc = act.fcurves.new(f'pose.bones["{nm}"].{path}', index=k, action_group=nm)
+            fc.keyframe_points.add(len(pts))
+            fc.keyframe_points.foreach_set('co', [c for p in pts for c in p])
+            for kp in fc.keyframe_points: kp.interpolation = 'LINEAR'
+        act.frame_range = (1, n + 1)
+        return act
+
+    # final clip list: the game's 52 moves in order (ours replace its saber draw/idle/sheathe
+    # and its idle), then our extras
+    OURS = {'Idle': 'Idle', 'Saber_Draw': 'SaberDraw', 'Saber_Idle': 'SaberIdle', 'Saber_Sheathe': 'SaberSheathe'}
+    GUN_CLIPS = {'Gun_Idle', 'Gun_Pickup', 'Gun_Burst', 'Gun_Charge', 'Gun_Charge_Shot'}
+    by_name = {a.name: a for a in acts}
+    final = []
+    for an in GJ['animations']:
+        nm = an['name']
+        if nm in OURS:
+            a = by_name[OURS[nm]]; a.name = nm; final.append(a)
+        else:
+            final.append(retarget(nm, mirror=nm in GUN_CLIPS))
+            print("RETARGET", nm)
+    by_name['Walk'].name = 'Walk'; final.append(by_name['Walk'])
+    by_name['SaberWalk'].name = 'Saber_Walk'; final.append(by_name['SaberWalk'])
+    acts = final
 
 for a in acts:  # push to NLA so both export as separate clips
     tr = rig.animation_data.nla_tracks.new(); tr.name = a.name
