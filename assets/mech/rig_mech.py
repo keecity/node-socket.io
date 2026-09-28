@@ -199,25 +199,42 @@ P = rig.pose.bones
 # swings the tail forward (-Y); for Hips/Spine/Head (pointing up), +X tips forward too.
 
 def idle(p):
-    P['Hips'].location.y = -0.012 * (0.5 - 0.5 * math.cos(p))
-    P['UpperLeg_L'].rotation_euler.x = P['UpperLeg_R'].rotation_euler.x = rad(4 * (0.5 - 0.5 * math.cos(p)))
-    P['LowerLeg_L'].rotation_euler.x = P['LowerLeg_R'].rotation_euler.x = rad(-8 * (0.5 - 0.5 * math.cos(p)))
-    P['Foot_L'].rotation_euler.x = P['Foot_R'].rotation_euler.x = rad(4 * (0.5 - 0.5 * math.cos(p)))
+    br = 0.5 - 0.5 * math.cos(p)                                   # breath 0..1
+    P['Hips'].location.y = -0.012 * br
+    P['Hips'].rotation_euler.x = rad(0.6 * math.sin(p))
+    P['Hips'].rotation_euler.z = rad(0.4 * math.sin(p + 0.7))
+    P['UpperLeg_L'].rotation_euler.x = P['UpperLeg_R'].rotation_euler.x = rad(4 * br)
+    P['LowerLeg_L'].rotation_euler.x = P['LowerLeg_R'].rotation_euler.x = rad(-8 * br)
+    P['Foot_L'].rotation_euler.x = P['Foot_R'].rotation_euler.x = rad(4 * br)
     P['Spine'].rotation_euler.x = rad(-1.5 * math.sin(p))
+    P['Spine'].rotation_euler.z = rad(-0.5 * math.sin(p + 0.7))
+    P['Head'].rotation_euler.x = rad(1.5 * math.sin(p - 0.6))      # nod trails the chest
     P['Head'].rotation_euler.y = rad(6 * math.sin(p))
     for s, sg in (('L', 1), ('R', -1)):
+        P[f'Shoulder_{s}'].rotation_euler.z = rad(sg * -1.2 * br)  # shoulders lift on the breath
         P[f'UpperArm_{s}'].rotation_euler.x = rad(3 + 2 * math.sin(p))
         P[f'UpperArm_{s}'].rotation_euler.z = rad(sg * -3)
-        P[f'ForeArm_{s}'].rotation_euler.x = rad(10 + 3 * math.sin(p))
+        P[f'ForeArm_{s}'].rotation_euler.x = rad(10 + 4 * math.sin(p - 0.4))
+        P[f'Hand_{s}'].rotation_euler.x = rad(3 * math.sin(p - 0.9))
+        P[f'Hand_{s}'].rotation_euler.y = rad(sg * 2 * math.sin(p - 0.5))
+        P[f'SkirtFront_{s}'].rotation_euler.x = rad(1.2 * math.sin(p - 0.5))
+        P[f'SkirtSide_{s}'].rotation_euler.z = rad(-sg * (1 + 0.8 * math.sin(p - 0.5)))
+    P['SkirtBack'].rotation_euler.x = rad(-1.2 * math.sin(p - 0.5))
 
 def walk(p):
-    P['Hips'].location.y = -0.035 * (0.5 + 0.5 * math.cos(2 * p))   # dip on each step
+    hit = math.cos(2 * p)                  # +1 at each foot strike (p = 0, pi)
+    P['Hips'].location.y = -0.035 * (0.5 + 0.5 * hit)              # dip on each step
+    P['Hips'].rotation_euler.x = rad(1.0 * hit)
     P['Hips'].rotation_euler.y = rad(2 * math.sin(p))              # hip twist
-    P['Hips'].rotation_euler.z = rad(0.8 * math.cos(p))              # hip sway
+    P['Hips'].rotation_euler.z = rad(0.8 * math.cos(p))            # hip sway
+    P['Spine'].rotation_euler.x = rad(4 + 1.5 * math.cos(2 * p - 0.5))  # lean forward + absorb
     P['Spine'].rotation_euler.y = rad(-3 * math.sin(p))            # counter twist
-    P['Spine'].rotation_euler.x = rad(4)                           # lean forward
+    P['Spine'].rotation_euler.z = rad(-0.6 * math.cos(p))
+    # head bounce: nods after each strike, settles before the next
+    P['Head'].rotation_euler.x = rad(-1 + 3 * math.cos(2 * p - 0.9))
     P['Head'].rotation_euler.y = rad(1.5 * math.sin(p))
-    for s, ph in (('L', 0.0), ('R', math.pi)):
+    P['Head'].rotation_euler.z = rad(0.8 * math.sin(p - 0.4))
+    for s, ph, sg in (('L', 0.0, 1), ('R', math.pi, -1)):
         q = p + ph
         thigh = 26 * math.sin(q)
         knee = -(6 + 45 * max(0.0, math.cos(q)) ** 1.5)          # bend while leg swings through
@@ -225,11 +242,19 @@ def walk(p):
         P[f'LowerLeg_{s}'].rotation_euler.x = rad(knee)
         P[f'Foot_{s}'].rotation_euler.x = rad(-(thigh + knee) + 8 * math.sin(q))
         arm = -16 * math.sin(q)                                   # opposite to its own leg
+        P[f'Shoulder_{s}'].rotation_euler.x = rad(0.25 * arm)     # shoulder rolls with the swing
+        P[f'Shoulder_{s}'].rotation_euler.z = rad(sg * 1.5 * math.cos(2 * p - 0.6))  # drops on impact
         P[f'UpperArm_{s}'].rotation_euler.x = rad(arm)
-        P[f'ForeArm_{s}'].rotation_euler.x = rad(10 + max(0.0, arm) * 0.4)
-        P[f'SkirtFront_{s}'].rotation_euler.x = rad(max(0.0, thigh) * 0.8)
-        P[f'SkirtSide_{s}'].rotation_euler.z = rad((-1 if s == 'L' else 1) * 3)
-    P['SkirtBack'].rotation_euler.x = rad(-max(0.0, -26 * math.sin(p), -26 * math.sin(p + math.pi)) * 0.5)
+        P[f'UpperArm_{s}'].rotation_euler.z = rad(sg * -2)
+        fwd = -math.sin(q - 0.45)                                 # forearm lags the upper arm
+        P[f'ForeArm_{s}'].rotation_euler.x = rad(15 + 13 * fwd + 2 * hit)
+        P[f'Hand_{s}'].rotation_euler.x = rad(7 * -math.sin(q - 0.9))  # wrist follow-through
+        P[f'Hand_{s}'].rotation_euler.y = rad(sg * 4 * math.cos(q))
+        P[f'SkirtFront_{s}'].rotation_euler.x = rad(max(0.0, thigh) * 0.8 + 2 * math.cos(2 * p - 0.6))
+        P[f'SkirtSide_{s}'].rotation_euler.x = rad(0.25 * thigh)
+        P[f'SkirtSide_{s}'].rotation_euler.z = rad(-sg * (3 + 2.5 * (0.5 + 0.5 * math.cos(2 * p - 0.6))))
+    P['SkirtBack'].rotation_euler.x = rad(-max(0.0, -26 * math.sin(p), -26 * math.sin(p + math.pi)) * 0.5
+                                          - 2 * math.cos(2 * p - 0.6))
 
 acts = [key_pose('Idle', 60, idle), key_pose('Walk', 30, walk)]
 for a in acts:  # push to NLA so both export as separate clips
