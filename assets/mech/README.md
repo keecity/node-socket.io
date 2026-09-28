@@ -8,11 +8,15 @@ Rigged version of `mech-build-01.fbx` (3ds Max export), built for PlayCanvas.
 | --- | --- |
 | `mech_rigged.glb` | Upload this to the PlayCanvas Editor (or load with `pc.Asset` type `container`). |
 | `mech_rigged.fbx` | Same rig and clips, if you want to edit in 3ds Max/Blender. |
-| `rig_mech.py` | Script that builds the rig from the original FBX (Blender 4.2 / `bpy`). |
+| `rig_mech.py` | Script that builds the rig from the original FBX (Blender 4.2 / `bpy`); picks up the shield from `../shield/` (or `MECH_SHIELD`). |
 
 ## What's in it
 
-- One skinned mesh (`MechBody`, 34.5k verts, 7 materials, textures embedded).
+- One skinned mesh (`MechBody`, 39k verts, 8 materials, textures embedded),
+  including the shield from `../shield/shield_lowpoly.glb` mounted on the
+  outside of the left forearm (bound to `ForeArm_L`).
+- `_L` / `_R` are the mech's own left and right (left = +X in glTF, on the
+  viewer's right when it faces you).
 - 23 bones, Y-up, model faces **+Z**, about 2.8 units tall:
 
   ```

@@ -71,21 +71,21 @@ PARTS = {
     'Hips':        ['tripo_node_8b432b89'],
     'Spine':       ['tripo_node_5486a718', 'Object001'],
     'Head':        ['Object005', 'Object002'],
-    'SkirtFront_L': ['Object015'], 'SkirtFront_R': ['Object007'],
-    'SkirtSide_L':  ['Object014'], 'SkirtSide_R':  ['Object013'],
+    'SkirtFront_R': ['Object015'], 'SkirtFront_L': ['Object007'],
+    'SkirtSide_R':  ['Object014'], 'SkirtSide_L':  ['Object013'],
     'SkirtBack':    ['Object009'],
-    'UpperArm_L': ['Object017', 'Object003'],
-    'ForeArm_L':  ['tripo_node_6aea384b.001', 'tripo_node_6aea384b002', 'tripo_node_6aea384b'],
-    'Hand_L':     ['tripo_node_9dcdae07'],
-    'UpperArm_R': ['Object023', 'Object020'],
-    'ForeArm_R':  ['tripo_node_6aea384b007', 'tripo_node_6aea384b010', 'tripo_node_6aea384b006'],
-    'Hand_R':     ['tripo_node_9dcdae010'],
-    'UpperLeg_L': ['Object025'],
-    'LowerLeg_L': ['tripo_node_3c441de2', 'Object024'],
-    'Foot_L':     ['tripo_node_a834b1bb'],
-    'UpperLeg_R': ['Object027'],
-    'LowerLeg_R': ['tripo_node_3c441de004', 'Object026'],
-    'Foot_R':     ['tripo_node_a834b1bb001'],
+    'UpperArm_R': ['Object017', 'Object003'],
+    'ForeArm_R':  ['tripo_node_6aea384b.001', 'tripo_node_6aea384b002', 'tripo_node_6aea384b'],
+    'Hand_R':     ['tripo_node_9dcdae07'],
+    'UpperArm_L': ['Object023', 'Object020'],
+    'ForeArm_L':  ['tripo_node_6aea384b007', 'tripo_node_6aea384b010', 'tripo_node_6aea384b006'],
+    'Hand_L':     ['tripo_node_9dcdae010'],
+    'UpperLeg_R': ['Object025'],
+    'LowerLeg_R': ['tripo_node_3c441de2', 'Object024'],
+    'Foot_R':     ['tripo_node_a834b1bb'],
+    'UpperLeg_L': ['Object027'],
+    'LowerLeg_L': ['tripo_node_3c441de004', 'Object026'],
+    'Foot_L':     ['tripo_node_a834b1bb001'],
 }
 part_bone = {}
 for bone, names in PARTS.items():
@@ -97,11 +97,11 @@ assert not unassigned, f"unassigned parts: {unassigned}"
 # --- 4. Joint positions (Z up, mech faces -Y), measured from the parts
 cx = centroid('tripo_node_5486a718').x
 Y = 0.45
-armx = {'L': centroid('tripo_node_9dcdae07').x + 0.01, 'R': centroid('tripo_node_9dcdae010').x - 0.01}
-legx = {'L': (centroid('Object025').x + centroid('Object024').x) / 2,
-        'R': (centroid('Object027').x + centroid('Object026').x) / 2}
-skf = {'L': centroid('Object015'), 'R': centroid('Object007')}
-sks = {'L': centroid('Object014'), 'R': centroid('Object013')}
+armx = {'R': centroid('tripo_node_9dcdae07').x + 0.01, 'L': centroid('tripo_node_9dcdae010').x - 0.01}
+legx = {'R': (centroid('Object025').x + centroid('Object024').x) / 2,
+        'L': (centroid('Object027').x + centroid('Object026').x) / 2}
+skf = {'R': centroid('Object015'), 'L': centroid('Object007')}
+sks = {'R': centroid('Object014'), 'L': centroid('Object013')}
 skb = centroid('Object009')
 
 B = {  # name: (head, tail, parent)
@@ -113,7 +113,7 @@ B = {  # name: (head, tail, parent)
 }
 for s in 'LR':
     ax, lx = armx[s], legx[s]
-    sgn = -1 if s == 'L' else 1
+    sgn = 1 if s == 'L' else -1          # mech faces -Y: its left is +X
     B[f'Shoulder_{s}'] = ((cx + sgn * 0.15, 0.47, 2.10), (ax, 0.49, 2.10), 'Spine')
     B[f'UpperArm_{s}'] = ((ax, 0.49, 2.10), (ax, 0.485, 1.88), f'Shoulder_{s}')
     B[f'ForeArm_{s}']  = ((ax, 0.485, 1.88), (ax, 0.40, 1.44), f'UpperArm_{s}')
@@ -154,6 +154,28 @@ if legmat and nimg:
         nt.links.new(tex.outputs['Color'], nm.inputs['Color'])
         bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
         nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
+
+# --- 5b. Shield on the left forearm (outer side, painted face out), like the reference
+SHIELD = os.environ.get('MECH_SHIELD', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shield', 'shield_lowpoly.glb'))
+SHIELD = SHIELD if os.path.exists(SHIELD) else None
+if SHIELD:
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=SHIELD)
+    new = [o for o in bpy.data.objects if o not in before]
+    sh = next(o for o in new if o.type == 'MESH')
+    mw = sh.matrix_world.copy(); sh.parent = None; sh.matrix_world = mw
+    for o in new:
+        if o is not sh:
+            bpy.data.objects.remove(o)
+    # source is ~100 units tall (cm), face along +X, grip bar at the top (+Z)
+    S_SCALE = 0.0155
+    sh.scale = (S_SCALE,) * 3
+    sh.location = (0.64 + 12.0 * S_SCALE, 0.47, 1.90 - 99.6 * S_SCALE)  # back mount against forearm, top 1.90
+    bpy.ops.object.select_all(action='DESELECT'); sh.select_set(True)
+    bpy.context.view_layer.objects.active = sh
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    sh.name = 'Shield'
+    meshes.append(sh); part_bone[sh.name] = 'ForeArm_L'
 
 # --- 6. Rigid skinning: every vertex of a part -> its bone at weight 1.0
 for o in meshes:
@@ -213,7 +235,7 @@ def idle(p):
     body_pitch = P['Hips'].rotation_euler.x + P['Spine'].rotation_euler.x
     P['Head'].rotation_euler.x = -STAB * body_pitch + rad(0.5 * math.sin(p - 0.6))  # stabilized
     P['Head'].rotation_euler.y = rad(6 * math.sin(p))
-    for s, sg in (('L', 1), ('R', -1)):
+    for s, sg in (('L', -1), ('R', 1)):
         P[f'Shoulder_{s}'].rotation_euler.z = rad(sg * -1.2 * br)  # shoulders lift on the breath
         P[f'UpperArm_{s}'].rotation_euler.x = rad(3 + 2 * math.sin(p))
         P[f'UpperArm_{s}'].rotation_euler.z = rad(sg * -3)
@@ -240,20 +262,24 @@ def walk(p):
     P['Head'].rotation_euler.x = -STAB * body_pitch + rad(0.6 * math.cos(2 * p - 1.2))
     P['Head'].rotation_euler.y = rad(1.5 * math.sin(p))
     P['Head'].rotation_euler.z = rad(0.4 * math.sin(p - 0.4))
-    for s, ph, sg in (('L', 0.0, 1), ('R', math.pi, -1)):
+    for s, ph, sg in (('L', 0.0, -1), ('R', math.pi, 1)):
         q = p + ph
         thigh = 26 * math.sin(q)
         knee = -(6 + 45 * max(0.0, math.cos(q)) ** 1.5)          # bend while leg swings through
         P[f'UpperLeg_{s}'].rotation_euler.x = rad(thigh)
         P[f'LowerLeg_{s}'].rotation_euler.x = rad(knee)
         P[f'Foot_{s}'].rotation_euler.x = rad(-(thigh + knee) + 8 * math.sin(q))
-        arm = -16 * math.sin(q)                                   # opposite to its own leg
+        heavy = s == 'L' and SHIELD                               # shield arm swings less
+        arm = -16 * math.sin(q) * (0.45 if heavy else 1.0)        # opposite to its own leg
         P[f'Shoulder_{s}'].rotation_euler.x = rad(0.25 * arm)     # shoulder rolls with the swing
         P[f'Shoulder_{s}'].rotation_euler.z = rad(sg * 1.5 * math.cos(2 * p - 0.6))  # drops on impact
         P[f'UpperArm_{s}'].rotation_euler.x = rad(arm)
         P[f'UpperArm_{s}'].rotation_euler.z = rad(sg * -2)
         fwd = -math.sin(q - 0.45)                                 # forearm lags the upper arm
-        P[f'ForeArm_{s}'].rotation_euler.x = rad(15 + 13 * fwd + 2 * hit)
+        if heavy:
+            P[f'ForeArm_{s}'].rotation_euler.x = rad(14 + 4 * fwd + 1.5 * hit)
+        else:
+            P[f'ForeArm_{s}'].rotation_euler.x = rad(15 + 13 * fwd + 2 * hit)
         P[f'Hand_{s}'].rotation_euler.x = rad(7 * -math.sin(q - 0.9))  # wrist follow-through
         P[f'Hand_{s}'].rotation_euler.y = rad(sg * 4 * math.cos(q))
         P[f'SkirtFront_{s}'].rotation_euler.x = rad(max(0.0, thigh) * 0.8 + 2 * math.cos(2 * p - 0.6))
