@@ -58,11 +58,12 @@ def _align(a, b):
 # ------------------------------------------------------------------- constants
 CX = -0.125            # body centre line
 FX = -0.115            # face centre line
-EYE_X = {'R': FX - 0.056, 'L': FX + 0.056}   # character's right eye is -x
-EYE_Y, EYE_R = 0.740, 0.034
+EYE_X = {'R': FX - 0.050, 'L': FX + 0.050}   # character's right eye is -x
+EYE_Y = 0.740
+EYE_RAD = np.array([0.026, 0.026, 0.022])   # squashed eyeball: sits in the socket, not on the face
+EZ = {}
 SKIN_Z = 0.170
-EYE_Z = SKIN_Z - 0.022
-R_UP, R_LO, R_RING = EYE_R * 1.13, EYE_R * 1.10, EYE_R * 1.09
+R_UP, R_LO, R_RING = EYE_RAD * 1.08, EYE_RAD * 1.05, EYE_RAD * 1.03
 LID_OPEN_UP, LID_OPEN_LO = np.radians(38), np.radians(28)
 LID_ALPHA0 = np.radians(58)
 
@@ -73,19 +74,29 @@ hole_verts = set()
 for s in 'RL':
     ex = EYE_X[s]
     inside = (comp[F[:, 0]] == body_id) & (cen[:, 2] > 0.09) & \
-        (((cen[:, 0] - ex) / 0.050) ** 2 + ((cen[:, 1] - EYE_Y) / 0.036) ** 2 < 1)
+        (((cen[:, 0] - ex) / 0.034) ** 2 + ((cen[:, 1] - EYE_Y) / 0.033) ** 2 < 1)
     keep_face &= ~inside
+    # leftover eyelash spikes: long thin triangles around the eye
+    e = P[F]
+    edge = np.stack([np.linalg.norm(e[:, 0] - e[:, 1], axis=1), np.linalg.norm(e[:, 1] - e[:, 2], axis=1), np.linalg.norm(e[:, 2] - e[:, 0], axis=1)], 1)
+    area = 0.5 * np.linalg.norm(np.cross(e[:, 1] - e[:, 0], e[:, 2] - e[:, 0]), axis=1)
+    thin = (edge.max(1) ** 2 / (2 * area + 1e-12)) > 6
+    wide = (comp[F[:, 0]] == body_id) & (cen[:, 2] > 0.09) & \
+        (((cen[:, 0] - ex) / 0.060) ** 2 + ((cen[:, 1] - EYE_Y) / 0.050) ** 2 < 1)
+    keep_face &= ~(wide & thin)
 removed = F[~keep_face]
 F = F[keep_face]
 # boundary verts of the holes = verts of remaining faces welded to removed ones
 removed_w = set(winv[removed.ravel()])
 ring = np.array([i for i in np.unique(F.ravel()) if winv[i] in removed_w])
 # snap ring vertices onto a sphere hidden just under the lids
+for s in 'RL':
+    EZ[s] = SKIN_Z - 0.008 - R_UP[2]   # lid front sits ~3mm proud of the frontal skin, so the eye reads as inside the head
 for i in ring:
     s = 'R' if P[i, 0] < FX else 'L'
-    ctr = np.array([EYE_X[s], EYE_Y, EYE_Z])
+    ctr = np.array([EYE_X[s], EYE_Y, EZ[s]])
     dvec = P[i] - ctr
-    P[i] = ctr + dvec / np.linalg.norm(dvec) * R_RING
+    P[i] = ctr + dvec / np.sqrt(((dvec / R_RING) ** 2).sum())
 # refresh normals of ring vertices from adjacent faces
 fn = np.cross(P[F[:, 1]] - P[F[:, 0]], P[F[:, 2]] - P[F[:, 0]])
 acc_n = np.zeros_like(P)
@@ -120,7 +131,8 @@ for cid, s in zip(eye_ids, 'RL'):
     Rm = _align(fwd, np.array([0., 0., 1.]))
     q = (q - ctr) @ Rm.T
     N[idx] = N[idx] @ Rm.T
-    P[idx] = q * (EYE_R / rad) + np.array([EYE_X[s], EYE_Y, EYE_Z])
+    P[idx] = q * (EYE_RAD / rad) + np.array([EYE_X[s], EYE_Y, EZ[s]])
+    N[idx] = N[idx] / EYE_RAD; N[idx] /= np.linalg.norm(N[idx], axis=1, keepdims=True)
     for i in idx: vtag[i] = 'eye' + s
     sel_eyes[s] = idx
 
@@ -143,7 +155,8 @@ def lid_mesh(sc, upper, ex):
             phi = edge + t * (far - edge)
             if not upper: phi = -phi
             dvec = np.array([np.sin(a), np.cos(a) * np.sin(phi), np.cos(a) * np.cos(phi)])
-            verts.append(np.array([ex, EYE_Y, EYE_Z]) + dvec * R); norms.append(dvec)
+            verts.append(np.array([ex, EYE_Y, EZ[sc]]) + dvec * R)
+            nn = dvec / R; norms.append(nn / np.linalg.norm(nn))
     tris = []
     for i in range(na - 1):
         for j in range(nr - 1):
@@ -179,9 +192,9 @@ bone('neck', 'chest', V(CX, 0.585, 0.06), V(FX, 0.635, 0.065))
 bone('head', 'neck', V(FX, 0.635, 0.065), V(FX, 0.86, 0.08))
 bone('jaw', 'head', V(FX, 0.685, 0.075), V(FX, 0.64, 0.175))
 for s in 'RL':
-    B['eye' + s] = ('head', V(EYE_X[s], EYE_Y, EYE_Z), V(EYE_X[s], EYE_Y, EYE_Z + 0.05))
-    B['upperlid' + s] = ('head', V(EYE_X[s], EYE_Y, EYE_Z), V(EYE_X[s], EYE_Y + 0.04, EYE_Z))
-    B['lowerlid' + s] = ('head', V(EYE_X[s], EYE_Y, EYE_Z), V(EYE_X[s], EYE_Y - 0.04, EYE_Z))
+    B['eye' + s] = ('head', V(EYE_X[s], EYE_Y, EZ[s]), V(EYE_X[s], EYE_Y, EZ[s] + 0.05))
+    B['upperlid' + s] = ('head', V(EYE_X[s], EYE_Y, EZ[s]), V(EYE_X[s], EYE_Y + 0.04, EZ[s]))
+    B['lowerlid' + s] = ('head', V(EYE_X[s], EYE_Y, EZ[s]), V(EYE_X[s], EYE_Y - 0.04, EZ[s]))
 AY, AZ = 0.556, 0.045
 arm = {'R': [-0.16, -0.21, -0.33, -0.43, -0.50], 'L': [-0.09, -0.04, 0.09, 0.21, 0.292]}
 for s in 'RL':
