@@ -1,14 +1,15 @@
-"""Add locomotion clips to model_v2_rigged.blend and re-export.
+"""Author the body animation set for the rigged character (model_v2_rigged.blend).
 
-Clips are in place (no root motion); a controller moves the character.
-Idle, Walk, Run, SitDown, SitIdle, StandUp, Wave, Jump  (Blink / Talk / Jaw* from the rig stay untouched)
+Legs are solved with analytic two-bone IK against planted foot targets, so feet do not slide:
+stance feet move backwards at exactly the clip's travel speed, which a controller matches (see SPEEDS).
+Upper body uses world-space targets with phase lag (overlap) and a stabilised head.
 
-usage: python3 add_locomotion.py model_v2_rigged.blend out_dir      (needs: pip install bpy numpy)
+Clips (in place): Idle, Walk, Run, SitDown, SitIdle, StandUp, Wave, Jump  + face clips Blink, Talk, JawOpen, JawClose
+usage: python3 add_locomotion.py model_v2_rigged.blend out_dir         (needs: pip install bpy numpy)
 """
-import sys, os, math
-import numpy as np
+import sys, os, math, json
 import bpy
-from mathutils import Vector, Quaternion, Matrix
+from mathutils import Vector, Quaternion
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 os.makedirs(OUT, exist_ok=True)
@@ -18,145 +19,246 @@ rig = bpy.data.objects['Armature']
 FPS = 30; bpy.context.scene.render.fps = FPS
 bpy.context.view_layer.objects.active = rig
 bpy.ops.object.mode_set(mode='POSE')
-AX = {'x': Vector((1, 0, 0)), 'y': Vector((0, 1, 0)), 'z': Vector((0, 0, 1))}
-REST = {b.name: b.matrix_local.to_3x3() for b in rig.data.bones}
 for pb in rig.pose.bones: pb.rotation_mode = 'QUATERNION'
 
-def rot(*steps):
-    """world-space rotation from a list of (axis, degrees), applied in the order given"""
-    q = Quaternion((1, 0, 0, 0))
-    for ax, deg in steps:
-        if abs(deg) > 1e-6: q = Quaternion(AX[ax], math.radians(deg)) @ q
-    return q
+BONES = rig.data.bones
+HEAD = {b.name: b.head_local.copy() for b in BONES}
+TAIL = {b.name: b.tail_local.copy() for b in BONES}
+RM = {b.name: b.matrix_local.to_3x3() for b in BONES}
+PAR = {b.name: (b.parent.name if b.parent else None) for b in BONES}
+def depth(n): return 0 if PAR[n] is None else 1 + depth(PAR[n])
+ORDER = sorted(HEAD, key=depth)
+BODY = ['root', 'hips', 'spine', 'chest', 'neck', 'Bone001'] + [p + s for s in 'LR' for p in ('clavicle', 'upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot', 'toe')]
+X, Y, Z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
+I = Quaternion()
+def R(ax, deg): return Quaternion(ax, math.radians(deg))
+def lerp(a, b, t): return a + (b - a) * t
+def ss(t): t = min(1, max(0, t)); return t * t * (3 - 2 * t)
+SG = {'L': 1, 'R': -1}                     # L is +X
+L1 = {s: (HEAD['shin' + s] - HEAD['thigh' + s]).length for s in 'LR'}
+L2 = {s: (HEAD['foot' + s] - HEAD['shin' + s]).length for s in 'LR'}
+ANK = {s: HEAD['foot' + s].copy() for s in 'LR'}                       # ankle, foot flat on the floor
+TOE_V = {s: HEAD['toe' + s] - HEAD['foot' + s] for s in 'LR'}          # ankle -> toe joint
+print('leg lengths', L1, L2)
 
-def local_quat(bone, qw):          # world-space rotation about the bone's head -> the bone's own rotation channel
-    R = REST[bone]; return (R.inverted() @ qw.to_matrix() @ R).to_quaternion()
-def local_loc(bone, dw):
-    return REST[bone].inverted() @ Vector(dw)
-
-# ---- pose vocabulary ------------------------------------------------------------------
-ARM_DOWN = 72
-def arms(side, down=ARM_DOWN, swing=0.0, bend=8.0, raise_=0.0, twist=0.0):
-    """side 'L' is +x.  swing: degrees about world X, positive = backwards.  bend: elbow flexion (forward)."""
-    sgn = 1 if side == 'L' else -1
-    up = rot(('y', sgn * down), ('x', swing))
-    if raise_: up = rot(('y', -sgn * raise_), ('x', swing))
-    fore = rot(('z', -sgn * bend))
-    return {'upperarm' + side: up, 'forearm' + side: fore}
-
-def leg(side, thigh=0.0, knee=0.0, foot=None, spread=0.0):
-    sgn = 1 if side == 'L' else -1
-    f = -(thigh + knee) if foot is None else foot
-    return {'thigh' + side: rot(('y', sgn * -spread), ('x', thigh)), 'shin' + side: rot(('x', knee)), 'foot' + side: rot(('x', f))}
-
-def body(hips_z=0.0, hips_x=0.0, hips_yaw=0.0, hips_pitch=0.0, spine_pitch=0.0, spine_twist=0.0, chest_pitch=0.0, head_pitch=0.0, head_yaw=0.0, head_roll=0.0, root_z=0.0):
-    d = {'hips': rot(('z', hips_yaw), ('x', hips_pitch)), 'spine': rot(('x', spine_pitch), ('z', spine_twist)), 'chest': rot(('x', chest_pitch)),
-         'Bone001': rot(('x', head_pitch), ('z', head_yaw), ('y', head_roll))}
-    d['_hips_loc'] = (hips_x, 0, hips_z); d['_root_loc'] = (0, 0, root_z)
-    return d
-
-def merge(*ds):
-    out = {}
-    for d in ds: out.update(d)
+# ------------------------------------------------------------------------------------------ pose solver
+def solve(P):
+    """P: dict with
+         root, hips : Vector world offsets
+         W          : {bone: world-axis rotation}  (unspecified bones inherit the parent's rotation)
+         feet       : {side: (ankle_target Vector, foot_pitch_deg, toe_bend_deg)}
+       returns {bone: (relative quaternion, local location or None)}"""
+    W = dict(P.get('W', {}))
+    root_off, hips_off = P.get('root', Vector()), P.get('hips', Vector())
+    Qh = W.get('hips', I)
+    hips_head = HEAD['hips'] + root_off + hips_off
+    for s, (tgt, pitch, toe) in P.get('feet', {}).items():
+        hip = hips_head + Qh @ (HEAD['thigh' + s] - HEAD['hips'])
+        a, b = L1[s], L2[s]
+        d_vec = tgt - hip; d = min(max(d_vec.length, 0.35 * (a + b)), 0.9995 * (a + b)); u = d_vec.normalized()
+        pole = (Vector((0.18 * SG[s], -1, 0)) + Vector()).normalized()     # knees forward, a touch outward
+        v = (pole - u * pole.dot(u)).normalized()
+        ca = (a * a - b * b + d * d) / (2 * d); h = math.sqrt(max(a * a - ca * ca, 0))
+        knee = hip + u * ca + v * h; ank = hip + u * d
+        W['thigh' + s] = (HEAD['shin' + s] - HEAD['thigh' + s]).rotation_difference(knee - hip)
+        W['shin' + s] = (HEAD['foot' + s] - HEAD['shin' + s]).rotation_difference(ank - knee)
+        W['foot' + s] = R(X, pitch)
+        W['toe' + s] = R(X, pitch - toe)
+    out, Wf = {}, {}
+    for n in ORDER:
+        qp = Wf.get(PAR[n], I) if PAR[n] else I
+        qw = W.get(n, qp); Wf[n] = qw
+        rel = qp.inverted() @ qw
+        loc = None
+        if n == 'root': loc = RM[n].inverted() @ root_off
+        if n == 'hips': loc = RM[n].inverted() @ (qp.inverted() @ hips_off)
+        out[n] = (RM[n].inverted() @ rel.to_matrix() @ RM[n]).to_quaternion(), loc
     return out
 
-def key_pose(pose, frame):
-    for bone, q in pose.items():
-        if bone == '_hips_loc':
-            pb = rig.pose.bones['hips']; pb.location = local_loc('hips', q); pb.keyframe_insert('location', frame=frame)
-        elif bone == '_root_loc':
-            pb = rig.pose.bones['root']; pb.location = local_loc('root', q); pb.keyframe_insert('location', frame=frame)
-        else:
-            pb = rig.pose.bones[bone]; pb.rotation_quaternion = local_quat(bone, q); pb.keyframe_insert('rotation_quaternion', frame=frame)
+def upper(P, lean=0.0, yaw=0.0, roll=0.0, chest_lag_yaw=0.0, breath=0.0, look_yaw=0.0, look_pitch=0.0, look_roll=0.0, stab=0.85):
+    """spine / chest / neck / head world rotations layered on top of the hips"""
+    Qh = P['W'].get('hips', I)
+    sp = Qh @ R(Z, -yaw * 0.45) @ R(X, lean * 0.5) @ R(Y, -roll * 0.5)
+    ch = sp @ R(Z, -yaw * 0.55 + chest_lag_yaw) @ R(X, lean * 0.5 + breath * 1.2) @ R(Y, -roll * 0.4)
+    head_free = ch @ R(X, -breath * 0.6)
+    head_world = R(Z, look_yaw) @ R(X, look_pitch) @ R(Y, look_roll)            # stabilised gaze
+    hd = head_free.slerp(head_world, stab)
+    P['W'].update({'spine': sp, 'chest': ch, 'neck': ch.slerp(hd, 0.5), 'Bone001': hd})
+    return ch
 
-def new_action(name):
-    for pb in rig.pose.bones:
-        pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
-    act = bpy.data.actions.new(name); act.use_fake_user = True; rig.animation_data.action = act
-    return act
+def arm(P, s, chest, down=74.0, swing=0.0, bend=14.0, twist=0.0, clav=12.0, wrist=6.0, lift_fwd=0.0):
+    """down: degrees below T-pose; swing: + = backwards; bend: elbow flexion (hand forward); twist about the arm"""
+    g = SG[s]
+    cl = chest @ R(Y, g * clav)
+    up = chest @ R(X, swing) @ R(Z, g * lift_fwd) @ R(Y, g * down) @ R(X, twist * g)
+    fo = up @ R(Z, -g * bend)
+    P['W'].update({'clavicle' + s: cl, 'upperarm' + s: up, 'forearm' + s: fo, 'hand' + s: fo @ R(Z, -g * wrist)})
+    return up, fo
 
-def make_clip(name, nframes, pose_fn, step=1, loop=False):
-    """sample pose_fn on whole frames with linear keys.  loop clips get phase 0..1, others get seconds."""
-    new_action(name)
-    for f in list(range(0, nframes, step)) + [nframes]:
-        key_pose(pose_fn(f / nframes if loop else f / FPS), f + 1)
+def planted(s, dx=0.0, dy=0.0, dz=0.0, pitch=0.0, toe=0.0):
+    return (ANK[s] + Vector((dx, dy, dz)), pitch, toe)
 
-# ---- rest / idle pose used at the start and end of every clip so crossfades are clean ----------------------------
-def idle_pose(breath=0.0, sway=0.0, look=0.0):
-    return merge(body(chest_pitch=breath * 1.2, head_yaw=look, head_pitch=-breath * .8, hips_x=sway * .006, hips_yaw=sway * 1.5, spine_twist=-sway),
-                 arms('L', bend=8 + breath), arms('R', bend=8 + breath), leg('L', spread=2), leg('R', spread=2))
+# ------------------------------------------------------------------------------------------ keying
+def key(sol, frame):
+    for n in BODY:
+        q, loc = sol[n]; pb = rig.pose.bones[n]
+        prev = LASTQ.get(n)
+        if prev is not None and prev.dot(q) < 0: q = -q                      # keep quaternion signs continuous
+        LASTQ[n] = q
+        pb.rotation_quaternion = q; pb.keyframe_insert('rotation_quaternion', frame=frame)
+        if loc is not None: pb.location = loc; pb.keyframe_insert('location', frame=frame)
+LASTQ = {}
+def clip(name, nframes, fn, loop):
+    for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
+    act = bpy.data.actions.new(name); act.use_fake_user = True; rig.animation_data_create(); rig.animation_data.action = act
+    LASTQ.clear()
+    for f in range(nframes + 1):
+        t = (f % nframes) / nframes if loop else f / FPS                     # loops end exactly on frame 0's pose
+        key(solve(fn(t)), f + 1)
 
-# ---- locomotion cycle -------------------------------------------------------------------------------------------
-def gait(phase, A, K, arm, elbow, lean, bob, yaw, spread, run=False):
-    p = 2 * math.pi * phase
-    out = {}
-    for side, off in (('L', 0.0), ('R', math.pi)):
-        s = math.sin(p + off); c = math.cos(p + off)
-        th = -A * s + (2 if not run else -4)
-        knee = K * max(0.0, c) + (6 if not run else 10) * (1 if s < 0 else .3)
-        out.update(leg(side, thigh=th, knee=knee, spread=spread))
-        out.update(arms(side, swing=arm * s, bend=elbow + (arm * .35 * max(0, -s))))
-    out.update(body(hips_z=-bob * (0.5 + 0.5 * math.cos(2 * p)) + (0.02 if run else 0), hips_x=0.01 * math.sin(p), hips_yaw=yaw * math.sin(p), spine_pitch=lean, spine_twist=-yaw * 1.2 * math.sin(p),
-                    chest_pitch=lean * .5, head_pitch=-lean * .8 + .8 * math.cos(2 * p), head_yaw=-yaw * .4 * math.sin(p)))
-    return out
+# ------------------------------------------------------------------------------------------ gait
+def gait(ph, T, D, beta, lift, heel, lean, bob, drop, sway, yaw, roll, arm_sw, elbow, elbow_fwd, run=False):
+    P = {'W': {}, 'feet': {}}
+    # pelvis
+    zb = (-drop - bob * math.cos(4 * math.pi * (ph - beta / 2))) if run else (-drop + bob * math.cos(4 * math.pi * (ph - beta / 2)))
+    xs = sway * math.cos(2 * math.pi * (ph - beta / 2))
+    P['hips'] = Vector((xs, 0, zb))
+    yw = -yaw * math.cos(2 * math.pi * ph); rl = -roll * math.cos(2 * math.pi * (ph - beta / 2))
+    P['W']['hips'] = R(Z, yw) @ R(Y, rl) @ R(X, lean * 0.3)
+    # feet
+    for s, off in (('L', 0.0), ('R', 0.5)):
+        p = (ph + off) % 1.0; span = D * beta
+        if p < beta:                                                          # stance: planted, travels back at D/T
+            q = p / beta; f = span * (0.5 - q); z = 0.0
+            pitch = -9 * (1 - ss(q / 0.14)) if q < 0.14 else heel * ss((q - 0.7) / 0.3)
+        else:                                                                 # swing
+            q = (p - beta) / (1 - beta); e = 0.5 - 0.5 * math.cos(math.pi * q)
+            f = span * (-0.5 + e); z = lift * math.sin(math.pi * q) ** (0.8 if run else 1.0)
+            if run: f -= 0.05 * math.sin(math.pi * min(1, q * 1.6)) * (1 - q)     # heel kick
+            pitch = heel * (1 - ss(q / 0.35)) - 9 * ss((q - 0.6) / 0.4)
+        tgt = ANK[s] + Vector((0, -f, z))
+        if pitch > 0:                                                         # heel lift pivots about the toe joint
+            toe_pt = ANK[s] + Vector((0, -f, z)) + TOE_V[s]
+            tgt = toe_pt - (R(X, pitch) @ TOE_V[s])
+        P['feet'][s] = (tgt, pitch, pitch if pitch > 0 else 0.0)
+    ch = upper(P, lean=lean, yaw=yw, roll=rl, chest_lag_yaw=-yaw * 0.4 * math.cos(2 * math.pi * (ph - 0.08)),
+               breath=0.0, look_pitch=lean * 0.25 + (1.5 if run else 0.8) * math.cos(4 * math.pi * (ph - 0.1)), stab=0.8)
+    for s, off in (('L', 0.0), ('R', 0.5)):
+        c = math.cos(2 * math.pi * (ph + off - 0.07))                          # arm lags the opposite leg a little
+        c2 = math.cos(2 * math.pi * (ph + off - 0.16))                         # elbow lags the shoulder
+        arm(P, s, ch, down=74 if not run else 64, swing=arm_sw * c, bend=elbow + elbow_fwd * max(0, -c2), twist=-6 if run else 0)
+    return P
 
-FR = lambda n: [i / n for i in range(n + 1)]
-make_clip('Idle', 120, lambda ph: idle_pose(breath=math.sin(2 * math.pi * ph), sway=0.5 * math.sin(2 * math.pi * ph), look=6 * math.sin(2 * math.pi * ph + 1.0)), step=2, loop=True)
-make_clip('Walk', 30, lambda ph: gait(ph, 22, 40, 12, 12, 3, .012, 5, 6), loop=True)
-make_clip('Run', 17, lambda ph: gait(ph, 42, 95, 38, 70, 12, .03, 8, 4, run=True), loop=True)
+WALK = dict(T=0.84, D=0.40, beta=0.62, lift=0.045, heel=18, lean=3, bob=0.010, drop=0.030, sway=0.016, yaw=7, roll=4, arm_sw=16, elbow=14, elbow_fwd=16)
+RUN = dict(T=0.46, D=0.70, beta=0.34, lift=0.10, heel=25, lean=10, bob=0.020, drop=0.030, sway=0.010, yaw=10, roll=3, arm_sw=38, elbow=72, elbow_fwd=20, run=True)
+SPEEDS = {'Walk': WALK['D'] / WALK['T'], 'Run': RUN['D'] / RUN['T']}
 
-# ---- sitting on the floor: legs out in front, hands in lap -----------------------------------------------------------
-def sit_pose(breath=0.0, look=0.0):
-    return merge(body(hips_z=-0.285, spine_pitch=-2, chest_pitch=breath * 1.5, head_pitch=-4 - breath, head_yaw=look, hips_pitch=0),
-                 leg('L', thigh=-88, knee=14, foot=-12, spread=12), leg('R', thigh=-88, knee=14, foot=-12, spread=12),
-                 arms('L', swing=-30, bend=50, down=62), arms('R', swing=-30, bend=50, down=62))
-def crouch_pose():
-    return merge(body(hips_z=-0.15, spine_pitch=16, chest_pitch=8, head_pitch=-14),
-                 leg('L', thigh=-62, knee=100, spread=8), leg('R', thigh=-62, knee=100, spread=8),
-                 arms('L', swing=-30, bend=30, down=64), arms('R', swing=-30, bend=30, down=64))
-def lerp_pose(a, b, t):
-    out = {}
-    for k in a:
-        if k.startswith('_'): out[k] = tuple(np.array(a[k]) * (1 - t) + np.array(b[k]) * t)
-        else: out[k] = a[k].slerp(b[k], t)
+# ------------------------------------------------------------------------------------------ standing / idle
+def stand(t=0.0, shift=0.0, breath=0.0, look=(0, 0, 0), knees=0.012, arms_=None):
+    P = {'W': {}, 'feet': {}, 'hips': Vector((shift * 0.02, 0, -knees - 0.004 * breath))}
+    P['W']['hips'] = R(Y, -shift * 2.5) @ R(Z, shift * 2)
+    for s in 'LR': P['feet'][s] = planted(s)
+    ch = upper(P, lean=1.0, roll=-shift * 2.5, breath=breath, look_yaw=look[0], look_pitch=look[1], look_roll=look[2], stab=0.9)
+    for s in 'LR':
+        a = (arms_ or {}).get(s, {})
+        arm(P, s, ch, **{**dict(down=75 + breath * 1.5, swing=-2 + 2 * shift * SG[s], bend=16 + breath * 2), **a})
+    return P
+
+def idle(ph):
+    w = 2 * math.pi * ph
+    shift = 0.8 * math.sin(w) ** 3                                           # settles onto one foot, then the other
+    look = (14 * math.sin(w + 0.6) * ss(abs(math.sin(w + 0.6)) * 1.4), -3 + 3 * math.sin(2 * w), 3 * math.sin(w + 1.2))
+    return stand(shift=shift, breath=math.sin(3 * w), look=look)
+
+# ------------------------------------------------------------------------------------------ sit on the floor
+def crouch(k=1.0):
+    P = {'W': {}, 'feet': {}, 'hips': Vector((0, 0.035 * k, -0.15 * k))}
+    P['W']['hips'] = R(X, 18 * k)
+    for s in 'LR': P['feet'][s] = planted(s)
+    ch = upper(P, lean=26 * k, look_pitch=-6 * k, stab=0.5)
+    for s in 'LR': arm(P, s, ch, down=74 - 16 * k, swing=-28 * k, bend=22 + 20 * k)
+    return P
+def seated(breath=0.0, look=0.0):
+    P = {'W': {}, 'feet': {}, 'hips': Vector((0, 0.045, -0.272))}
+    P['W']['hips'] = R(X, -8)
+    for s in 'LR': P['feet'][s] = (ANK[s] + Vector((SG[s] * 0.035, -0.235, -0.02)), -22, 0)
+    ch = upper(P, lean=14 + breath, breath=breath, look_yaw=look, look_pitch=-8, stab=0.8)
+    for s in 'LR': arm(P, s, ch, down=66, swing=-34, bend=58, twist=-10)
+    return P
+def blend(A, B, t):
+    """blend two solved poses (quaternion slerp per bone, lerp locations)"""
+    sa, sb = solve(A), solve(B); out = {}
+    for n in sa:
+        qa, la = sa[n]; qb, lb = sb[n]
+        if qa.dot(qb) < 0: qb = -qb
+        loc = None if la is None else la.lerp(lb, t)
+        out[n] = (qa.slerp(qb, t), loc)
     return out
 def sitdown(t):
-    st, cr, se = idle_pose(), crouch_pose(), sit_pose()
-    return lerp_pose(st, cr, t / 0.45) if t < 0.45 else lerp_pose(cr, se, min(1, (t - 0.45) / 0.55))
-make_clip('SitDown', 30, sitdown)
-make_clip('SitIdle', 120, lambda ph: sit_pose(breath=math.sin(2 * math.pi * ph), look=10 * math.sin(2 * math.pi * ph + .5)), step=2, loop=True)
-make_clip('StandUp', 30, lambda t: sitdown(1.0 - t))
+    u = t / 1.2
+    if u < 0.5: return ('BLEND', stand(), crouch(), ss(u / 0.5))
+    return ('BLEND', crouch(), seated(), ss((u - 0.5) / 0.5))
 
-# ---- wave ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------ wave
 def wave(t):
-    base = idle_pose(breath=math.sin(t * 5))
-    r = min(1, t / 0.4) if t < 1.9 else max(0, (2.3 - t) / 0.4)          # raise / lower
-    wv = math.sin((t - 0.4) * 2 * math.pi * 2.2) * 22 * r                # hand wag
-    base['upperarmR'] = rot(('y', -72 * (1 - r) + 25 * r))                # from hanging to out and slightly up
-    base['forearmR'] = rot(('y', 70 * r + wv))                           # elbow bent up, hand wags
-    base['Bone001'] = rot(('z', 8 * r), ('x', -3 * r))
-    return base
-make_clip('Wave', 69, wave)
+    r = ss(t / 0.35) * (1 - ss((t - 1.95) / 0.35))
+    wag = math.sin((t - 0.35) * 2 * math.pi * 2.4) * 22 * r
+    P = stand(breath=math.sin(t * 4), look=(6 * r, 4 * r, 8 * r), knees=0.012 + 0.01 * abs(math.sin(t * 5)) * r)
+    ch = P['W']['chest']
+    up, fo = arm(P, 'R', ch, down=75 * (1 - r) - 30 * r, swing=-10 * r, bend=16 * (1 - r), clav=9 - 16 * r)
+    fo = up @ R(Y, 95 * r + wag) @ R(Z, 10 * r)                           # forearm up, hand wags from the elbow
+    P['W']['forearmR'] = fo; P['W']['handR'] = fo @ R(Y, wag * 0.4)
+    return P
 
-# ---- jump ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------ jump (toddler hop)
 def jump(t):
-    st = idle_pose(); cr = merge(crouch_pose()); air = merge(body(hips_z=0.0, spine_pitch=4, head_pitch=6, root_z=0.30),
-        leg('L', thigh=-35, knee=70, spread=6), leg('R', thigh=-20, knee=55, spread=6), arms('L', swing=-40, down=30, bend=15), arms('R', swing=-40, down=30, bend=15))
-    if t < .25: return lerp_pose(st, cr, t / .25)
-    if t < .30: return lerp_pose(cr, air, (t - .25) / .05)
-    if t < .55: return air if False else merge(air, {'_root_loc': (0, 0, 0.30 * math.sin(math.pi * (t - .30) / .25) ** 0.8 + 0.0)})
-    if t < .70: return lerp_pose(merge(air, {'_root_loc': (0, 0, 0)}), cr, (t - .55) / .15)
-    return lerp_pose(cr, st, (t - .70) / .20)
-make_clip('Jump', 27, jump)
+    H = 0.11; t0, t1 = 0.30, 0.62                                             # take-off, landing
+    if t < t0:                                                                # anticipation
+        k = ss(t / 0.26); P = crouch(0.7 * k)
+        for s in 'LR': arm(P, s, P['W']['chest'], down=58, swing=40 * k, bend=20)
+        return P
+    if t < t1:                                                                # airborne
+        q = (t - t0) / (t1 - t0); zr = 4 * H * q * (1 - q)
+        P = {'W': {}, 'feet': {}, 'root': Vector((0, 0, zr)), 'hips': Vector((0, 0, -0.02))}
+        P['W']['hips'] = R(X, 4)
+        tuck = 0.05 * math.sin(math.pi * q)
+        for s in 'LR': P['feet'][s] = (ANK[s] + Vector((0, 0.0, zr + tuck)), 12 * math.sin(math.pi * q), 0)
+        ch = upper(P, lean=4, look_pitch=6 * math.sin(math.pi * q), stab=0.6)
+        for s in 'LR': arm(P, s, ch, down=lerp(20, 45, q), swing=-45 + 25 * q, bend=25)
+        return P
+    k = 1 - ss((t - t1) / 0.36); P = crouch(0.75 * k)                         # land, absorb, recover
+    for s in 'LR': arm(P, s, P['W']['chest'], down=lerp(75, 45, k), swing=-15 * k, bend=16 + 14 * k)
+    return P
 
-# ---- face clips (recreated here: reopening the .blend in Blender 5 drops the old actions from the exporter) ----------------
-for n in ('Blink', 'Talk', 'JawOpen', 'JawClose'):
-    if n in bpy.data.actions: bpy.data.actions.remove(bpy.data.actions[n])
+# ------------------------------------------------------------------------------------------ build clips
+def clip_any(name, nframes, fn, loop=False):
+    for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
+    act = bpy.data.actions.new(name); act.use_fake_user = True; rig.animation_data_create(); rig.animation_data.action = act
+    LASTQ.clear()
+    for f in range(nframes + 1):
+        t = (f % nframes) / nframes if loop else f / FPS
+        P = fn(t)
+        sol = blend(P[1], P[2], P[3]) if isinstance(P, tuple) else solve(P)
+        key(sol, f + 1)
+
+for n in [a.name for a in bpy.data.actions]: bpy.data.actions.remove(bpy.data.actions[n])
+clip_any('Idle', 150, idle, loop=True)
+clip_any('Walk', round(WALK['T'] * FPS), lambda ph: gait(ph, **WALK), loop=True)
+clip_any('Run', round(RUN['T'] * FPS), lambda ph: gait(ph, **RUN), loop=True)
+clip_any('SitDown', 36, sitdown)
+clip_any('SitIdle', 150, lambda ph: seated(breath=math.sin(2 * math.pi * ph * 2), look=12 * math.sin(2 * math.pi * ph)), loop=True)
+clip_any('StandUp', 36, lambda t: sitdown(1.2 - t))
+clip_any('Wave', 69, wave)
+clip_any('Jump', 30, jump)
+
+# ---- face clips ------------------------------------------------------------------------------------------
 def face_clip(name, tracks):
-    new_action(name)
+    for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
+    act = bpy.data.actions.new(name); act.use_fake_user = True; rig.animation_data.action = act
     for bone, keys in tracks.items():
         for t, deg in keys:
-            pb = rig.pose.bones[bone]; pb.rotation_quaternion = local_quat(bone, rot(('x', deg))); pb.keyframe_insert('rotation_quaternion', frame=int(round(t * FPS)) + 1)
+            pb = rig.pose.bones[bone]; pb.rotation_quaternion = (RM[bone].inverted() @ R(X, deg).to_matrix() @ RM[bone]).to_quaternion()
+            pb.keyframe_insert('rotation_quaternion', frame=int(round(t * FPS)) + 1)
 BL, LOW, JO, JC = 93, 93, 12, -14
 lid = {}
 for sd in 'RL':
@@ -165,12 +267,12 @@ face_clip('Blink', lid)
 face_clip('JawOpen', {'jaw': [(0, 0), (.25, JO), (.5, 0)]})
 face_clip('JawClose', {'jaw': [(0, 0), (.25, JC), (.5, 0)]})
 face_clip('Talk', {'jaw': [(0, 0), (.15, JO * .75), (.3, JC * .6), (.45, JO * .6), (.6, 0)]})
-for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
 
-# ---- finish ------------------------------------------------------------------------------------------------------------------------
+# ---- export -------------------------------------------------------------------------------------------------
 for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
 rig.animation_data.action = None
 bpy.ops.object.mode_set(mode='OBJECT')
+json.dump({k: round(v, 4) for k, v in SPEEDS.items()}, open(os.path.join(OUT, 'locomotion_speeds.json'), 'w'))
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'model_v2_motion.glb'), export_format='GLB', use_selection=True,
                           export_animation_mode='ACTIONS', export_apply=False, export_skins=True, export_yup=True,
@@ -178,4 +280,4 @@ bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'model_v2_motion.glb'), exp
 bpy.ops.export_scene.fbx(filepath=os.path.join(OUT, 'model_v2_motion.fbx'), use_selection=True, path_mode='COPY', embed_textures=True,
                          add_leaf_bones=False, bake_anim=True, bake_anim_use_all_actions=True, bake_anim_use_nla_strips=False)
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'model_v2_motion.blend'))
-print('done', [a.name for a in bpy.data.actions])
+print('done', [a.name for a in bpy.data.actions], 'speeds', SPEEDS)

@@ -90,11 +90,12 @@ for s in 'RL':
     bone('eye' + s, 'Bone001', c, c + (0, -.05, 0))
     bone('upperlid' + s, 'Bone001', c, c + (0, 0, .035))
     bone('lowerlid' + s, 'Bone001', c, c - (0, 0, .035))
-AYc, AZc = .755, .546
-arms = {'R': [.41, .33, .21, .15, .079], 'L': [.475, .555, .68, .78, .866]}
+AYc, AZc = .762, .546
+# measured from the mesh cross-sections; the model's left arm is ~6 cm longer than the right
+arms = {'R': [.415, .325, .255, .180, .079], 'L': [.468, .56, .66, .765, .866]}
 for s in 'RL':
     x = arms[s]
-    bone('clavicle' + s, 'chest', (x[0], .745, .555), (x[1], AYc, AZc))
+    bone('clavicle' + s, 'chest', (x[0], .752, .552), (x[1], AYc, AZc))
     bone('upperarm' + s, 'clavicle' + s, (x[1], AYc, AZc), (x[2], AYc, AZc))
     bone('forearm' + s, 'upperarm' + s, (x[2], AYc, AZc), (x[3], AYc, AZc))
     bone('hand' + s, 'forearm' + s, (x[3], AYc, AZc), (x[4], AYc, AZc))
@@ -125,17 +126,38 @@ def seg_dist(p, a, b):
 def smooth(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t)
 body_bones = [n for n in names if n in ('hips', 'spine', 'chest', 'neck') or n.startswith(('clavicle', 'upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot', 'toe'))]
+# ---- body weights: Blender bone-heat skinning on a copy of the mesh, body bones + head bone only
+tmp = body.copy(); tmp.data = body.data.copy(); tmp.vertex_groups.clear(); bpy.context.scene.collection.objects.link(tmp)
+# weld UV-seam splits and drop loose pieces so the heat solver sees one closed-ish surface
+bm = bmesh.new(); bm.from_mesh(tmp.data); bm.verts.ensure_lookup_table()
+bmesh.ops.delete(bm, geom=[v for v in bm.verts if not is_big[v.index]], context='VERTS')
+bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+bm.to_mesh(tmp.data); bm.free()
+heat_bones = set(body_bones) | {'Bone001'}
+for b in arm_data.bones: b.use_deform = b.name in heat_bones
+bpy.ops.object.select_all(action='DESELECT'); tmp.select_set(True); rig.select_set(True); bpy.context.view_layer.objects.active = rig
+bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+hn = {g.index: g.name for g in tmp.vertex_groups}
+hw = [{hn[g.group]: g.weight for g in v.groups if g.weight > 1e-4} for v in tmp.data.vertices]
+from mathutils.kdtree import KDTree
+kd = KDTree(len(tmp.data.vertices))
+for v in tmp.data.vertices: kd.insert(v.co, v.index)
+kd.balance()
+heat = [hw[kd.find(Vector(p))[1]] if is_big[i] else {} for i, p in enumerate(VB)]
+bpy.data.objects.remove(tmp); 
+for b in arm_data.bones: b.use_deform = True
+# verts heat could not reach (loose pieces): copy the nearest weighted vertex on the main surface
+ok = np.array([bool(h) and is_big[i] for i, h in enumerate(heat)])
+src = np.where(ok)[0]
+print('heat: weighted', ok.sum(), 'of', len(heat))
 new_w = []
 for i, p in enumerate(VB):
     w = dict(orig_w[i])
     if is_body[i] and p[2] < 0.595 and 'jaw' not in w:
-        ws = {}
-        for n in body_bones:
-            side = 1 if n.endswith('L') else -1 if n.endswith('R') else 0
-            if side and n.startswith(('clavicle', 'upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot', 'toe')) and side * (p[0] - CX) < -.03: continue
-            ws[n] = 1.0 / (seg_dist(p, B[n][1], B[n][2]) + .006) ** 4
-        tot = sum(ws.values()); hh = smooth(.55, .595, p[2])
-        w = {k: v / tot * (1 - hh) for k, v in ws.items()}
+        h = heat[i] if ok[i] else heat[src[np.argmin(np.linalg.norm(VB[src] - p, axis=1))]]
+        tot = sum(h.values()) or 1.0; hh = smooth(.555, .595, p[2])       # hand over to the authored head weights at the chin
+        w = {k: v / tot * (1 - hh) for k, v in h.items()}
         w['Bone001'] = w.get('Bone001', 0) + hh
     new_w.append(w)
 

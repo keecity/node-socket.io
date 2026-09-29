@@ -35,6 +35,7 @@ button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 if(typeof THREE==='undefined'||!THREE.GLTFLoader||!THREE.OrbitControls){document.getElementById('msg').textContent='Could not load the 3D library. Reload the page.';throw new Error('three.js failed to load')}
+const SPEED={"Walk": 0.4762, "Run": 1.5217}; // m/s the clips travel at (feet stay planted when matched)
 const SCHOOL="__SCHOOL__",GIRL="__GIRL__";
 const $=id=>document.getElementById(id),stage=$('stage');
 const b64buf=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer;
@@ -159,7 +160,7 @@ function step(dt){
   if(d<(last?.06:.25)){if(last){S.speed=0;arrive()}else S.pi++}
   else{
    const remain=d+(function(){let s=0;for(let k=S.pi;k<S.path.length-1;k++)s+=Math.hypot(S.path[k+1][0]-S.path[k][0],S.path[k+1][1]-S.path[k][1]);return s})();
-   want=S.run&&remain>1.5?1.7:.55;if(remain<.7)want=Math.min(want,.3+remain*.4);
+   want=S.run&&remain>1.5?SPEED.Run:SPEED.Walk;if(remain<.7)want=Math.min(want,.3+remain*.4);
    const th=Math.atan2(dx,dz),dh=angDiff(S.h,th);
    const maxT=(S.run?4.2:5.5)*dt;S.h+=Math.max(-maxT,Math.min(maxT,dh));
    if(Math.abs(dh)>1.2)want*=.25;
@@ -182,8 +183,8 @@ function step(dt){
    if(S.actT>S.actDur){play('Idle',.3);nextGoal()}
   }else{if(S.actT>S.actDur)nextGoal()}
  }
- if(S.mode==='walk'){const wantClip=S.run&&S.speed>1.0?'Run':'Walk';
-  if(S.speed<.05)play('Idle');else{const a=play(wantClip,.25);const base=wantClip==='Run'?1.7:.55;gactions[wantClip].timeScale=Math.max(.5,S.speed/base)}}
+ if(S.mode==='walk'){const wantClip=S.run&&S.speed>0.95?'Run':'Walk';
+  if(S.speed<.05)play('Idle');else{const a=play(wantClip,.25);gactions[wantClip].timeScale=Math.max(.35,S.speed/SPEED[wantClip])}}
  // ground + placement
  const gy=groundY(S.x,S.z);S.y+=(gy-S.y)*Math.min(1,dt*10);
  girl.position.set(S.x,S.y,S.z);girl.rotation.y=S.h;
