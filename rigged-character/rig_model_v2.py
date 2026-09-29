@@ -105,8 +105,8 @@ for s in 'RL':
     x = legx[s]
     bone('thigh' + s, 'hips', (x, .723, .36), (x, .723, .19))
     bone('shin' + s, 'thigh' + s, (x, .723, .19), (x, .73, .07))
-    bone('foot' + s, 'shin' + s, (x, .73, .07), (x, .62, .03))
-    bone('toe' + s, 'foot' + s, (x, .62, .03), (x, .53, .02))
+    bone('foot' + s, 'shin' + s, (x, .73, .07), (x, .59, .025))      # toe joint at the ball of the foot (~70% heel -> tip)
+    bone('toe' + s, 'foot' + s, (x, .59, .025), (x, .515, .02))
 names = list(B)
 
 arm_data = bpy.data.armatures.new('Armature'); rig = bpy.data.objects.new('Armature', arm_data)
@@ -161,6 +161,12 @@ for i, p in enumerate(VB):
         tot = sum(h.values()) or 1.0; hh = smooth(.555, .595, p[2])       # hand over to the authored head weights at the chin
         w = {k: v / tot * (1 - hh) for k, v in h.items()}
         w['Bone001'] = w.get('Bone001', 0) + hh
+        # shoes are rigid: foot bone, toe box hinged at the ball, shin only above the shoe collar
+        if p[2] < 0.105:
+            sd = 'L' if p[0] > CX else 'R'
+            sw = smooth(0.072, 0.100, p[2])
+            tw = smooth(0.625, 0.585, p[1]) * (1 - smooth(0.035, 0.06, p[2]))   # front of the shoe, low down
+            w = {'shin' + sd: sw, 'foot' + sd: (1 - sw) * (1 - tw), 'toe' + sd: (1 - sw) * tw}
         # shoulders: one wide, smooth chest -> arm blend so the whole sleeve travels with the arm
         for sd in 'LR':
             a = SG_[sd] * (p[0] - B['upperarm' + sd][1][0])                 # distance out along the arm from the pivot
