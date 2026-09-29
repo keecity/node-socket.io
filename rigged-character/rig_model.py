@@ -85,6 +85,7 @@ bone('chest', 'spine', V3(CX, .52, .06), V3(CX, .585, .06))
 bone('neck', 'chest', V3(CX, .585, .06), V3(FX, .635, .065))
 bone('head', 'neck', V3(FX, .635, .065), V3(FX, .86, .08))
 bone('jaw', 'head', V3(FX, .69, .07), V3(FX, .625, .17))
+bone('lowerlip', 'jaw', V3(FX, .652, .185), V3(FX, .640, .190))
 for s in 'RL':
     c = EC[s]
     bone('eye' + s, 'head', c, c + V3(0, 0, .05))
@@ -119,7 +120,7 @@ for n in names:
     eb = arm_data.edit_bones.new(n)
     eb.head, eb.tail = to_bl(h), to_bl(t)
     if p: eb.parent = arm_data.edit_bones[p]
-    if n in ('jaw', 'eyeR', 'eyeL') or n.startswith(('upperlid', 'lowerlid')):
+    if n in ('jaw', 'lowerlip', 'eyeR', 'eyeL') or n.startswith(('upperlid', 'lowerlid')):
         # local X axis = world X, so a rotation about X opens the jaw / closes a lid
         y = (eb.tail - eb.head).normalized()
         eb.align_roll(X.cross(y))
@@ -132,7 +133,7 @@ def seg_dist(p, a, b):
 def smooth(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t)
 
-body_bones = [n for n in names if n not in ('root', 'head', 'jaw') and not n.startswith(('eye', 'upperlid', 'lowerlid'))]
+body_bones = [n for n in names if n not in ('root', 'head', 'jaw', 'lowerlip') and not n.startswith(('eye', 'upperlid', 'lowerlid'))]
 W = {}   # vertex index -> {bone: weight}
 for i, p in enumerate(VB):
     if comp[i] != skin_id:
@@ -144,16 +145,21 @@ for i, p in enumerate(VB):
             if side * (p[0] - CX) < -.03: continue
         ws[n] = 1.0 / (seg_dist(p[None], B[n][1], B[n][2])[0] + .006) ** 4
     tot = sum(ws.values()); ws = {k: v / tot for k, v in ws.items()}
-    # jaw bone = the lower lip only (lip edge + the inside of the lower lip), not the chin or cheeks
-    J = smooth(.612, .642, p[1]) * (1 - smooth(.658, .667, p[1])) * (1 - smooth(.030, .075, abs(p[0] - FX))) \
-        * smooth(.100, .140, p[2])
+    # jaw = the whole lower face (chin, lower lip, teeth/tongue, jaw underside, lower cheeks): closes/opens the mouth.
+    # lowerlip = just the lip, a child of the jaw, for fine lip movement on top of the jaw motion.
+    t = smooth(.040, .090, abs(p[0] - FX))          # 0 at the lips (sharp split), 1 on the cheeks (gentle)
+    Jj = (1 - smooth(.660 - .025 * t, .674 + .055 * t, p[1])) * smooth(.598, .608, p[1]) * smooth(.075, .110, p[2]) \
+        * (1 - smooth(.085, .120, abs(p[0] - FX)))
+    Jl = min(Jj, smooth(.612, .642, p[1]) * (1 - smooth(.658, .667, p[1])) * (1 - smooth(.030, .075, abs(p[0] - FX)))
+             * smooth(.100, .140, p[2]))
     if p[1] > .60:
         h = smooth(.605, .645, p[1])
         ws = {k: v * (1 - h) for k, v in ws.items()}
         ws['head'] = ws.get('head', 0) + h
-    if J > 0:
-        ws = {k: v * (1 - J) for k, v in ws.items()}
-        ws['jaw'] = ws.get('jaw', 0) + J
+    if Jj > 0:
+        ws = {k: v * (1 - Jj) for k, v in ws.items()}
+        ws['jaw'] = ws.get('jaw', 0) + Jj - Jl
+        if Jl > 0: ws['lowerlip'] = Jl
     # eyelids: the lid shell around each eyeball follows the lid bones
     for s in 'RL':
         q = p - EC[s]; d = np.linalg.norm(q)
@@ -198,22 +204,25 @@ def make_action(name, tracks):
 BL = 58
 make_action('Blink', {'upperlidR': [(0, 0), (.06, BL), (.11, BL), (.22, 0)], 'upperlidL': [(0, 0), (.06, BL), (.11, BL), (.22, 0)],
                       'lowerlidR': [(0, 0), (.06, -8), (.11, -8), (.22, 0)], 'lowerlidL': [(0, 0), (.06, -8), (.11, -8), (.22, 0)]})
-# The mouth is already open in the rest pose and only the lower lip is on the jaw bone, so the jaw is animated
-# as a straight vertical move (metres, +down = more open) rather than a swing about a distant hinge, which
-# would push the lip back into the teeth.
-jaw_pb = rig.pose.bones['jaw']
-jaw_rest = jaw_pb.bone.matrix_local.to_3x3()
-def make_lip_action(name, keys):
+# The model's rest pose has the mouth already open, so the jaw rotates both ways: negative closes it.
+# The lower lip is a child of the jaw and is nudged straight up/down (metres, world Y) on top of it.
+lip_pb = rig.pose.bones['lowerlip']
+lip_rest = lip_pb.bone.matrix_local.to_3x3()
+def make_jaw_action(name, jaw_keys, lip_keys=()):
     act = bpy.data.actions.new(name); act.use_fake_user = True
     rig.animation_data.action = act
-    for t, down in keys:
-        jaw_pb.location = jaw_rest.inverted() @ Vector((0, 0, -down))   # rest-space delta for a world-space vertical move
-        jaw_pb.keyframe_insert('location', frame=t * FPS + 1)
+    jaw_pb = rig.pose.bones['jaw']
+    for t, deg in jaw_keys:
+        jaw_pb.rotation_euler = (np.radians(deg), 0, 0)
+        jaw_pb.keyframe_insert('rotation_euler', frame=t * FPS + 1)
+    for t, up in lip_keys:
+        lip_pb.location = lip_rest.inverted() @ Vector((0, 0, up))
+        lip_pb.keyframe_insert('location', frame=t * FPS + 1)
     return act
-make_lip_action('Talk', [(0, 0), (.15, .008), (.3, -.005), (.45, .006), (.6, 0)])
-make_lip_action('JawOpen', [(0, 0), (.25, .010), (.5, 0)])
-make_lip_action('JawClose', [(0, 0), (.25, -.010), (.5, 0)])
-jaw_pb.location = (0, 0, 0)
+make_jaw_action('JawOpen', [(0, 0), (.25, 12), (.5, 0)])
+make_jaw_action('JawClose', [(0, 0), (.25, -16), (.5, 0)], [(0, 0), (.25, .008), (.5, 0)])
+make_jaw_action('Talk', [(0, 0), (.15, 9), (.3, -9), (.45, 7), (.6, 0)], [(0, 0), (.3, .003), (.6, 0)])
+lip_pb.location = (0, 0, 0)
 for pb in rig.pose.bones: pb.rotation_euler = (0, 0, 0)
 rig.animation_data.action = None
 bpy.ops.object.mode_set(mode='OBJECT')
