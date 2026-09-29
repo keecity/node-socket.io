@@ -126,3 +126,16 @@ plus `Idle` and `Walk` animation assets that you can put in an Anim State Graph.
 - Clips (after the game list): `Cockpit_Open` (1.2 s), `Cockpit_Close` (1.0 s),
   `Winch_Lower` (2.0 s), `Winch_Raise` (3.0 s: pilot steps on, rides up, steps into the
   cockpit), `Pilot_Board` (8.3 s: open, lower, raise, close in one clip).
+
+## Saber strikes vs. a training dummy
+
+![Strikes against the dummy](saber_vs_dummy.png)
+
+Every saber attack was built against a dummy (radius 0.38, torso height) standing
+**1.2 units** in front of the mech: each game hit window has a wind-up at its start,
+the blade passing through the dummy at its middle, and a follow-through at its end.
+All 15 hits connect. This is the mech's saber reach, so set the game's melee trigger
+distance to about 1.2 units (centre to centre) for this model.
+
+- `tools/solve_strokes.py <distance>` re-solves the stroke poses (`strokes.json`).
+- `tools/saber_contact_check.py <distance>` reports HIT/miss for every hit window.

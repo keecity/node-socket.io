@@ -405,3 +405,39 @@ for _c in CLIPS.values():
     for _t, _p in _c['keys']:
         if 'sab' in _p:
             _p.update(FK[_BYPOS[tuple(_p['sab'][0])]]); del _p['sab']
+
+# ---- saber strikes rebuilt against a dummy at 1.2 units: each hit window gets
+# wind-up -> contact (blade through the dummy at mid-window) -> follow-through
+import json as _json, os as _os
+_ST = _json.load(open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)) if '__file__' in dir() else '.', 'strokes.json'))) \
+    if _os.path.exists('strokes.json') else None
+def _q2p(q):
+    return {'Spine': (q[0], q[1], 0), 'Hips': (0, q[2], 0), 'UpperArm_R': (q[3], q[4], q[5]),
+            'ForeArm_R': (q[6], 0, 0), 'Hand_R': (q[7], 0, 0)}
+def _strike(name, dur, hits, pre=None, post_legs=None):
+    rest = M(READY_LEGS, SH_READY, S_READY, TORSO_READY)
+    keys = [(0.0, pre or rest)]
+    for (t0, t1, stroke) in hits:
+        s = _ST[stroke]; tm = (t0 + t1) / 2
+        keys.append((max(keys[-1][0] + 0.02, t0 - 0.08), M(READY_LEGS, SH_READY, SABER_ON, _q2p(s['start']))))
+        keys.append((t0, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['start']))))
+        keys.append((tm, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['contact']))))
+        keys.append((t1, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['end']))))
+    last = keys[-1][1]
+    keys.append((min(dur - 0.05, keys[-1][0] + 0.15), M(post_legs or LUNGE, dict(last, **{k: v for k, v in last.items() if k.endswith('_R')}))))
+    keys.append((dur, rest))
+    keys.sort(key=lambda k: k[0])
+    CLIPS[name]['keys'] = keys
+if _ST:
+    _strike('Saber_Slash_Combo', 1.7, [(0.15, 0.31, 'diag_dn'), (0.45, 0.6, 'backhand'), (0.84, 1.0, 'cleave')])
+    _strike('Saber_Run_Slash', 1.0, [(0.13, 0.3, 'sweep')], pre=M(legs(30, -60, -18, -20), SH_READY, S_READY, Spine=(14, -10, 0)))
+    _strike('Saber_Boost_Slash', 1.35, [(0.5, 0.76, 'rising')])
+    _strike('Saber_Air_Slash', 1.1, [(0.26, 0.43, 'cleave')], pre=M(AIR_OVER, lift=0.9))
+    _strike('Saber_Dash_Thrust', 1.1, [(0.3, 0.44, 'thrust')])
+    _strike('Saber_Rising_Slash', 0.9, [(0.16, 0.36, 'rising')])
+    _strike('Saber_Wide_Sweep', 1.2, [(0.28, 0.48, 'sweep')])
+    _strike('Saber_Stab_Combo', 1.0, [(0.1, 0.26, 'thrust'), (0.34, 0.5, 'thrust')])
+    _strike('Saber_Cross_Cut', 1.1, [(0.15, 0.3, 'diag_dn'), (0.46, 0.64, 'diag_dn2')])
+    _pk = [k for k in CLIPS['Saber_Parry_Riposte']['keys'] if k[0] <= 0.33]
+    _strike('Saber_Parry_Riposte', 1.0, [(0.42, 0.57, 'thrust')])
+    CLIPS['Saber_Parry_Riposte']['keys'] = _pk + [k for k in CLIPS['Saber_Parry_Riposte']['keys'] if k[0] > 0.33]
