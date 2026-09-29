@@ -1011,6 +1011,7 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
             return (60 * (m.translation - pos).length + 40 * m.to_3x3().col[1].angle(d)
                     + 1.5 * (a[1] ** 2 + a[4] ** 2 + a[7] ** 2) + 0.8 * (a[6] ** 2 + a[8] ** 2)
                     + 0.05 * sum(x * x for x in a) + 0.6 * max(0.0, -a[3])
+                    + 200 * max(0.0, math.sqrt(a[6] ** 2 + a[7] ** 2 + a[8] ** 2) - 0.52) ** 2   # wrist <= ~30 deg
                     + (cw * sum((x - y) ** 2 for x, y in zip(a, prev)) if prev else 0.0))
         def descend(a, c):
             step = 0.3
