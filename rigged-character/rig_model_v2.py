@@ -91,12 +91,13 @@ for s in 'RL':
     bone('upperlid' + s, 'Bone001', c, c + (0, 0, .035))
     bone('lowerlid' + s, 'Bone001', c, c - (0, 0, .035))
 AYc, AZc = .762, .546
+SHZ = .556                                  # shoulder pivot sits in the upper half of the arm, not on its axis
 # measured from the mesh cross-sections; the model's left arm is ~6 cm longer than the right
-arms = {'R': [.415, .325, .255, .180, .079], 'L': [.468, .56, .66, .765, .866]}
+arms = {'R': [.415, .345, .255, .180, .079], 'L': [.468, .54, .66, .765, .866]}
 for s in 'RL':
     x = arms[s]
-    bone('clavicle' + s, 'chest', (x[0], .752, .552), (x[1], AYc, AZc))
-    bone('upperarm' + s, 'clavicle' + s, (x[1], AYc, AZc), (x[2], AYc, AZc))
+    bone('clavicle' + s, 'chest', (x[0], .752, .552), (x[1], AYc, SHZ))
+    bone('upperarm' + s, 'clavicle' + s, (x[1], AYc, SHZ), (x[2], AYc, AZc))
     bone('forearm' + s, 'upperarm' + s, (x[2], AYc, AZc), (x[3], AYc, AZc))
     bone('hand' + s, 'forearm' + s, (x[3], AYc, AZc), (x[4], AYc, AZc))
 legx = {'R': .374, 'L': .508}
@@ -151,6 +152,7 @@ for b in arm_data.bones: b.use_deform = True
 ok = np.array([bool(h) and is_big[i] for i, h in enumerate(heat)])
 src = np.where(ok)[0]
 print('heat: weighted', ok.sum(), 'of', len(heat))
+SG_ = {'L': 1, 'R': -1}
 new_w = []
 for i, p in enumerate(VB):
     w = dict(orig_w[i])
@@ -159,6 +161,20 @@ for i, p in enumerate(VB):
         tot = sum(h.values()) or 1.0; hh = smooth(.555, .595, p[2])       # hand over to the authored head weights at the chin
         w = {k: v / tot * (1 - hh) for k, v in h.items()}
         w['Bone001'] = w.get('Bone001', 0) + hh
+        # shoulders: one wide, smooth chest -> arm blend so the whole sleeve travels with the arm
+        for sd in 'LR':
+            a = SG_[sd] * (p[0] - B['upperarm' + sd][1][0])                 # distance out along the arm from the pivot
+            if a < -0.06 or p[2] < 0.47: continue
+            gate = 1.0 if a > 0.01 else smooth(0.50, 0.535, p[2])           # keep the torso side under the armpit on the chest
+            wa = smooth(-0.055, 0.045, a) * gate
+            if wa <= 0: continue
+            chain = {k: v for k, v in w.items() if k[:-1] in ('upperarm', 'forearm', 'hand') and k.endswith(sd)}
+            ct = sum(chain.values())
+            chain = {k: v / ct for k, v in chain.items()} if ct > 0.05 else {'upperarm' + sd: 1.0}
+            if a < 0.045: chain = {'upperarm' + sd: 1.0}                    # the shoulder cap belongs to the upper arm only
+            rest = 1 - wa
+            w = {'chest': rest * 0.65, 'clavicle' + sd: rest * 0.35}
+            for k, v in chain.items(): w[k] = w.get(k, 0) + wa * v
     new_w.append(w)
 
 # ---- eyelid caps: skin-coloured shells that sit inside the socket and swing shut ------------------

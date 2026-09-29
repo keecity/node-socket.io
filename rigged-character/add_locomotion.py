@@ -205,8 +205,8 @@ def wave(t):
     wag = math.sin((t - 0.35) * 2 * math.pi * 2.4) * 22 * r
     P = stand(breath=math.sin(t * 4), look=(6 * r, 4 * r, 8 * r), knees=0.012 + 0.01 * abs(math.sin(t * 5)) * r)
     ch = P['W']['chest']
-    up, fo = arm(P, 'R', ch, down=75 * (1 - r) - 30 * r, swing=-10 * r, bend=16 * (1 - r), clav=9 - 16 * r)
-    fo = up @ R(Y, 95 * r + wag) @ R(Z, 10 * r)                           # forearm up, hand wags from the elbow
+    up, fo = arm(P, 'R', ch, down=75 * (1 - r) - 5 * r, swing=-22 * r, bend=16 * (1 - r), clav=12 - 14 * r)
+    fo = up @ R(Y, 82 * r + wag) @ R(Z, 14 * r)                           # forearm up, hand wags from the elbow
     P['W']['forearmR'] = fo; P['W']['handR'] = fo @ R(Y, wag * 0.4)
     return P
 
