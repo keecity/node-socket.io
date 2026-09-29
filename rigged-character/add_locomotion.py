@@ -12,6 +12,7 @@ import bpy
 from mathutils import Vector, Quaternion
 
 SRC, OUT = sys.argv[1], sys.argv[2]
+NAME = sys.argv[3] if len(sys.argv) > 3 else 'model_v2_motion'
 os.makedirs(OUT, exist_ok=True)
 bpy.ops.wm.open_mainfile(filepath=SRC)
 bpy.context.preferences.edit.keyframe_new_interpolation_type = 'LINEAR'
@@ -274,10 +275,10 @@ rig.animation_data.action = None
 bpy.ops.object.mode_set(mode='OBJECT')
 json.dump({k: round(v, 4) for k, v in SPEEDS.items()}, open(os.path.join(OUT, 'locomotion_speeds.json'), 'w'))
 bpy.ops.object.select_all(action='SELECT')
-bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'model_v2_motion.glb'), export_format='GLB', use_selection=True,
+bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, NAME + '.glb'), export_format='GLB', use_selection=True,
                           export_animation_mode='ACTIONS', export_apply=False, export_skins=True, export_yup=True,
                           export_force_sampling=False, export_image_format='JPEG', export_jpeg_quality=90)
-bpy.ops.export_scene.fbx(filepath=os.path.join(OUT, 'model_v2_motion.fbx'), use_selection=True, path_mode='COPY', embed_textures=True,
+bpy.ops.export_scene.fbx(filepath=os.path.join(OUT, NAME + '.fbx'), use_selection=True, path_mode='COPY', embed_textures=True,
                          add_leaf_bones=False, bake_anim=True, bake_anim_use_all_actions=True, bake_anim_use_nla_strips=False)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'model_v2_motion.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, NAME + '.blend'))
 print('done', [a.name for a in bpy.data.actions], 'speeds', SPEEDS)

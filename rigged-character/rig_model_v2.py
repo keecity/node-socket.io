@@ -12,6 +12,7 @@ import bpy, bmesh
 from mathutils import Vector, Matrix
 
 SRC, OUT = sys.argv[1], sys.argv[2]
+NAME = sys.argv[3] if len(sys.argv) > 3 else 'model_v2_rigged'
 os.makedirs(OUT, exist_ok=True)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.fbx(filepath=SRC)
@@ -101,12 +102,20 @@ for s in 'RL':
     bone('forearm' + s, 'upperarm' + s, (x[2], AYc, AZc), (x[3], AYc, AZc))
     bone('hand' + s, 'forearm' + s, (x[3], AYc, AZc), (x[4], AYc, AZc))
 legx = {'R': .374, 'L': .508}
+# shoe landmarks measured from the sole: heel (back, +Y) and toe tip (front, -Y); toe hinge at the ball (70 % heel -> tip)
+SHOE = {}
+for s in 'RL':
+    side = (VB[:, 0] < CX) if s == 'R' else (VB[:, 0] > CX)
+    sole = VB[side & is_body & (VB[:, 2] < 0.03)]
+    heel, tip = sole[:, 1].max(), sole[:, 1].min()
+    SHOE[s] = dict(heel=heel, tip=tip, ball=heel - 0.70 * (heel - tip))
+    print('shoe', s, {k: round(float(v), 3) for k, v in SHOE[s].items()})
 for s in 'RL':
     x = legx[s]
     bone('thigh' + s, 'hips', (x, .723, .36), (x, .723, .19))
     bone('shin' + s, 'thigh' + s, (x, .723, .19), (x, .73, .07))
-    bone('foot' + s, 'shin' + s, (x, .73, .07), (x, .59, .025))      # toe joint at the ball of the foot (~70% heel -> tip)
-    bone('toe' + s, 'foot' + s, (x, .59, .025), (x, .515, .02))
+    bone('foot' + s, 'shin' + s, (x, .73, .07), (x, SHOE[s]['ball'], .025))
+    bone('toe' + s, 'foot' + s, (x, SHOE[s]['ball'], .025), (x, SHOE[s]['tip'] + .007, .02))
 names = list(B)
 
 arm_data = bpy.data.armatures.new('Armature'); rig = bpy.data.objects.new('Armature', arm_data)
@@ -165,7 +174,7 @@ for i, p in enumerate(VB):
         if p[2] < 0.105:
             sd = 'L' if p[0] > CX else 'R'
             sw = smooth(0.072, 0.100, p[2])
-            tw = smooth(0.625, 0.585, p[1]) * (1 - smooth(0.035, 0.06, p[2]))   # front of the shoe, low down
+            b_ = SHOE[sd]['ball']; tw = smooth(b_ + 0.035, b_ - 0.005, p[1]) * (1 - smooth(0.035, 0.06, p[2]))   # front of the shoe, low down
             w = {'shin' + sd: sw, 'foot' + sd: (1 - sw) * (1 - tw), 'toe' + sd: (1 - sw) * tw}
         # shoulders: one wide, smooth chest -> arm blend so the whole sleeve travels with the arm
         for sd in 'LR':
@@ -256,10 +265,10 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---- export ---------------------------------------------------------------
 bpy.ops.object.select_all(action='SELECT')
-bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'model_v2_rigged.glb'), export_format='GLB', use_selection=True,
+bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, NAME + '.glb'), export_format='GLB', use_selection=True,
                           export_animation_mode='ACTIONS', export_apply=False, export_skins=True, export_yup=True,
                           export_force_sampling=False, export_image_format='JPEG', export_jpeg_quality=90)
-bpy.ops.export_scene.fbx(filepath=os.path.join(OUT, 'model_v2_rigged.fbx'), use_selection=True, path_mode='COPY', embed_textures=True,
+bpy.ops.export_scene.fbx(filepath=os.path.join(OUT, NAME + '.fbx'), use_selection=True, path_mode='COPY', embed_textures=True,
                          add_leaf_bones=False, bake_anim=True, bake_anim_use_all_actions=True, bake_anim_use_nla_strips=False)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'model_v2_rigged.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, NAME + '.blend'))
 print('done', len(names), 'bones')
