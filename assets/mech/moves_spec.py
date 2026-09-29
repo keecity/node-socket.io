@@ -428,7 +428,7 @@ def _strike(name, dur, hits, pre=None, post_legs=None):
     keys.append((dur, rest))
     keys.sort(key=lambda k: k[0])
     CLIPS[name]['keys'] = keys
-STEP = 1.1     # lunge: hips forward 0.55, front foot steps 1.1 (units)
+STEP = 0.6     # lunge: hips forward 0.55, front foot steps 1.1 (units)
 if _ST:
     _strike('Saber_Slash_Combo', 1.7, [(0.15, 0.31, 'diag_dn'), (0.45, 0.6, 'backhand'), (0.84, 1.0, 'cleave')])
     _strike('Saber_Run_Slash', 1.0, [(0.13, 0.3, 'sweep')], pre=M(legs(30, -60, -18, -20), SH_READY, S_READY, Spine=(14, -10, 0)))

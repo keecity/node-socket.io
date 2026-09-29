@@ -334,7 +334,7 @@ if SABER:
     HOLSTER_TILT = (14.4, 19.3)        # deg about X, Z: emitter up, leaning toward the right hand
     HOLSTER_ROLL = 113.5               # spin of the hilt about its own axis
     HS = 0.85                          # handle scale
-    HILT_LEN, BLADE_LEN = 0.30 * HS, 1.45
+    HILT_LEN, BLADE_LEN = 0.30 * HS, 1.8
 
     # right-fist socket: where the hilt sits when the fingers are closed
     bpy.context.view_layer.objects.active = rig
@@ -1103,14 +1103,14 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
             lo = 0.0
             q, w = solve_at(0.0)
             if w <= 0.01: break
-            hi = 0.6
+            hi = 0.25
             q2, w2 = solve_at(hi)
             if w2 <= 0.01: break
             L *= 0.85; tgt['L'] = base_['L'] + Vector((0, -1.1 * L, 0))
         lo = 0.0
         q, w = solve_at(0.0)
         if w > 0.01:
-            hi = 0.6
+            hi = 0.25
             for _ in range(8):
                 mid = (lo + hi) / 2; qm, wm = solve_at(mid)
                 if wm > 0.01: lo = mid
