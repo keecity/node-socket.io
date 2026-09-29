@@ -381,3 +381,27 @@ for _c in CLIPS.values():
         if _p.get('sab') == _TH:
             _p['sab'] = ((-0.30, -0.78, 1.98), (0.0, -1.0, 0.03))
             _p['Hips'] = (0, 22, 0); _p['Spine'] = (10, 26, 0); _p['Head'] = (-6, -40, 0)
+
+# ---- clean strokes: every saber key uses a plain shoulder/elbow arm pose (no solving);
+# the wrist stays near the Saber_Idle angle and only cocks for thrusts / cleave finishes.
+def A(ua, fa, h):
+    return {'UpperArm_R': ua, 'ForeArm_R': (fa, 0, 0), 'Hand_R': (h, 0, 0)}
+FK = {
+    'HIGH_R': A((130, 0, -35), 60, -20), 'LOW_L': A((40, 0, 30), 15, -55), 'SIDE_R': A((75, 0, -65), 20, -40),
+    'OVER': A((160, 0, -10), 40, -20), 'CLEAVE': A((45, 0, -5), 5, -55), 'CHAMBER': A((-10, 0, -15), 25, -45),
+    'THRUST': A((55, 0, -5), 0, -65), 'LOW_R': A((10, 0, -15), 20, -55), 'UP': A((150, 0, -20), 15, -20),
+    'SWEEP_A': A((70, 0, -80), 20, -40), 'SWEEP_B': A((70, 0, 40), 15, -40), 'HIGH_L': A((135, 0, 20), 60, -20),
+    'PARRY': A((60, 0, 15), 40, -20), 'WAIST_R': A((55, 0, -60), 30, -45), 'WAIST_L': A((55, 0, 35), 15, -45),
+    'TRAIL': A((-35, 0, -15), 25, -45), 'UPCUT_L': A((140, 0, 25), 15, -20), 'CROSS_R': A((40, 0, -35), 15, -55)}
+_SB = {'HIGH_R': SB_HIGH_R, 'LOW_L': SB_LOW_L, 'SIDE_R': SB_SIDE_R, 'OVER': SB_OVER, 'CLEAVE': SB_CLEAVE,
+       'CHAMBER': SB_CHAMBER, 'LOW_R': SB_LOW_R, 'UP': SB_UP, 'SWEEP_A': SB_SWEEP_A, 'SWEEP_B': SB_SWEEP_B,
+       'HIGH_L': SB_HIGH_L, 'PARRY': SB_PARRY, 'WAIST_R': SB_WAIST_R, 'WAIST_L': SB_WAIST_L, 'TRAIL': SB_TRAIL,
+       'UPCUT_L': SB_UPCUT_L}
+_BYPOS = {tuple(v['sab'][0]): k for k, v in _SB.items()}
+_BYPOS[(-0.30, -0.78, 1.98)] = 'THRUST'
+_BYPOS[(-0.15, -0.80, 1.95)] = 'THRUST'
+_BYPOS[(-0.50, -0.35, 1.45)] = 'CROSS_R'
+for _c in CLIPS.values():
+    for _t, _p in _c['keys']:
+        if 'sab' in _p:
+            _p.update(FK[_BYPOS[tuple(_p['sab'][0])]]); del _p['sab']

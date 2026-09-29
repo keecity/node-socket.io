@@ -1083,7 +1083,7 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
                 p = full(p)
                 if 'sab' not in p and p.get('saber'):
                     prev_arm = [D2R(x) for b in CHR for x in p.get(b, (0, 0, 0))]
-                if 'sab' not in p and p.get('saber'):
+                if False and 'sab' not in p and p.get('saber'):
                     off_ = ground_off(p, p.get('lift', 0)) if ground else Vector((0, 0, p.get('lift', 0)))
                     g_ = fk(p, off_)['SaberGrip']
                     p['_sab'] = (g_.translation - off_, g_.to_3x3().col[1].normalized())
