@@ -35,7 +35,7 @@ button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 if(typeof THREE==='undefined'||!THREE.GLTFLoader||!THREE.OrbitControls){document.getElementById('msg').textContent='Could not load the 3D library. Reload the page.';throw new Error('three.js failed to load')}
-const SPEED={"Walk": 0.4762, "Run": 1.5217}; // m/s the clips travel at (feet stay planted when matched)
+const SPEED={"Walk": 0.45, "Run": 1.4348}; // m/s the clips travel at (feet stay planted when matched)
 const SCHOOL="__SCHOOL__",GIRL="__GIRL__";
 const $=id=>document.getElementById(id),stage=$('stage');
 const b64buf=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer;

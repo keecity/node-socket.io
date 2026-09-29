@@ -117,11 +117,15 @@ def clip(name, nframes, fn, loop):
         t = (f % nframes) / nframes if loop else f / FPS                     # loops end exactly on frame 0's pose
         key(solve(fn(t)), f + 1)
 
+STRAIGHT = 0.9965
 # ------------------------------------------------------------------------------------------ gait
 def gait(ph, T, D, beta, lift, heel, lean, bob, drop, sway, yaw, roll, arm_sw, elbow, elbow_fwd, run=False):
+    global STRAIGHT
+    STRAIGHT = 0.985 if run else 0.9965
     P = {'W': {}, 'feet': {}}
     # pelvis
-    zb = (-drop - bob * math.cos(4 * math.pi * (ph - beta / 2))) if run else (-drop + bob * math.cos(4 * math.pi * (ph - beta / 2)))
+    zb = 0.0
+    zb_extra = (bob * math.cos(4 * math.pi * (ph - beta / 2)) - drop) if run else -drop    # run: extra lift in flight
     xs = sway * math.cos(2 * math.pi * (ph - beta / 2))
     P['hips'] = Vector((xs, 0, zb))
     yw = -yaw * math.cos(2 * math.pi * ph); rl = -roll * math.cos(2 * math.pi * (ph - beta / 2))
@@ -142,6 +146,17 @@ def gait(ph, T, D, beta, lift, heel, lean, bob, drop, sway, yaw, roll, arm_sw, e
             toe_pt = ANK[s] + Vector((0, -f, z)) + TOE_V[s]
             tgt = toe_pt - (R(X, pitch) @ TOE_V[s])
         P['feet'][s] = (tgt, pitch, pitch if pitch > 0 else 0.0)
+    # hips ride on the legs: as high as the planted legs allow at a small knee bend (smooth-min over both feet)
+    hip0 = HEAD['hips'].z
+    reach = []
+    for s in 'LR':
+        tgt = P['feet'][s][0]; hipj = HEAD['thigh' + s]
+        dxy = math.hypot(tgt.y - hipj.y, (tgt.x - hipj.x) - 0.0)
+        Lr = (L1[s] + L2[s]) * STRAIGHT
+        reach.append(tgt.z + math.sqrt(max(Lr * Lr - dxy * dxy, 1e-6)) + (hip0 - hipj.z))
+    k = 400.0
+    zmax = -math.log(sum(math.exp(-k * r) for r in reach)) / k                 # smooth min
+    P['hips'].z = zmax - hip0 + zb_extra
     ch = upper(P, lean=lean, yaw=yw, roll=rl, chest_lag_yaw=-yaw * 0.4 * math.cos(2 * math.pi * (ph - 0.08)),
                breath=0.0, look_pitch=lean * 0.25 + (1.5 if run else 0.8) * math.cos(4 * math.pi * (ph - 0.1)), stab=0.8)
     for s, off in (('L', 0.0), ('R', 0.5)):
@@ -150,16 +165,16 @@ def gait(ph, T, D, beta, lift, heel, lean, bob, drop, sway, yaw, roll, arm_sw, e
         arm(P, s, ch, down=74 if not run else 64, swing=arm_sw * c, bend=elbow + elbow_fwd * max(0, -c2), twist=-6 if run else 0)
     return P
 
-WALK = dict(T=0.84, D=0.40, beta=0.62, lift=0.045, heel=18, lean=3, bob=0.010, drop=0.030, sway=0.016, yaw=7, roll=4, arm_sw=16, elbow=14, elbow_fwd=16)
-RUN = dict(T=0.46, D=0.70, beta=0.34, lift=0.10, heel=25, lean=10, bob=0.020, drop=0.030, sway=0.010, yaw=10, roll=3, arm_sw=38, elbow=72, elbow_fwd=20, run=True)
+WALK = dict(T=0.80, D=0.36, beta=0.60, lift=0.040, heel=16, lean=1.5, bob=0.0, drop=0.0015, sway=0.014, yaw=6, roll=3, arm_sw=16, elbow=12, elbow_fwd=14)
+RUN = dict(T=0.46, D=0.66, beta=0.34, lift=0.09, heel=22, lean=7, bob=0.014, drop=0.004, sway=0.010, yaw=10, roll=3, arm_sw=38, elbow=72, elbow_fwd=20, run=True)
 SPEEDS = {'Walk': WALK['D'] / WALK['T'], 'Run': RUN['D'] / RUN['T']}
 
 # ------------------------------------------------------------------------------------------ standing / idle
-def stand(t=0.0, shift=0.0, breath=0.0, look=(0, 0, 0), knees=0.012, arms_=None):
-    P = {'W': {}, 'feet': {}, 'hips': Vector((shift * 0.02, 0, -knees - 0.004 * breath))}
+def stand(t=0.0, shift=0.0, breath=0.0, look=(0, 0, 0), knees=0.0012, arms_=None):
+    P = {'W': {}, 'feet': {}, 'hips': Vector((shift * 0.012, 0, -knees - 0.0006 * (1 + breath)))}
     P['W']['hips'] = R(Y, -shift * 2.5) @ R(Z, shift * 2)
     for s in 'LR': P['feet'][s] = planted(s)
-    ch = upper(P, lean=1.0, roll=-shift * 2.5, breath=breath, look_yaw=look[0], look_pitch=look[1], look_roll=look[2], stab=0.9)
+    ch = upper(P, lean=-1.0, roll=-shift * 2.5, breath=breath, look_yaw=look[0], look_pitch=look[1], look_roll=look[2], stab=0.9)
     for s in 'LR':
         a = (arms_ or {}).get(s, {})
         arm(P, s, ch, **{**dict(down=75 + breath * 1.5, swing=-2 + 2 * shift * SG[s], bend=16 + breath * 2), **a})
@@ -204,7 +219,7 @@ def sitdown(t):
 def wave(t):
     r = ss(t / 0.35) * (1 - ss((t - 1.95) / 0.35))
     wag = math.sin((t - 0.35) * 2 * math.pi * 2.4) * 22 * r
-    P = stand(breath=math.sin(t * 4), look=(6 * r, 4 * r, 8 * r), knees=0.012 + 0.01 * abs(math.sin(t * 5)) * r)
+    P = stand(breath=math.sin(t * 4), look=(6 * r, 4 * r, 8 * r), knees=0.0012 + 0.002 * abs(math.sin(t * 5)) * r)
     ch = P['W']['chest']
     up, fo = arm(P, 'R', ch, down=75 * (1 - r) - 5 * r, swing=-22 * r, bend=16 * (1 - r), clav=12 - 14 * r)
     fo = up @ R(Y, 82 * r + wag) @ R(Z, 14 * r)                           # forearm up, hand wags from the elbow
@@ -268,6 +283,16 @@ face_clip('Blink', lid)
 face_clip('JawOpen', {'jaw': [(0, 0), (.25, JO), (.5, 0)]})
 face_clip('JawClose', {'jaw': [(0, 0), (.25, JC), (.5, 0)]})
 face_clip('Talk', {'jaw': [(0, 0), (.15, JO * .75), (.3, JC * .6), (.45, JO * .6), (.6, 0)]})
+
+# ---- all keys linear (cubic-spline tangents overshoot badly on fast clips once exported to glTF) -----
+for act in bpy.data.actions:
+    fcs = []
+    for layer in getattr(act, 'layers', []):
+        for strip in layer.strips:
+            for bag in strip.channelbags: fcs += list(bag.fcurves)
+    if not fcs and hasattr(act, 'fcurves'): fcs = list(act.fcurves)
+    for fc in fcs:
+        for kp in fc.keyframe_points: kp.interpolation = 'LINEAR'
 
 # ---- export -------------------------------------------------------------------------------------------------
 for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
