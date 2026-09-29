@@ -50,7 +50,8 @@ def sweep(d,href,q0):
     d=Vector(d).normalized()
     def cost(q):
         hp,bd=blade(q)
-        return 8*bd.angle(d)+6*max(0,(hp-href).length-0.45)+pen(q)+0.004*sum((a-b)**2 for a,b in zip(q,q0))
+        tipz=(hp+bd*BL).z
+        return 8*bd.angle(d)+6*max(0,(hp-href).length-0.45)+pen(q)+0.004*sum((a-b)**2 for a,b in zip(q,q0))+20*max(0,0.55-tipz)
     return cost
 STROKES={
  'diag_dn': (1.85,(-0.05,-1,0.05),(-0.6,-0.5,0.6),(0.6,-0.5,-0.6)),

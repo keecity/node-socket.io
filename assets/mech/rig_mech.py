@@ -1067,6 +1067,7 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
 
     FOOT0 = {s_: REST_O[f'Foot_{s_}'].translation.copy() for s_ in 'LR'}
     IKMISS = []
+    KNEE_MIN = 0.0       # knee pivot stays this far above the sole (knee armour clears the floor)
     PLANT = None      # per-clip foot positions (armature space) captured on frame 0 of stepping clips
     def step_legs(pose, L):
         """lunge: hips forward 0.55*L and lowered just enough, front (left) foot steps 1.1*L
@@ -1083,7 +1084,9 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
                     return r_
                 def cost(v, legq=legq, s_=s_, t0=t0):
                     W = fk(legq(v), Vector(q['hips']))
-                    return (W[f'Foot_{s_}'].translation - tgt[s_]).length + 0.0002 * abs(v[2] - t0[2])
+                    knee = W[f'LowerLeg_{s_}'].translation.z - W[f'Foot_{s_}'].translation.z
+                    return ((W[f'Foot_{s_}'].translation - tgt[s_]).length + 0.0002 * abs(v[2] - t0[2])
+                            + 3.0 * max(0.0, KNEE_MIN - knee))
                 v = [t0[0], k0[0], t0[2]]; c = cost(v); st = 8.0
                 while st > 0.02:
                     imp = False
@@ -1096,6 +1099,14 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
                 hy = q.get('Hips', (0, 0, 0))[1]
                 q[f'Foot_{s_}'] = (-(v[0] + min(-2.0, v[1])), -hy, -v[2])
             return q, worst
+        for _try in range(6):
+            lo = 0.0
+            q, w = solve_at(0.0)
+            if w <= 0.01: break
+            hi = 0.6
+            q2, w2 = solve_at(hi)
+            if w2 <= 0.01: break
+            L *= 0.85; tgt['L'] = base_['L'] + Vector((0, -1.1 * L, 0))
         lo = 0.0
         q, w = solve_at(0.0)
         if w > 0.01:
@@ -1109,7 +1120,10 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
         return q
 
     def ground_off(pose, lift):
-        W = fk(pose)
+        """vertical correction so the lowest sole touches the ground, *including* the pose's
+        own hips offset (the caller adds that offset afterwards)"""
+        hip_ = Vector(pose.get('hips', (0, 0, 0)))
+        W = fk(pose, hip_)
         low = min((W[b] @ c).z for b, pts in SOLE.items() for c in pts[::4])   # pts are bone-local
         return Vector((0, 0, -low + lift))
 
