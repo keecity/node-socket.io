@@ -144,12 +144,9 @@ for i, p in enumerate(VB):
             if side * (p[0] - CX) < -.03: continue
         ws[n] = 1.0 / (seg_dist(p[None], B[n][1], B[n][2])[0] + .006) ** 4
     tot = sum(ws.values()); ws = {k: v / tot for k, v in ws.items()}
-    # jaw = the whole lower face: chin, lower lip, lower teeth/tongue, lower cheeks and the jaw underside,
-    # everything below the mouth corners (y ~ .665) and in front of the hinge (z > ~.09).
-    # The neck stays put, the upper lip / teeth follow the head.
-    t = smooth(.040, .090, abs(p[0] - FX))          # 0 at the lips (sharp split), 1 on the cheeks (gentle)
-    J = (1 - smooth(.660 - .025 * t, .674 + .055 * t, p[1])) * smooth(.598, .608, p[1]) * smooth(.075, .110, p[2]) \
-        * (1 - smooth(.085, .120, abs(p[0] - FX)))
+    # jaw bone = the lower lip only (lip edge + the inside of the lower lip), not the chin or cheeks
+    J = smooth(.630, .639, p[1]) * (1 - smooth(.658, .667, p[1])) * (1 - smooth(.035, .055, abs(p[0] - FX))) \
+        * smooth(.100, .130, p[2])
     if p[1] > .60:
         h = smooth(.605, .645, p[1])
         ws = {k: v * (1 - h) for k, v in ws.items()}
@@ -202,9 +199,9 @@ BL = 58
 make_action('Blink', {'upperlidR': [(0, 0), (.06, BL), (.11, BL), (.22, 0)], 'upperlidL': [(0, 0), (.06, BL), (.11, BL), (.22, 0)],
                       'lowerlidR': [(0, 0), (.06, -8), (.11, -8), (.22, 0)], 'lowerlidL': [(0, 0), (.06, -8), (.11, -8), (.22, 0)]})
 # the model's rest pose has the mouth already open, so the jaw can also close (negative angle)
-make_action('Talk', {'jaw': [(0, 0), (.15, 12), (.3, -6), (.45, 9), (.6, 0)]})
-make_action('JawOpen', {'jaw': [(0, 0), (.25, 16), (.5, 0)]})
-make_action('JawClose', {'jaw': [(0, 0), (.25, -15), (.5, 0)]})
+make_action('Talk', {'jaw': [(0, 0), (.15, 5), (.3, -3), (.45, 4), (.6, 0)]})
+make_action('JawOpen', {'jaw': [(0, 0), (.25, 6), (.5, 0)]})
+make_action('JawClose', {'jaw': [(0, 0), (.25, -5), (.5, 0)]})
 for pb in rig.pose.bones: pb.rotation_euler = (0, 0, 0)
 rig.animation_data.action = None
 bpy.ops.object.mode_set(mode='OBJECT')
