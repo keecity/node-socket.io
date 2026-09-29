@@ -514,6 +514,7 @@ if MOVES_OK:
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
         # the demo's rifle is this same model: rifle (left hand) mirrored into the right hand
         M_GUN = mapped('BeamRifle', 'Hand.L', 'Hand_R', mirror=True)
+        M_GUN = M_GUN @ Matrix.Rotation(math.pi, 4, 'Z')   # mirroring left it backwards: barrel forward
         go.data.transform(M_GUN)
         go.data.uv_layers[0].name = 'UVMap'
         go.vertex_groups.new(name='Gun').add(list(range(len(go.data.vertices))), 1.0, 'REPLACE')
