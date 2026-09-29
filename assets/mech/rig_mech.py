@@ -512,9 +512,28 @@ if MOVES_OK:
             if o is not go: bpy.data.objects.remove(o)
         bpy.context.view_layer.objects.active = go; bpy.ops.object.select_all(action='DESELECT'); go.select_set(True)
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        # the demo's rifle is this same model: rifle (left hand) mirrored into the right hand
-        M_GUN = mapped('BeamRifle', 'Hand.L', 'Hand_R', mirror=True)
-        M_GUN = M_GUN @ Matrix.Rotation(math.pi, 4, 'Z')   # mirroring left it backwards: barrel forward
+        # mount by the gun's own geometry: its pistol grip (the part hanging below the
+        # body, barrel toward -X, top +Z) goes through the right fist like the saber hilt,
+        # top of the gun on the thumb side, barrel along the forearm
+        gv = [v.co.copy() for v in go.data.vertices]
+        zmin = min(c.z for c in gv); zmax = max(c.z for c in gv)
+        low = [c for c in gv if c.z < zmin + 0.30 * (zmax - zmin)]
+        gx = sum(c.x for c in low) / len(low)
+        band = [c for c in gv if abs(c.x - gx) < 0.08 and c.z < zmin + 0.55 * (zmax - zmin)]
+        GRIP_P = Vector((gx, sum(c.y for c in band) / len(band), zmin + 0.30 * (zmax - zmin)))
+        Bn0 = rig.data.bones
+        sgm = Bn0['SaberGrip'].matrix_local; hm = Bn0['Hand_R'].matrix_local
+        up_w = sgm.to_3x3().col[1].normalized()                      # handle axis through the fist
+        fwd_w = hm.to_3x3().col[1] - up_w * hm.to_3x3().col[1].dot(up_w)
+        fwd_w.normalize()                                             # barrel along the forearm/hand
+        side_w = up_w.cross(fwd_w)
+        # gun local basis: barrel -X, up +Z, side = up x barrel
+        Lg = Matrix((Vector((-1, 0, 0)), Vector((0, 0, 1)), Vector((0, 0, 1)).cross(Vector((-1, 0, 0))))).transposed()
+        Wg = Matrix((fwd_w, up_w, side_w)).transposed()
+        GUN_SCALE = 1.45 * (hm.translation - Bn0['ForeArm_R'].matrix_local.translation).length / (max(c.x for c in gv) - min(c.x for c in gv))
+        R3 = (Wg @ Lg.inverted()) * GUN_SCALE
+        M_GUN = R3.to_4x4(); M_GUN.translation = sgm.translation - R3 @ GRIP_P
+        print("GUN mount: grip", tuple(round(x, 3) for x in GRIP_P), "scale", round(GUN_SCALE, 3))
         go.data.transform(M_GUN)
         go.data.uv_layers[0].name = 'UVMap'
         go.vertex_groups.new(name='Gun').add(list(range(len(go.data.vertices))), 1.0, 'REPLACE')
@@ -529,7 +548,7 @@ if MOVES_OK:
         eb.align_roll(r3.col[2]); eb.parent = E[parent]; eb.use_deform = deform
     if HAS_GUN:
         sock('Gun', M_GUN, 'Hand_R', 0.2, deform=True)
-        mz = M_GUN @ Vector((-0.53, 0.0, 0.235))
+        mz = M_GUN @ Vector((min(c.x for c in gv), 0.0, zmin + 0.62 * (zmax - zmin)))
         sock('Gun_Muzzle', Matrix.Translation(mz) @ M_GUN.to_3x3().normalized().to_4x4(), 'Gun')
     for s in 'LR':     # muzzle points of the head vulcans (source flashes rest at scale 0: use position only)
         fl = mapped(f'HeadTurret_Flash.{s}', 'Head', 'Head')
