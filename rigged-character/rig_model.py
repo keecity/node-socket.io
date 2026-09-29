@@ -198,10 +198,22 @@ def make_action(name, tracks):
 BL = 58
 make_action('Blink', {'upperlidR': [(0, 0), (.06, BL), (.11, BL), (.22, 0)], 'upperlidL': [(0, 0), (.06, BL), (.11, BL), (.22, 0)],
                       'lowerlidR': [(0, 0), (.06, -8), (.11, -8), (.22, 0)], 'lowerlidL': [(0, 0), (.06, -8), (.11, -8), (.22, 0)]})
-# the model's rest pose has the mouth already open, so the jaw can also close (negative angle)
-make_action('Talk', {'jaw': [(0, 0), (.15, 5), (.3, -3), (.45, 4), (.6, 0)]})
-make_action('JawOpen', {'jaw': [(0, 0), (.25, 6), (.5, 0)]})
-make_action('JawClose', {'jaw': [(0, 0), (.25, -5), (.5, 0)]})
+# The mouth is already open in the rest pose and only the lower lip is on the jaw bone, so the jaw is animated
+# as a straight vertical move (metres, +down = more open) rather than a swing about a distant hinge, which
+# would push the lip back into the teeth.
+jaw_pb = rig.pose.bones['jaw']
+jaw_rest = jaw_pb.bone.matrix_local.to_3x3()
+def make_lip_action(name, keys):
+    act = bpy.data.actions.new(name); act.use_fake_user = True
+    rig.animation_data.action = act
+    for t, down in keys:
+        jaw_pb.location = jaw_rest.inverted() @ Vector((0, 0, -down))   # rest-space delta for a world-space vertical move
+        jaw_pb.keyframe_insert('location', frame=t * FPS + 1)
+    return act
+make_lip_action('Talk', [(0, 0), (.15, .008), (.3, -.005), (.45, .006), (.6, 0)])
+make_lip_action('JawOpen', [(0, 0), (.25, .010), (.5, 0)])
+make_lip_action('JawClose', [(0, 0), (.25, -.010), (.5, 0)])
+jaw_pb.location = (0, 0, 0)
 for pb in rig.pose.bones: pb.rotation_euler = (0, 0, 0)
 rig.animation_data.action = None
 bpy.ops.object.mode_set(mode='OBJECT')
