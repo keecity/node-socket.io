@@ -139,3 +139,32 @@ distance to about 1.2 units (centre to centre) for this model.
 
 - `tools/solve_strokes.py <distance>` re-solves the stroke poses (`strokes.json`).
 - `tools/saber_contact_check.py <distance>` reports HIT/miss for every hit window.
+
+## Two-robot testing and range
+
+Strikes are tuned against a second copy of this mech (not a dummy), using the game's
+own hit test (capsule 0.12–0.80 units tall, radius 0.15 in game units) and the blade's
+contact with the opponent's actual mesh. The attacks now include a lunge step (front
+foot steps in, back foot stays planted, hips drop), so every hit connects from 0.44 to
+0.73 game units apart, the range the game's AI uses for saber attacks.
+`Saber_Run_Slash` also relies on the game's run root motion. Re-check with
+`tools/versus_check.py <distance in mech units>` (mech units = game units × 3.41).
+
+## Saber clash
+
+![Two mechs in a saber clash](saber_clash.png)
+
+Both robots play the same clips facing each other ~0.64 game units apart; the blades
+cross in an X at the midpoint and stay in contact (0.2–5 cm) through the loop.
+
+| Clip | Length | Loop | Use |
+| --- | --- | --- | --- |
+| `Saber_Clash_Enter` | 0.45 s | no | swing into the bind |
+| `Saber_Clash_Loop` | 1.0 s | yes | straining lock with a grinding tremor |
+| `Saber_Clash_Win` | 0.7 s | no | shove through |
+| `Saber_Clash_Lose` | 0.8 s | no | knocked back (moves back ~0.16 game units) |
+
+`saber_clash.js` is a drop-in sketch for the demo game's loop: when both fighters are
+inside a saber hit window and their blade segments come within 0.08 units, both enter
+the clash with a flash and hit-stop, sparks pour from the contact point, and after
+1–1.8 s the more aggressive fighter is more likely to win the shove.

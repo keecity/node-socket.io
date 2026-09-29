@@ -1051,7 +1051,7 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
         """fill a key pose with defaults"""
         q = {k: v for k, v in p.items()}
         q.setdefault('fistR', 0.4); q.setdefault('blade', 0.0); q.setdefault('saber', 0); q.setdefault('gun', 0)
-        q.setdefault('lift', 0.0)
+        q.setdefault('lift', 0.0); q.setdefault('step', 0.0)
         return q
 
     def fk(pose, hips_off=Vector()):
@@ -1064,6 +1064,49 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
             if nm == 'Hips': basis.translation = Vector((hips_off.x, hips_off.z, -hips_off.y))
             W[nm] = par @ REL[nm] @ basis
         return W
+
+    FOOT0 = {s_: REST_O[f'Foot_{s_}'].translation.copy() for s_ in 'LR'}
+    IKMISS = []
+    PLANT = None      # per-clip foot positions (armature space) captured on frame 0 of stepping clips
+    def step_legs(pose, L):
+        """lunge: hips forward 0.55*L and lowered just enough, front (left) foot steps 1.1*L
+        from where it stood, back foot stays planted; thigh/knee solved so no foot slides."""
+        base_ = PLANT if PLANT else FOOT0
+        tgt = {'L': base_['L'] + Vector((0, -1.1 * L, 0)), 'R': base_['R']}
+        def solve_at(drop):
+            q = dict(pose); q['hips'] = tuple(Vector(pose.get('hips', (0, 0, 0))) + Vector((0, -0.55 * L, -drop)))
+            worst = 0.0
+            for s_ in 'LR':
+                t0 = list(q.get(f'UpperLeg_{s_}', (0, 0, 0))); k0 = list(q.get(f'LowerLeg_{s_}', (0, 0, 0)))
+                def legq(v, q=q, s_=s_, t0=t0):
+                    r_ = dict(q); r_[f'UpperLeg_{s_}'] = (v[0], t0[1], v[2]); r_[f'LowerLeg_{s_}'] = (min(-2.0, v[1]), 0, 0)
+                    return r_
+                def cost(v, legq=legq, s_=s_, t0=t0):
+                    W = fk(legq(v), Vector(q['hips']))
+                    return (W[f'Foot_{s_}'].translation - tgt[s_]).length + 0.0002 * abs(v[2] - t0[2])
+                v = [t0[0], k0[0], t0[2]]; c = cost(v); st = 8.0
+                while st > 0.02:
+                    imp = False
+                    for i in range(3):
+                        for d in (st, -st):
+                            w = list(v); w[i] += d; cw = cost(w)
+                            if cw < c: v, c, imp = w, cw, True
+                    if not imp: st /= 2
+                q = legq(v); worst = max(worst, c)
+                hy = q.get('Hips', (0, 0, 0))[1]
+                q[f'Foot_{s_}'] = (-(v[0] + min(-2.0, v[1])), -hy, -v[2])
+            return q, worst
+        lo = 0.0
+        q, w = solve_at(0.0)
+        if w > 0.01:
+            hi = 0.6
+            for _ in range(8):
+                mid = (lo + hi) / 2; qm, wm = solve_at(mid)
+                if wm > 0.01: lo = mid
+                else: hi = mid; q, w = qm, wm
+            if w > 0.01: q, w = solve_at(hi)
+        if w > 0.03: IKMISS.append(round(w, 3))
+        return q
 
     def ground_off(pose, lift):
         W = fk(pose)
@@ -1191,6 +1234,10 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
         curves = {}
         prev = {}
         arm_prev = None
+        global PLANT
+        PLANT = None
+        if keys is not None and any(k[1].get('step', 0) > 0 for k in keys) and keys[0][1].get('lift', 0) < 0.2 and name != 'Saber_Run_Slash':
+            W0 = fk(keys[0][1]); PLANT = {s_: W0[f'Foot_{s_}'].translation.copy() for s_ in 'LR'}
         for f in range(n + 1):
             t = min(dur, f / 30.0); u = t / dur
             if keys is None:
@@ -1209,8 +1256,8 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
                     pose = {}
                     for kk in set(A) | set(B):
                         if kk in ('sab', '_sab'): continue
-                        a_ = A.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift') else full({})[kk])
-                        b_ = B.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift') else full({})[kk])
+                        a_ = A.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift', 'step') else full({})[kk])
+                        b_ = B.get(kk, (0, 0, 0) if kk not in ('fistR', 'blade', 'saber', 'gun', 'lift', 'step') else full({})[kk])
                         if kk in ('saber', 'gun'): pose[kk] = max(a_, b_) if (a_ and b_) or w < 0.5 else b_
                         elif isinstance(a_, tuple): pose[kk] = tuple(x + (y - x) * w for x, y in zip(a_, b_))
                         else: pose[kk] = a_ + (b_ - a_) * w
@@ -1222,6 +1269,7 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
                         pose, _ = solve_saber(pose, ground, arm_prev, restarts=0 if arm_prev else 8, cw=25.0)
                         pose.pop('sab', None)
                 if fx: fx(u, pose)
+                if PLANT: pose = step_legs(pose, pose.get('step', 0.0))
                 if pose.get('saber', 0) > 0.5: arm_prev = [D2R(x) for b in CHR for x in pose.get(b, (0, 0, 0))]
             # skirts follow the thighs, left hand holds the shield grip
             for s in 'LR':
@@ -1270,9 +1318,11 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
         if nm in OURS:
             a = by_name[OURS[nm]]; a.name = nm; final.append(a)
         else:
-            final.append(author(nm)); print("AUTHORED", nm)
+            IKMISS.clear(); final.append(author(nm)); print("AUTHORED", nm, "ik-miss max", max(IKMISS) if IKMISS else 0, "n", len(IKMISS))
     by_name['Walk'].name = 'Walk'; final.append(by_name['Walk'])
     by_name['SaberWalk'].name = 'Saber_Walk'; final.append(by_name['SaberWalk'])
+    for nm in ('Saber_Clash_Enter', 'Saber_Clash_Loop', 'Saber_Clash_Win', 'Saber_Clash_Lose'):
+        if nm in CLIPS_A: final.append(author(nm)); print("AUTHORED", nm)
     acts = final
 
 if SABER:

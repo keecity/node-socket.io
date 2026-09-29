@@ -420,14 +420,15 @@ def _strike(name, dur, hits, pre=None, post_legs=None):
     for (t0, t1, stroke) in hits:
         s = _ST[stroke]; tm = (t0 + t1) / 2
         keys.append((max(keys[-1][0] + 0.02, t0 - 0.08), M(READY_LEGS, SH_READY, SABER_ON, _q2p(s['start']))))
-        keys.append((t0, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['start']))))
-        keys.append((tm, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['contact']))))
-        keys.append((t1, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['end']))))
+        keys.append((t0, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['start']), step=STEP * 0.6)))
+        keys.append((tm, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['contact']), step=STEP)))
+        keys.append((t1, M(LUNGE, SH_BRACE, SABER_ON, _q2p(s['end']), step=STEP)))
     last = keys[-1][1]
-    keys.append((min(dur - 0.05, keys[-1][0] + 0.15), M(post_legs or LUNGE, dict(last, **{k: v for k, v in last.items() if k.endswith('_R')}))))
+    keys.append((min(dur - 0.05, keys[-1][0] + 0.15), M(post_legs or LUNGE, dict(last, **{k: v for k, v in last.items() if k.endswith('_R')}), step=STEP)))
     keys.append((dur, rest))
     keys.sort(key=lambda k: k[0])
     CLIPS[name]['keys'] = keys
+STEP = 1.1     # lunge: hips forward 0.55, front foot steps 1.1 (units)
 if _ST:
     _strike('Saber_Slash_Combo', 1.7, [(0.15, 0.31, 'diag_dn'), (0.45, 0.6, 'backhand'), (0.84, 1.0, 'cleave')])
     _strike('Saber_Run_Slash', 1.0, [(0.13, 0.3, 'sweep')], pre=M(legs(30, -60, -18, -20), SH_READY, S_READY, Spine=(14, -10, 0)))
@@ -441,3 +442,32 @@ if _ST:
     _pk = [k for k in CLIPS['Saber_Parry_Riposte']['keys'] if k[0] <= 0.33]
     _strike('Saber_Parry_Riposte', 1.0, [(0.42, 0.57, 'thrust')])
     CLIPS['Saber_Parry_Riposte']['keys'] = _pk + [k for k in CLIPS['Saber_Parry_Riposte']['keys'] if k[0] > 0.33]
+
+# air slash: the dive carries the body forward into the cleave (lands ~0.8 units in)
+if _ST:
+    _ak = CLIPS['Saber_Air_Slash']['keys']
+    for _i, (_t, _p) in enumerate(_ak):
+        if 0.2 <= _t < 1.0:
+            _p['hips'] = (0, -0.8 * min(1.0, (_t - 0.1) / 0.3), 0)
+            _p.pop('step', None)
+
+# ---- saber clash (both robots play the same clip facing each other ~2.2 units apart;
+# the blades cross in an X at the midpoint)
+_CL = _json.load(open('clash.json')) if _os.path.exists('clash.json') else None
+if _CL and _ST:
+    BIND = M(legs(22, -38, -10, -20), SH_BRACE, SABER_ON, _q2p(_CL['bind']))
+    PUSH = M(legs(26, -42, -14, -16), SH_BRACE, SABER_ON, _q2p(_CL['push']))
+    READY_S = M(READY_LEGS, SH_READY, S_READY, TORSO_READY)
+    WIND = M(READY_LEGS, SH_READY, SABER_ON, _q2p(_ST['diag_dn']['start']))
+    def _strain(u, p):
+        k = math.sin(2 * math.pi * u * 7) * 1.4 + math.sin(2 * math.pi * u * 13) * 0.7   # grinding tremor
+        add(p, 'UpperArm_R', (k, 0, 0.5 * k)); add(p, 'ForeArm_R', (-0.8 * k, 0, 0))
+        add(p, 'Spine', (0.5 * math.sin(2 * math.pi * u * 2), 0, 0.3 * k)); add(p, 'Head', (-0.4 * k, 0, 0))
+    clip('Saber_Clash_Enter', 0.45, [(0.0, READY_S), (0.15, WIND), (0.3, BIND), (0.45, PUSH)])
+    clip('Saber_Clash_Loop', 1.0, [(0.0, PUSH), (0.5, M(BIND, Spine=(BIND['Spine'][0] + 3, BIND['Spine'][1], 0))), (1.0, PUSH)],
+         loop=True, fx=_strain)
+    SHOVE = M(LUNGE, SH_BASH, SABER_ON, _q2p(_ST['sweep']['end']), step=STEP * 0.7)
+    clip('Saber_Clash_Win', 0.7, [(0.0, PUSH), (0.18, M(PUSH, step=STEP * 0.5)), (0.36, SHOVE), (0.7, READY_S)])
+    RECOIL = M(legs(-6, -30, 34, -60), SH_BLOCK, SABER_ON, _q2p(_ST['backhand']['start']),
+               Hips=(-10, 0, 0), Spine=(-16, 10, 0), Head=(14, -8, 0), hips=(0, 0.55, 0))
+    clip('Saber_Clash_Lose', 0.8, [(0.0, PUSH), (0.14, RECOIL), (0.45, M(RECOIL, hips=(0, 0.35, 0), Spine=(-4, 4, 0))), (0.8, READY_S)])
