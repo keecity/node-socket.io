@@ -112,3 +112,17 @@ app.assets.load(asset);
 
 In the Editor, drop `mech_rigged.glb` into Assets; the import creates a template
 plus `Idle` and `Walk` animation assets that you can put in an Anim State Graph.
+
+## Cockpit
+
+![Pilot boarding](cockpit_board.png)
+
+- The red chest panel is cut free as the cockpit hatch on the `CockpitDoor` bone, hinged
+  along its top edge (it swings up and out).
+- `Winch` (scale Y = cable length) and `WinchHook` (the stirrup) lower a cable from the
+  hatch sill to the ground. At rest they are hidden inside the closed cockpit.
+- `Pilot` carries a simple placeholder pilot (~1.8 m at the mech's scale). At rest the
+  pilot sits inside the cockpit; attach your own pilot model to this bone to replace it.
+- Clips (after the game list): `Cockpit_Open` (1.2 s), `Cockpit_Close` (1.0 s),
+  `Winch_Lower` (2.0 s), `Winch_Raise` (3.0 s: pilot steps on, rides up, steps into the
+  cockpit), `Pilot_Board` (8.3 s: open, lower, raise, close in one clip).

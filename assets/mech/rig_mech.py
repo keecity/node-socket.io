@@ -556,6 +556,97 @@ if MOVES_OK:
         sock(f'Vulcan_{s}', Matrix.Translation(fl.translation) @ fwd.to_4x4(), 'Head', 0.08)
     bpy.ops.object.mode_set(mode='OBJECT')
 
+
+# --- 6d. Cockpit: chest hatch on a hinge, winch rope with stirrup, placeholder pilot
+if SABER:
+    import bmesh
+    me_ = body.data
+    gidx = {g.name: g.index for g in body.vertex_groups}
+    bm = bmesh.new(); bm.from_mesh(me_); bm.faces.ensure_lookup_table()
+    dl = bm.verts.layers.deform.verify()
+    door = [f for f in bm.faces
+            if f.verts[0][dl].get(gidx['Spine'], 0) > 0.5
+            and -0.06 <= f.calc_center_median().x <= 0.11 and 1.62 <= f.calc_center_median().z <= 1.95
+            and f.calc_center_median().y < 0.37 and f.normal.y < -0.15]
+    res_ = bmesh.ops.split(bm, geom=door, use_only_faces=True)   # cut the hatch free of the hull
+    door = [g for g in res_['geom'] if isinstance(g, bmesh.types.BMFace)]
+    dv = {v for f in door for v in f.verts}
+    door_grp = body.vertex_groups.new(name='CockpitDoor').index
+    for v in dv:
+        v[dl].clear(); v[dl][door_grp] = 1.0
+    xs = [v.co.x for v in dv]; zs = [v.co.z for v in dv]; ys = [v.co.y for v in dv]
+    DOOR_TOP = Vector(((min(xs) + max(xs)) / 2, max(v.co.y for v in dv if v.co.z > max(zs) - 0.02), max(zs)))
+    DOOR_BOT = Vector((DOOR_TOP.x, min(ys), min(zs)))
+    bm.to_mesh(me_); bm.free()
+    print("DOOR", len(door), "faces; hinge", tuple(round(x, 3) for x in DOOR_TOP))
+
+    # sill (winch point) just inside the bottom of the opening; pilot waits inside
+    SILL = Vector((DOOR_TOP.x, DOOR_BOT.y + 0.06, DOOR_BOT.z + 0.01))
+    PILOT_IN = Vector((DOOR_TOP.x, DOOR_BOT.y + 0.16, DOOR_BOT.z))
+    ROPE0 = 0.01                                                  # rope length at rest (hidden)
+
+    def mk(name, build, grp, mats):
+        m = bpy.data.meshes.new(name); b2 = bmesh.new(); build(b2); b2.to_mesh(m); b2.free()
+        o = bpy.data.objects.new(name, m); scene.collection.objects.link(o)
+        o.vertex_groups.new(name=grp).add(list(range(len(m.vertices))), 1.0, 'REPLACE')
+        m.uv_layers.new(name='UVMap')
+        for mt in mats: m.materials.append(mt)
+        return o
+    def mat(name, rgb, metal=0.0, rough=0.7):
+        mt = bpy.data.materials.new(name); mt.use_nodes = True
+        b_ = mt.node_tree.nodes['Principled BSDF']; b_.inputs['Base Color'].default_value = (*rgb, 1)
+        b_.inputs['Metallic'].default_value = metal; b_.inputs['Roughness'].default_value = rough
+        return mt
+    def cyl(b2, p0, p1, r, seg=10, mi=0):
+        d = (p1 - p0); L = d.length
+        res = bmesh.ops.create_cone(b2, cap_ends=True, segments=seg, radius1=r, radius2=r, depth=L)
+        q = Vector((0, 0, 1)).rotation_difference(d.normalized())
+        bmesh.ops.rotate(b2, verts=res['verts'], cent=(0, 0, 0), matrix=q.to_matrix())
+        bmesh.ops.translate(b2, verts=res['verts'], vec=(p0 + p1) / 2)
+        for f in {f for v in res['verts'] for f in v.link_faces}: f.material_index = mi
+    def ball(b2, c, r, mi=0):
+        res = bmesh.ops.create_uvsphere(b2, u_segments=12, v_segments=8, radius=r)
+        bmesh.ops.translate(b2, verts=res['verts'], vec=c)
+        for f in {f for v in res['verts'] for f in v.link_faces}: f.material_index = mi
+
+    m_cable = mat('WinchCable', (0.75, 0.62, 0.25), 0.3, 0.5)
+    m_steel = mat('WinchSteel', (0.55, 0.56, 0.6), 0.8, 0.4)
+    rope = mk('Rope', lambda b2: cyl(b2, SILL, SILL - Vector((0, 0, ROPE0)), 0.008, 8), 'Winch', [m_cable])
+    def stirrup(b2):
+        c = SILL - Vector((0, 0, ROPE0))
+        cyl(b2, c, c - Vector((0, 0, 0.03)), 0.006, 8)                       # hook shank
+        cyl(b2, c - Vector((0.03, 0, 0.03)), c - Vector((-0.03, 0, 0.03)), 0.005, 8)   # foot bar
+        cyl(b2, c - Vector((0.03, 0, 0.03)), c - Vector((0.012, 0, 0.0)), 0.003, 6)
+        cyl(b2, c - Vector((-0.03, 0, 0.03)), c - Vector((-0.012, 0, 0.0)), 0.003, 6)
+    hook = mk('Stirrup', stirrup, 'WinchHook', [m_steel])
+    # placeholder pilot, ~0.27 units tall (1.8 m at this mech's ~18 m scale), feet at origin
+    m_suit = mat('PilotSuit', (0.85, 0.35, 0.08)); m_helm = mat('PilotHelmet', (0.92, 0.92, 0.9), 0.1, 0.3)
+    m_visor = mat('PilotVisor', (0.05, 0.08, 0.12), 0.5, 0.1)
+    def pilot(b2):
+        P0 = PILOT_IN; V = lambda x, y, z: P0 + Vector((x, y, z))
+        for sx in (-0.012, 0.012):
+            cyl(b2, V(sx, 0, 0.0), V(sx, 0, 0.125), 0.009, 8, 0)              # legs
+            cyl(b2, V(sx * 2.4, 0, 0.215), V(sx * 1.6, -0.01, 0.255), 0.006, 8, 0)   # arms up the rope
+        cyl(b2, V(0, 0, 0.12), V(0, 0, 0.215), 0.02, 10, 0)                  # torso
+        ball(b2, V(0, 0, 0.237), 0.016, 1)                                   # helmet
+        ball(b2, V(0, -0.008, 0.237), 0.011, 2)                              # visor
+    pil = mk('Pilot', pilot, 'Pilot', [m_suit, m_helm, m_visor])
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in (rope, hook, pil): o.select_set(True)
+    body.select_set(True); bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    E = arm_data.edit_bones
+    def eb(name, head, tail, parent, roll_to=Vector((0, -1, 0))):
+        e = E.new(name); e.head = head; e.tail = tail; e.align_roll(roll_to); e.parent = E[parent]
+    eb('CockpitDoor', DOOR_TOP, DOOR_BOT, 'Spine')                        # hinge along the top edge
+    eb('Winch', SILL, SILL - Vector((0, 0, ROPE0)), 'Spine')              # pointing down; scale Y = rope length
+    eb('WinchHook', SILL - Vector((0, 0, ROPE0)), SILL - Vector((0, 0, ROPE0 + 0.05)), 'Spine')
+    eb('Pilot', PILOT_IN, PILOT_IN + Vector((0, 0, 0.27)), 'Spine')
+    bpy.ops.object.mode_set(mode='OBJECT')
+
 # --- 7. Animation clips (in place, loopable)
 def rad(d): return math.radians(d)
 
@@ -1183,6 +1274,63 @@ if SABER and MOVES_OK and os.path.exists(MOVES_SPEC):
     by_name['Walk'].name = 'Walk'; final.append(by_name['Walk'])
     by_name['SaberWalk'].name = 'Saber_Walk'; final.append(by_name['SaberWalk'])
     acts = final
+
+if SABER:
+    # --- 7d. Cockpit clips (appended after the game's move list)
+    def ease(a, b, t):
+        t = min(1.0, max(0.0, (t - a) / (b - a))); return t * t * (3 - 2 * t)
+    BASE = capture(idle, 0.0)
+    for pb in rig.pose.bones: pb.rotation_mode = 'XYZ'
+    SPINE_R = rig.data.bones['Spine'].matrix_local
+    HOOK_R = rig.data.bones['WinchHook'].matrix_local
+    PIL_R = rig.data.bones['Pilot'].matrix_local
+    DROP = SILL.z - ROPE0 - 0.035                                   # sill down to the ground
+    def rest_pose():
+        for n, (l, r_, sc) in BASE.items():
+            P[n].location, P[n].rotation_euler, P[n].scale = l, r_, sc
+    def set_cockpit(door_deg, rope_len, pilot_world=None, pilot_vis=1.0):
+        P['CockpitDoor'].rotation_euler = (rad(door_deg), 0, 0)
+        P['Winch'].scale = (1, max(1.0, rope_len / ROPE0), 1)
+        P['WinchHook'].location = (0, max(0.0, rope_len - ROPE0), 0)        # bone points down
+        if pilot_world is None: pilot_world = PILOT_IN
+        P['Pilot'].location = PIL_R.inverted().to_3x3() @ (pilot_world - PILOT_IN)
+        P['Pilot'].scale = (max(0.001, pilot_vis),) * 3
+    def stand_on_hook(rope_len):
+        return SILL - Vector((0, 0, rope_len + 0.028)) + Vector((0, 0, 0))
+    def build(name, dur, fn):
+        n = round(dur * 30); act = bpy.data.actions.new(name); act.use_fake_user = True
+        rig.animation_data.action = act
+        for f in range(n + 1):
+            rest_pose(); fn(f / 30.0)
+            for pb in rig.pose.bones:
+                for path in ('location', 'rotation_euler', 'scale'):
+                    pb.keyframe_insert(path, frame=f + 1)
+        act.frame_range = (1, n + 1); return act
+    OPEN = 105.0
+    def c_open(t):
+        d = OPEN * ease(0.1, 0.9, t) + 4 * math.sin(math.pi * ease(0.9, 1.2, t)) * (t > 0.9)
+        set_cockpit(d, ROPE0)
+    def c_close(t):
+        set_cockpit(OPEN * (1 - ease(0.0, 0.8, t)), ROPE0)
+    def w_lower(t):
+        L = ROPE0 + DROP * ease(0.1, 1.9, t)
+        set_cockpit(OPEN, L, pilot_vis=0.001)
+    def w_raise(t):
+        # pilot steps on at the bottom, rides up, steps off into the cockpit
+        up = ease(0.3, 2.3, t); L = ROPE0 + DROP * (1 - up)
+        ride = stand_on_hook(L)
+        into = ease(2.4, 3.0, t)
+        pos = ride.lerp(PILOT_IN, into)
+        set_cockpit(OPEN, L if t < 2.4 else ROPE0, pos, 1.0)
+    def board(t):                                                     # full sequence, 8.3 s
+        if t < 1.2: c_open(t)
+        elif t < 3.2: w_lower(t - 1.2)
+        elif t < 6.2: w_raise(t - 3.2)
+        elif t < 6.9: set_cockpit(OPEN, ROPE0)
+        else: c_close(t - 6.9)
+    acts += [build('Cockpit_Open', 1.2, c_open), build('Cockpit_Close', 1.0, c_close),
+             build('Winch_Lower', 2.0, w_lower), build('Winch_Raise', 3.0, w_raise),
+             build('Pilot_Board', 8.3, board)]
 
 for a in acts:  # push to NLA so both export as separate clips
     tr = rig.animation_data.nla_tracks.new(); tr.name = a.name
