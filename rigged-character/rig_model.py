@@ -145,8 +145,8 @@ for i, p in enumerate(VB):
         ws[n] = 1.0 / (seg_dist(p[None], B[n][1], B[n][2])[0] + .006) ** 4
     tot = sum(ws.values()); ws = {k: v / tot for k, v in ws.items()}
     # jaw bone = the lower lip only (lip edge + the inside of the lower lip), not the chin or cheeks
-    J = smooth(.630, .639, p[1]) * (1 - smooth(.658, .667, p[1])) * (1 - smooth(.035, .055, abs(p[0] - FX))) \
-        * smooth(.100, .130, p[2])
+    J = smooth(.612, .642, p[1]) * (1 - smooth(.658, .667, p[1])) * (1 - smooth(.030, .075, abs(p[0] - FX))) \
+        * smooth(.100, .140, p[2])
     if p[1] > .60:
         h = smooth(.605, .645, p[1])
         ws = {k: v * (1 - h) for k, v in ws.items()}
