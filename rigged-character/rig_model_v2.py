@@ -67,6 +67,10 @@ for p in body.data.polygons:
     vs = p.vertices
     for i in vs[1:]: par[find(winv[i])] = find(winv[vs[0]])
 lab = np.array([find(i) for i in winv]); big = np.bincount(lab).argmax(); is_big = lab == big
+# loose pieces that sit on the body (shoe details etc.) follow the body; hair / bows near the head stay on the head bone
+cz = {l: VB[lab == l][:, 2].mean() for l in np.unique(lab)}
+is_body = np.array([l == big or cz[l] < 0.5 for l in lab])
+print('body islands:', sum(1 for l in cz if l != big and cz[l] < 0.5), 'extra loose pieces')
 
 # ---- skeleton (Blender space: X right, -Y front, Z up) ---------------------
 B = {}
@@ -124,7 +128,7 @@ body_bones = [n for n in names if n in ('hips', 'spine', 'chest', 'neck') or n.s
 new_w = []
 for i, p in enumerate(VB):
     w = dict(orig_w[i])
-    if is_big[i] and p[2] < 0.595 and 'jaw' not in w:
+    if is_body[i] and p[2] < 0.595 and 'jaw' not in w:
         ws = {}
         for n in body_bones:
             side = 1 if n.endswith('L') else -1 if n.endswith('R') else 0

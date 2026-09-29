@@ -1,0 +1,233 @@
+<title>Riley Explores The School</title>
+<style>
+:root{--bg:#f3efec;--fg:#2a2220;--muted:#7a6a64;--panel:#fffaf7;--line:#e2d6cf;--accent:#d8452f;--stage:#dfe8ef;--font:'DM Sans',system-ui,sans-serif;--mono:'DM Mono',ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1716;--fg:#f1e8e3;--muted:#a3948d;--panel:#262020;--line:#3a3130;--accent:#ff7a5f;--stage:#26303a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1c1716;--fg:#f1e8e3;--muted:#a3948d;--panel:#262020;--line:#3a3130;--accent:#ff7a5f;--stage:#26303a;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);padding-inline:16px;padding-block:16px}
+h1{font-size:1.25rem;margin:0 auto 10px;font-weight:600;max-width:1180px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px}
+@media(max-width:760px){.wrap{grid-template-columns:minmax(0,1fr)}}
+#stage{position:relative;background:var(--stage);border-radius:6px;height:min(76vh,680px);min-height:380px;overflow:hidden}
+#stage canvas{display:block;width:100%;height:100%}
+#msg{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:.875rem;text-align:center;padding:16px}
+#status{position:absolute;left:12px;top:12px;background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:.8125rem;font-family:var(--mono)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:14px;min-width:0;align-self:start}
+.panel h2{font-size:.6875rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+button{font:inherit;font-size:.8125rem;padding:7px 12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:4px;cursor:pointer}
+button:hover{border-color:var(--accent)}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.hint{font-family:var(--mono);font-size:.6875rem;color:var(--muted);line-height:1.5}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&family=DM+Mono&display=swap">
+<h1>Riley Explores The School</h1>
+<div class="wrap">
+<div id="stage"><div id="msg">Loading…</div><div id="status">starting</div></div>
+<div class="panel">
+<div><h2>Behaviour</h2><div class="row"><button id="bAuto" class="on">Wander on her own</button><button id="bPause">Pause</button></div></div>
+<div><h2>Send her to</h2><div class="row" id="poi"></div></div>
+<div><h2>Camera</h2><div class="row"><button id="cFollow" class="on">Follow</button><button id="cOver">Overview</button><button id="cTop">Top down</button></div></div>
+<div><h2>Building</h2><div class="row"><button id="bRoof" class="on">Roof cutaway when inside</button></div></div>
+<div class="hint">She plans her own routes around walls and furniture, opens the doors as she arrives, and walks, runs, sits, waves and jumps. Drag to orbit, scroll to zoom.</div>
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+if(typeof THREE==='undefined'||!THREE.GLTFLoader||!THREE.OrbitControls){document.getElementById('msg').textContent='Could not load the 3D library. Reload the page.';throw new Error('three.js failed to load')}
+const SCHOOL="__SCHOOL__",GIRL="__GIRL__";
+const $=id=>document.getElementById(id),stage=$('stage');
+const b64buf=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer;
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=0.85;
+stage.appendChild(renderer.domElement);
+const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(36,1,0.05,150);
+scene.add(new THREE.HemisphereLight(0xffffff,0xb8a898,0.6));
+const sun=new THREE.DirectionalLight(0xfff4e0,0.9);sun.position.set(-6,10,14);scene.add(sun);
+[[-5,2.9,-3],[5,2.9,-3],[0,2.9,-3],[-5,2.9,-1.5],[5,2.9,-1.5],[0,2.9,-1]].forEach(p=>{const l=new THREE.PointLight(0xfff2dd,0.6,8,1.5);l.position.set(...p);scene.add(l)});
+const controls=new THREE.OrbitControls(cam,renderer.domElement);controls.enableDamping=true;controls.maxPolarAngle=Math.PI*0.495;controls.minDistance=1.2;controls.maxDistance=40;
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+
+// ---------------------------------------------------------------- navigation
+// glTF space: +X right, +Z toward the front of the school, y up. Rectangles are [x0,x1,z0,z1].
+const R=[];const box=(x0,x1,z0,z1)=>R.push([Math.min(x0,x1),Math.max(x0,x1),Math.min(z0,z1),Math.max(z0,z1)]);
+const C=[];
+// walls
+box(-7.5,-2.6,-.25,0);box(2.6,7.5,-.25,0);box(-2.6,-1.4,-.25,0);box(1.4,2.6,-.25,0);
+box(-7.5,-7.25,-6,0);box(7.25,7.5,-6,0);box(-7.5,7.5,-6,-5.75);
+for(const s of[-1,1]){box(s*2.35,s*2.6,-2.2,-.25);box(s*2.35,s*2.6,-5.75,-3.2)}
+box(-2.6,-2,0,1.5);box(2,2.6,0,1.5);                                   // porch pilasters
+// lobby
+box(-1.5,1.5,-5.25,-4.45);C.push([-1.9,-1,.32],[1.9,-1,.32]);
+// classrooms
+for(const s of[-1,1]){const xc=5*s;
+ [[xc-1.15,1.6],[xc+1.15,1.6],[xc,3.0]].forEach(([tx,ty])=>{box(tx-.6,tx+.6,-ty-.4,-ty+.4);
+  for(const dx of[-.25,.25])for(const dy of[-.62,.62])box(tx+dx-.17,tx+dx+.17,-(ty+dy)-.17,-(ty+dy)+.17)});
+ box(xc-1.9,xc+1.9,-5.75,-5.35);
+ s>0?box(6.85,7.25,-4.8,-2.6):box(-7.25,-6.85,-4.8,-2.6);
+ box(xc-.42,xc+.42,-4.5,-4.2)}
+// outdoor planters
+for(const s of[-1,1]){C.push([s*6.15,.85,.78],[s*4.0,.85,.74],[s*5.05,1.0,.42])}
+const X0=-12,X1=12,Z0=-8.5,Z1=10,CS=0.1,GW=Math.round((X1-X0)/CS),GH=Math.round((Z1-Z0)/CS),AGENT=0.2;
+const blocked=new Uint8Array(GW*GH);
+const cx=x=>Math.floor((x-X0)/CS),cz=z=>Math.floor((z-Z0)/CS);
+for(let j=0;j<GH;j++)for(let i=0;i<GW;i++){const x=X0+(i+.5)*CS,z=Z0+(j+.5)*CS;let b=false;
+ for(const r of R){if(x>r[0]-AGENT&&x<r[1]+AGENT&&z>r[2]-AGENT&&z<r[3]+AGENT){b=true;break}}
+ if(!b)for(const c of C){if(Math.hypot(x-c[0],z-c[1])<c[2]+AGENT){b=true;break}}
+ if(x<X0+.5||x>X1-.5||z<Z0+.5||z>Z1-.5)b=true;blocked[j*GW+i]=b?1:0}
+const free=(i,j)=>i>=0&&j>=0&&i<GW&&j<GH&&!blocked[j*GW+i];
+function snap(x,z){let i=cx(x),j=cz(z);if(free(i,j))return[x,z];
+ for(let r=1;r<40;r++)for(let dj=-r;dj<=r;dj++)for(let di=-r;di<=r;di++){if(Math.max(Math.abs(di),Math.abs(dj))!==r)continue;if(free(i+di,j+dj))return[X0+(i+di+.5)*CS,Z0+(j+dj+.5)*CS]}return[x,z]}
+function los(a,b){const n=Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/(CS*.5));for(let k=0;k<=n;k++){const t=k/n;if(!free(cx(a[0]+(b[0]-a[0])*t),cz(a[1]+(b[1]-a[1])*t)))return false}return true}
+function findPath(a,b){a=snap(...a);b=snap(...b);const si=cx(a[0]),sj=cz(a[1]),ei=cx(b[0]),ej=cz(b[1]);
+ const N=GW*GH,g=new Float32Array(N).fill(1e9),from=new Int32Array(N).fill(-1),closed=new Uint8Array(N);
+ const heap=[];const push=(f,k)=>{heap.push([f,k]);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p][0]<=heap[i][0])break;[heap[p],heap[i]]=[heap[i],heap[p]];i=p}};
+ const pop=()=>{const t=heap[0],l=heap.pop();if(heap.length){heap[0]=l;let i=0;for(;;){let m=i,a=2*i+1,c=2*i+2;if(a<heap.length&&heap[a][0]<heap[m][0])m=a;if(c<heap.length&&heap[c][0]<heap[m][0])m=c;if(m===i)break;[heap[m],heap[i]]=[heap[i],heap[m]];i=m}}return t};
+ const h=(i,j)=>Math.hypot(i-ei,j-ej);g[sj*GW+si]=0;push(h(si,sj),sj*GW+si);
+ while(heap.length){const[,k]=pop();if(closed[k])continue;closed[k]=1;const i=k%GW,j=(k/GW)|0;if(i===ei&&j===ej)break;
+  for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){if(!di&&!dj)continue;const ni=i+di,nj=j+dj;if(!free(ni,nj))continue;
+   if(di&&dj&&(!free(i+di,j)||!free(i,j+dj)))continue;const nk=nj*GW+ni,ng=g[k]+Math.hypot(di,dj);if(ng<g[nk]){g[nk]=ng;from[nk]=k;push(ng+h(ni,nj),nk)}}}
+ const ek=ej*GW+ei;if(from[ek]<0&&ek!==sj*GW+si)return null;
+ let pts=[];for(let k=ek;k>=0;k=from[k])pts.push([X0+(k%GW+.5)*CS,Z0+(((k/GW)|0)+.5)*CS]);pts.reverse();
+ const out=[pts[0]];let a0=0;while(a0<pts.length-1){let b0=pts.length-1;while(b0>a0+1&&!los(pts[a0],pts[b0]))b0--;out.push(pts[b0]);a0=b0}return out}
+
+// floor height: interior/porch at 0.3, step 0.15, ground 0
+function groundY(x,z){if(z<0&&Math.abs(x)<7.5)return .3;if(Math.abs(x)<2.9&&z>=0&&z<1.6)return .3;if(Math.abs(x)<3.1&&z>=1.6&&z<2.2)return .15;return 0}
+const inside=(x,z)=>z<0&&Math.abs(x)<7.5;
+
+// points of interest
+const POIS=[
+ {name:'Front door',pos:[0,1.3],look:[0,9],act:'wave'},
+ {name:'Reception',pos:[0,-3.7],look:[0,-9],act:'wave'},
+ {name:'Left rug',pos:[-4.3,-4.85],look:[-4.3,9],act:'sit'},
+ {name:'Right rug',pos:[5.7,-4.85],look:[5.7,9],act:'sit'},
+ {name:'Left bookshelf',pos:[-5.0,-4.95],look:[-5,-9],act:'look'},
+ {name:'Right bookshelf',pos:[5.0,-4.95],look:[5,-9],act:'look'},
+ {name:'Table',pos:[-4.0,-3.0],look:[-9,-3.0],act:'look'},
+ {name:'Table ',pos:[6.0,-3.0],look:[9,-3.0],act:'look'},
+ {name:'Garden',pos:[-1.0,5.0],look:[0,12],act:'jump'},
+ {name:'Garden ',pos:[3.5,4.0],look:[0,12],act:'jump'},
+].map(p=>({...p,pos:snap(...p.pos)}));
+
+// ---------------------------------------------------------------- the girl
+const girl=new THREE.Group();scene.add(girl);
+const S={x:0,z:7,h:Math.PI,speed:0,y:0,mode:'idle',goal:null,path:[],pi:0,act:null,actT:0,run:false,queue:null,paused:false,auto:true,doorsOpen:false,log:[]};
+let gm,gclips={},gactions={},cur=null,school,smixer,sclip,sT=0;
+function play(name,fade=.25,speedScale=1){const a=gactions[name];if(!a||cur===a)return a;a.reset().setEffectiveWeight(1).play();if(cur)cur.crossFadeTo(a,fade,false);cur=a;a.timeScale=speedScale;return a}
+function playOnce(name,fade=.2){const a=gactions[name];a.reset();a.setLoop(THREE.LoopOnce,1);a.clampWhenFinished=true;a.setEffectiveWeight(1).play();if(cur&&cur!==a)cur.crossFadeTo(a,fade,false);cur=a;return a}
+function load(){
+ const L=new THREE.GLTFLoader();
+ L.parse(b64buf(SCHOOL),'',g=>{school=g.scene;scene.add(school);school.traverse(o=>{if(o.isMesh)o.frustumCulled=false});
+  ['Glass','DoorGlassL','DoorGlassR'].forEach(n=>{const o=school.getObjectByName(n);if(o)o.traverse(m=>{if(m.material){[].concat(m.material).forEach(q=>{q.transparent=true;q.depthWrite=false;q.side=THREE.DoubleSide})}})});
+  smixer=new THREE.AnimationMixer(school);sclip=smixer.clipAction(g.animations[0]);sclip.setLoop(THREE.LoopOnce);sclip.clampWhenFinished=true;sclip.play();sclip.paused=true;
+  L.parse(b64buf(GIRL),'',c=>{gm=c.scene;gm.position.set(-0.4415,0,0.735);gm.traverse(o=>{if(o.isMesh)o.frustumCulled=false});girl.add(gm);
+   gm.updateMatrixWorld(true);
+   const mx=new THREE.AnimationMixer(gm);S.mixer=mx;c.animations.forEach(a=>{gclips[a.name]=a;gactions[a.name]=mx.clipAction(a)});
+   ['Idle','Walk','Run','SitIdle'].forEach(n=>{gactions[n].setLoop(THREE.LoopRepeat)});
+   S.blinkA=gactions.Blink;S.blinkA.setLoop(THREE.LoopOnce,1);S.blinkA.clampWhenFinished=false;
+   play('Idle');$('msg').remove();if(!window.__noStart)startBehaviour()},e=>$('msg').textContent='Could not load the character')},
+ e=>$('msg').textContent='Could not load the school')}
+const Hs=a=>Math.atan2(a[0],a[1]);
+function angDiff(a,b){let d=b-a;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d}
+function goTo(poi,run){const p=findPath([S.x,S.z],poi.pos);if(!p){S.log.push('nopath '+poi.name);return false}
+ S.goal=poi;S.path=p;S.pi=1;S.run=!!run;S.mode='walk';S.act=null;return true}
+let lastGoal=-1;
+function pickNext(){let k;do{k=Math.floor(Math.random()*POIS.length)}while(k===lastGoal&&POIS.length>1);lastGoal=k;const poi=POIS[k];
+ const d=Math.hypot(poi.pos[0]-S.x,poi.pos[1]-S.z);goTo(poi,d>6&&Math.random()<.45)}
+function startBehaviour(){pickNext()}
+function arrive(){const p=S.goal;S.mode='turn'}
+function beginAct(){const p=S.goal;S.mode='act';S.actT=0;
+ if(p.act==='wave'){playOnce('Wave');S.actDur=2.3;S.talk=true;S.talkT=0}
+ else if(p.act==='sit'){playOnce('SitDown');S.actDur=1+5+Math.random()*4;S.sitStage=0}
+ else if(p.act==='jump'){S.jumps=2+Math.floor(Math.random()*2);playOnce('Jump');S.actDur=.9*S.jumps+.3}
+ else{play('Idle');S.actDur=3+Math.random()*3}}
+function doorTarget(){const near=Math.hypot(S.x,S.z-.4)<3.2&&Math.abs(S.x)<3.5&&S.z>-2.5&&S.z<4.5;return near?1:0}
+let dprog=0;
+function step(dt){
+ if(!gm)return;
+ if(S.paused){return}
+ // doors
+ const tgt=doorTarget();dprog+=Math.sign(tgt-dprog)*Math.min(Math.abs(tgt-dprog),dt*1.6);
+ if(smixer){sclip.time=dprog*(29/30);smixer.update(0)}
+ // movement
+ let moving=false,want=0;
+ if(S.mode==='walk'){
+  const tp=S.path[S.pi];let dx=tp[0]-S.x,dz=tp[1]-S.z;let d=Math.hypot(dx,dz);
+  const last=S.pi===S.path.length-1;
+  if(d<(last?.06:.25)){if(last){S.speed=0;arrive()}else S.pi++}
+  else{
+   const remain=d+(function(){let s=0;for(let k=S.pi;k<S.path.length-1;k++)s+=Math.hypot(S.path[k+1][0]-S.path[k][0],S.path[k+1][1]-S.path[k][1]);return s})();
+   want=S.run&&remain>1.5?1.7:.55;if(remain<.7)want=Math.min(want,.3+remain*.4);
+   const th=Math.atan2(dx,dz),dh=angDiff(S.h,th);
+   const maxT=(S.run?4.2:5.5)*dt;S.h+=Math.max(-maxT,Math.min(maxT,dh));
+   if(Math.abs(dh)>1.2)want*=.25;
+   S.speed+=(want-S.speed)*Math.min(1,dt*6);
+   S.x+=Math.sin(S.h)*S.speed*dt;S.z+=Math.cos(S.h)*S.speed*dt;moving=true}
+ }else if(S.mode==='turn'){
+  const th=Hs([S.goal.look[0]-S.x,S.goal.look[1]-S.z]),dh=angDiff(S.h,th),m=4.5*dt;S.h+=Math.max(-m,Math.min(m,dh));
+  if(Math.abs(dh)<.05){beginAct()}else if(cur!==gactions.Idle)play('Idle',.2)
+ }else if(S.mode==='act'){
+  S.actT+=dt;const p=S.goal;
+  if(p.act==='sit'){
+   if(S.sitStage===0&&S.actT>1.0){play('SitIdle',.3);S.sitStage=1}
+   if(S.sitStage===1&&S.actT>S.actDur-1.0){playOnce('StandUp');S.sitStage=2}
+   if(S.sitStage===2&&S.actT>S.actDur){play('Idle',.3);nextGoal()}
+  }else if(p.act==='jump'){
+   if(gactions.Jump.time>=gclips.Jump.duration-.05&&S.jumps>1){S.jumps--;playOnce('Jump')}
+   if(S.actT>S.actDur){play('Idle',.3);nextGoal()}
+  }else if(p.act==='wave'){
+   if(S.talk){S.talkT+=dt;const j=gactions.Talk;if(!j.isRunning()&&S.talkT>.3&&S.talkT<1.6){j.reset().setLoop(THREE.LoopOnce,1).play()}}
+   if(S.actT>S.actDur){play('Idle',.3);nextGoal()}
+  }else{if(S.actT>S.actDur)nextGoal()}
+ }
+ if(S.mode==='walk'){const wantClip=S.run&&S.speed>1.0?'Run':'Walk';
+  if(S.speed<.05)play('Idle');else{const a=play(wantClip,.25);const base=wantClip==='Run'?1.7:.55;gactions[wantClip].timeScale=Math.max(.5,S.speed/base)}}
+ // ground + placement
+ const gy=groundY(S.x,S.z);S.y+=(gy-S.y)*Math.min(1,dt*10);
+ girl.position.set(S.x,S.y,S.z);girl.rotation.y=S.h;
+ S.mixer.update(dt);
+ // random blinks
+ S.bt=(S.bt||2)-dt;if(S.bt<0){S.bt=1.5+Math.random()*3.5;S.blinkA.reset().play()}
+ S.moving=moving;
+}
+function nextGoal(){S.mode='wait';S.waitT=.4+Math.random()*1.0}
+function tick(dt){
+ if(S.mode==='wait'&&!S.paused){S.waitT-=dt;if(S.waitT<=0){if(S.forced){S.forced=null}if(S.auto)pickNext();else S.mode='idle'}}
+ step(dt);
+}
+// status + camera
+function statusText(){const p=S.goal?S.goal.name.trim():'-';const m={walk:S.run&&S.speed>1?'running to':'walking to',turn:'arriving at',act:S.goal&&S.goal.act==='sit'?'sitting at':S.goal&&S.goal.act==='wave'?'saying hi at':S.goal&&S.goal.act==='jump'?'jumping in the':'looking around at',wait:'deciding where next',idle:'resting'}[S.mode]||'';return S.mode==='wait'||S.mode==='idle'?m:m+' '+p}
+let camMode='follow',prevT=new THREE.Vector3(),wantDist=5,occ=[];const ray=new THREE.Raycaster();
+controls.addEventListener('end',()=>{if(camMode==='follow')wantDist=cam.position.distanceTo(controls.target)});
+function setCam(m){camMode=m;['cFollow','cOver','cTop'].forEach(id=>$(id).classList.remove('on'));$({follow:'cFollow',over:'cOver',top:'cTop'}[m]).classList.add('on');
+ if(m==='follow'){const t=new THREE.Vector3(S.x,S.y+.5,S.z);cam.position.set(t.x+1.0,t.y+2.6,t.z+3.6);controls.target.copy(t);prevT.copy(t);wantDist=cam.position.distanceTo(t)}
+ if(m==='over'){cam.position.set(0,12,17);controls.target.set(0,1,-1)}
+ if(m==='top'){cam.position.set(0,19,-1.2);controls.target.set(0,0,-1.5)}
+ controls.update()}
+$('cFollow').onclick=()=>setCam('follow');$('cOver').onclick=()=>setCam('over');$('cTop').onclick=()=>setCam('top');
+setCam('over');
+let cut=true;
+$('bRoof').onclick=e=>{cut=!cut;e.target.classList.toggle('on',cut)};
+$('bAuto').onclick=e=>{S.auto=!S.auto;e.target.classList.toggle('on',S.auto)};
+$('bPause').onclick=e=>{S.paused=!S.paused;e.target.classList.toggle('on',S.paused);e.target.textContent=S.paused?'Resume':'Pause'};
+POIS.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.name.trim();b.onclick=()=>{if(!gm)return;S.paused=false;$('bPause').classList.remove('on');$('bPause').textContent='Pause';
+ if(S.mode==='act'&&S.goal.act==='sit'&&S.sitStage<2)return;S.forced=1;play('Idle',.1);goTo(p,Math.hypot(p.pos[0]-S.x,p.pos[1]-S.z)>6)};$('poi').appendChild(b)});
+const clock=new THREE.Clock();
+let forcedDt=0;
+function frame(){requestAnimationFrame(frame);const dt=forcedDt||Math.min(clock.getDelta(),.05);tick(dt);
+ if(school){const hide=cut&&inside(S.x,S.z)&&camMode!=='over'||cut&&inside(S.x,S.z)&&camMode==='over';['Roof','Ceiling'].forEach(n=>{const o=school.getObjectByName(n);if(o)o.visible=!hide})}
+ if(camMode==='follow'&&gm){const t=new THREE.Vector3(S.x,S.y+.5,S.z);const d=t.clone().sub(prevT);cam.position.add(d);controls.target.add(d);prevT.copy(t);
+  if(S.z<1.4&&S.z>-7&&Math.abs(S.x)<10.5){const minY=S.y+4.2;if(cam.position.y<minY)cam.position.y+=(minY-cam.position.y)*Math.min(1,dt*3)}
+  // keep walls from blocking the view: pull the camera in front of anything between her and the lens, ease back out afterwards
+  if(!occ.length&&school)school.traverse(o=>{if(o.isMesh&&/^(Walls|Trim|Windows|Pediment)/.test(o.name))occ.push(o)});
+  const off=cam.position.clone().sub(t),dist=off.length();ray.set(t,off.clone().normalize());ray.far=Math.max(dist,wantDist);
+  const hit=ray.intersectObjects(occ,false)[0];
+  if(hit&&hit.distance<wantDist+.2){const nd=Math.max(1.0,hit.distance-.25);const k=Math.min(1,dt*8);cam.position.copy(t).add(off.normalize().multiplyScalar(dist+(nd-dist)*k))}
+  else if(dist<wantDist)cam.position.copy(t).add(off.normalize().multiplyScalar(Math.min(wantDist,dist+dt*1.8)));
+  else wantDist=dist} $('status').textContent=statusText();
+ controls.update();renderer.render(scene,cam)}
+window.setDt=v=>{forcedDt=v};window.S=S;window.__step=tick;window.__dbg={R,C,blocked,GW,GH,X0,Z0,CS,findPath,POIS,inside};
+load();frame();
+</script>
