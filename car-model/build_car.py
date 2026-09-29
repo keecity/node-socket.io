@@ -120,13 +120,13 @@ LOOP = (NRING - 1) * 2             # 108 rings around the full section
 
 ROOF = Profile([(-2.14, 0.92), (-2.05, 0.98), (-1.85, 0.985), (-1.5, 0.98), (-1.2, 0.99), (-1.0, 1.05),
                 (-0.7, 1.17), (-0.4, 1.255), (-0.1, 1.27), (0.15, 1.22), (0.4, 1.04), (0.62, 0.87),
-                (0.9, 0.83), (1.2, 0.815), (1.6, 0.765), (1.94, 0.67), (2.1, 0.61), (2.16, 0.57)])
+                (0.9, 0.83), (1.2, 0.815), (1.6, 0.75), (1.94, 0.64), (2.1, 0.58), (2.16, 0.54)])
 BELT = Profile([(-2.14, 0.86), (-1.95, 0.92), (-1.5, 0.93), (-1.2, 0.92), (-0.9, 0.88), (-0.3, 0.86),
-                (0.3, 0.855), (0.62, 0.84), (1.0, 0.79), (1.4, 0.76), (1.8, 0.66), (2.05, 0.585), (2.16, 0.53)])
-WIDTH = Profile([(-2.14, 0.84), (-2.05, 0.90), (-1.85, 0.95), (-1.6, 0.975), (-1.285, 1.02), (-0.9, 0.965),
-                 (-0.4, 0.93), (0.4, 0.93), (0.9, 0.965), (1.285, 1.02), (1.6, 0.98), (1.85, 0.95),
+                (0.3, 0.855), (0.62, 0.84), (1.0, 0.79), (1.4, 0.76), (1.8, 0.62), (2.05, 0.55), (2.16, 0.50)])
+WIDTH = Profile([(-2.14, 0.84), (-2.05, 0.90), (-1.85, 0.96), (-1.6, 1.02), (-1.285, 1.08), (-0.9, 0.97),
+                 (-0.4, 0.905), (0.4, 0.905), (0.9, 0.97), (1.285, 1.08), (1.6, 1.03), (1.85, 0.95),
                  (2.05, 0.92), (2.16, 0.86)])
-FLOOR = Profile([(-2.14, 0.26), (-2.0, 0.22), (-1.6, 0.20), (1.6, 0.20), (2.0, 0.22), (2.16, 0.26)])
+FLOOR = Profile([(-2.14, 0.17), (-2.0, 0.13), (-1.6, 0.11), (1.6, 0.11), (2.0, 0.13), (2.16, 0.17)])
 
 
 def station_params(x):
@@ -152,10 +152,10 @@ def half_section(x):
 def taper(x):
     if x > X0_F:
         u = (x - X0_F) / (X_TIP_F - X0_F)
-        return 0.74 + 0.26 * math.sqrt(max(1 - u ** 3, 0))
+        return 0.60 + 0.40 * math.sqrt(max(1 - u ** 2.2, 0))
     if x < X0_R:
         u = (x - X0_R) / (X_TIP_R - X0_R)
-        return 0.74 + 0.26 * math.sqrt(max(1 - u ** 3, 0))
+        return 0.60 + 0.40 * math.sqrt(max(1 - u ** 2.2, 0))
     return 1.0
 
 
@@ -199,6 +199,10 @@ def xmid(i):
 MAT = {}
 
 
+def name_hint(n):
+    return n.startswith('Carbon')
+
+
 def mk_mat(name, color, rough=0.5, metal=0.0, alpha=1.0, emit=None, spec=0.5, carbon=False, coat=0.0):
     m = bpy.data.materials.new(name)
     m.use_nodes = True
@@ -207,6 +211,8 @@ def mk_mat(name, color, rough=0.5, metal=0.0, alpha=1.0, emit=None, spec=0.5, ca
     bsdf.inputs["Base Color"].default_value = (*color, 1)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
+    if "Specular IOR Level" in bsdf.inputs and name_hint(name):
+        bsdf.inputs["Specular IOR Level"].default_value = 0.25
     if "Coat Weight" in bsdf.inputs:
         bsdf.inputs["Coat Weight"].default_value = coat
     if alpha < 1:
@@ -228,8 +234,9 @@ def mk_mat(name, color, rough=0.5, metal=0.0, alpha=1.0, emit=None, spec=0.5, ca
 
 
 def make_materials():
-    mk_mat("Carbon", (0.022, 0.022, 0.026), rough=0.42, coat=0.15, carbon=True)
-    mk_mat("CarbonMatte", (0.035, 0.035, 0.04), rough=0.55, carbon=True)
+    mk_mat("Carbon", (0.012, 0.012, 0.014), rough=0.5, coat=0.0, carbon=True)
+    mk_mat("CarbonMatte", (0.02, 0.02, 0.022), rough=0.6, carbon=True)
+    mk_mat("DecalWhite", (0.9, 0.9, 0.9), rough=0.5)
     mk_mat("Glass", (0.02, 0.03, 0.04), rough=0.05, alpha=0.45, spec=0.9)
     mk_mat("Tire", (0.015, 0.015, 0.015), rough=0.85)
     mk_mat("RimBlack", (0.02, 0.02, 0.022), rough=0.3, metal=0.6)
@@ -331,6 +338,21 @@ class MB:
         faces.append(list(reversed(range(n))))
         faces.append([n + i for i in range(n)])
         s.add(vs, faces, mat, smooth)
+
+    def lathe_arc(s, profile, mat, a0, a1, seg=40, center=(0, 0, 0)):
+        n = len(profile)
+        vs = []
+        for j in range(seg + 1):
+            a = a0 + (a1 - a0) * j / seg
+            for r, y in profile:
+                vs.append(Vector(center) + Vector((r * math.cos(a), y, r * math.sin(a))))
+        faces = []
+        for j in range(seg):
+            for i in range(n):
+                a_ = j * n + i; b = j * n + (i + 1) % n
+                c = (j + 1) * n + (i + 1) % n; d = (j + 1) * n + i
+                faces.append([a_, b, c, d])
+        s.add(vs, faces, mat, True)
 
     def lathe(s, profile, mat, seg=48, center=(0, 0, 0), flip=False):
         """profile [(r, y)] closed loop, revolved about the Y axis"""
@@ -568,11 +590,11 @@ def front_bumper(kind):
         det.box((xf - 0.03, 0, z0 + 0.42 * hh), (0.03, yh * 1.25, hh * 0.42), "Steel")           # intercooler core
         det.box((xf - 0.02, 0, z0 + 0.42 * hh), (0.03, yh * 1.20, hh * 0.36), "DarkMesh")
         plan = [(1.84, -0.96), (2.26, -0.90), (2.42, -0.52), (2.42, 0.52), (2.26, 0.90), (1.84, 0.96)]
-        det.prism_xy(plan, 0.168, 0.186, "Carbon")                                            # splitter
+        det.prism_xy(plan, 0.078, 0.096, "Carbon")                                            # splitter
         for sy in (-1, 1):
             for yy in (0.34, 0.66):
-                det.cyl((2.10, sy * yy, 0.186), (2.10, sy * yy, 0.27), 0.009, "Steel", 8)
-            for j, (yy, zz) in enumerate(((0.88, 0.27), (0.94, 0.33))):                       # dive planes
+                det.cyl((2.10, sy * yy, 0.096), (2.10, sy * yy, 0.18), 0.009, "Steel", 8)
+            for j, (yy, zz) in enumerate(((0.90, 0.19), (0.97, 0.25))):                       # dive planes
                 det.box((2.02, sy * yy, zz), (0.22, 0.13, 0.006), "Carbon", rot=(sy * 0.50, 0, 0))
         det.cyl((xf + 0.004, -yh * 0.66, zc - 0.02), (xf + 0.06, -yh * 0.66, zc - 0.02), 0.014, "Red", 12)
         det.cyl((xf + 0.06, -yh * 0.66, zc - 0.02), (xf + 0.075, -yh * 0.66, zc - 0.02), 0.045, "Red", 20)
@@ -601,11 +623,11 @@ def rear_bumper(kind):
     else:
         det.box((xr - 0.004, 0, z0 + 0.40 * hh), (0.02, yh * 1.35, hh * 0.55), "DarkMesh")
         plan = [(-1.72, -0.84), (-2.30, -0.90), (-2.30, 0.90), (-1.72, 0.84)]
-        det.prism_xy(plan, 0.19, 0.205, "Carbon")                                              # diffuser floor
+        det.prism_xy(plan, 0.10, 0.115, "Carbon")                                              # diffuser floor
         for fy in (-0.66, -0.44, -0.22, 0.0, 0.22, 0.44, 0.66):
-            det.extrude_y([(-1.74, 0.19), (-2.28, 0.19), (-2.28, 0.34), (-2.12, 0.31)], fy, fy + 0.012, "Carbon")
+            det.extrude_y([(-1.74, 0.10), (-2.28, 0.10), (-2.28, 0.25), (-2.12, 0.22)], fy, fy + 0.012, "Carbon")
         for sy in (-1, 1):
-            det.extrude_y([(-1.78, 0.19), (-2.32, 0.19), (-2.32, 0.42), (-2.08, 0.33)], sy * 0.90, sy * 0.90 + 0.012 * sy, "Carbon")
+            det.extrude_y([(-1.78, 0.10), (-2.32, 0.10), (-2.32, 0.33), (-2.08, 0.24)], sy * 0.90, sy * 0.90 + 0.012 * sy, "Carbon")
         det.box((xr - 0.05, 0, z0 - 0.01), (0.12, yh * 1.7, 0.012), "Carbon", rot=(0, 0.25, 0))    # lip
         det.cyl((xr + 0.06, 0.0, z0 + 0.32 * hh), (xr - 0.16, 0.0, z0 + 0.32 * hh), 0.06, "Steel", 24)
         det.cyl((xr - 0.155, 0.0, z0 + 0.32 * hh), (xr - 0.17, 0.0, z0 + 0.32 * hh), 0.045, "DarkMesh", 24)
@@ -620,16 +642,16 @@ def side_skirts(kind):
     for sy in (-1, 1):
         y_out = 1.0
         if kind == "Flat":
-            plan = [(-0.90, sy * 0.70), (-0.90, sy * 1.03), (-0.55, sy * 1.06), (0.55, sy * 1.06), (0.90, sy * 1.03), (0.90, sy * 0.70)]
-            det.prism_xy(plan if sy > 0 else list(reversed(plan)), 0.170, 0.186, "Carbon")
+            plan = [(-0.90, sy * 0.70), (-0.90, sy * 0.99), (-0.55, sy * 1.02), (0.55, sy * 1.02), (0.90, sy * 0.99), (0.90, sy * 0.70)]
+            det.prism_xy(plan if sy > 0 else list(reversed(plan)), 0.085, 0.101, "Carbon")
             for xe in (-0.90, 0.90):     # vertical end fins
-                det.extrude_y([(xe - 0.06, 0.17), (xe + 0.06, 0.17), (xe + 0.02, 0.34), (xe - 0.02, 0.34)],
+                det.extrude_y([(xe - 0.06, 0.085), (xe + 0.06, 0.085), (xe + 0.02, 0.26), (xe - 0.02, 0.26)],
                               sy * 1.03 - (0.006 if sy > 0 else -0.006), sy * 1.03 + (0.006 if sy > 0 else -0.006), "Carbon")
         elif kind == "Wing":
             plan = [(-0.90, sy * 0.70), (-0.90, sy * 1.10), (-0.6, sy * 1.14), (0.6, sy * 1.14), (0.9, sy * 1.10), (0.9, sy * 0.70)]
-            det.prism_xy(plan if sy > 0 else list(reversed(plan)), 0.165, 0.180, "Carbon")
+            det.prism_xy(plan if sy > 0 else list(reversed(plan)), 0.080, 0.095, "Carbon")
             for xs_ in (-0.6, -0.3, 0.0, 0.3, 0.6):    # ground-effect strakes
-                det.extrude_y([(xs_ - 0.09, 0.18), (xs_ + 0.09, 0.18), (xs_ + 0.05, 0.27), (xs_ - 0.05, 0.27)],
+                det.extrude_y([(xs_ - 0.09, 0.095), (xs_ + 0.09, 0.095), (xs_ + 0.05, 0.19), (xs_ - 0.05, 0.19)],
                               sy * 1.12 - (0.005 if sy > 0 else -0.005), sy * 1.12 + (0.005 if sy > 0 else -0.005), "Carbon")
     parts = [shell]
     if det.v:
@@ -642,6 +664,7 @@ def wheel_mb():
     mb = MB()
     tire = [(0.232, -0.108), (0.262, -0.134), (0.312, -0.136), (0.332, -0.104), (0.337, -0.05), (0.337, 0.05),
             (0.332, 0.104), (0.312, 0.136), (0.262, 0.134), (0.232, 0.108)]
+    tire = [(r, y * 1.12) for r, y in tire]
     mb.lathe(tire, "Tire")
     rim = [(0.055, 0.115), (0.11, 0.100), (0.215, 0.045), (0.226, -0.125), (0.205, -0.128), (0.20, 0.025),
            (0.10, 0.075), (0.055, 0.085)]
@@ -660,8 +683,8 @@ def wheel_mb():
 
 def build_wheels(coll):
     objs = []
-    for name, x, y_off, flip in (("FL", WHEELBASE_HALF, 0.850, False), ("FR", WHEELBASE_HALF, -0.850, True),
-                                 ("RL", -WHEELBASE_HALF, 0.860, False), ("RR", -WHEELBASE_HALF, -0.860, True)):
+    for name, x, y_off, flip in (("FL", WHEELBASE_HALF, 0.900, False), ("FR", WHEELBASE_HALF, -0.900, True),
+                                 ("RL", -WHEELBASE_HALF, 0.910, False), ("RR", -WHEELBASE_HALF, -0.910, True)):
         ob = to_object(f"Wheel_{name}", wheel_mb(), coll)
         ob.location = (x, y_off, TIRE_R)
         ob.rotation_euler = (0, 0, 0 if not flip else math.pi)
@@ -704,21 +727,31 @@ def build_body_details(coll):
             d.box((1.02 + 0.065 * j, y, z + 0.026), (0.028, 0.15, 0.006), "DarkMesh", rot=(0, -0.3, 0))
     # headlights / tail lights
     for sy in (-1, 1):
-        d.sphere((1.86, sy * 0.66, 0.665), (0.20, 0.15, 0.035), "LensDark", rot=(0, 0.28, sy * 0.30))
-        d.sphere((1.90, sy * 0.66, 0.672), (0.09, 0.07, 0.038), "Chrome", rot=(0, 0.28, sy * 0.30))
+        d.sphere((1.82, sy * 0.70, 0.665), (0.31, 0.048, 0.026), "LensDark", rot=(0, 0.30, sy * 0.72))
+        d.sphere((1.93, sy * 0.78, 0.655), (0.10, 0.035, 0.028), "DarkMesh", rot=(0, 0.30, sy * 0.72))
         d.sphere((-2.00, sy * 0.68, 0.85), (0.045, 0.22, 0.05), "TailLight", rot=(0, 0, sy * -0.25))
         # mirrors
         d.sphere((0.42, sy * 0.99, 0.96), (0.06, 0.09, 0.045), "Carbon", rot=(0, 0, sy * 0.15))
         d.cyl((0.44, sy * 0.86, 0.90), (0.42, sy * 0.95, 0.955), 0.012, "Carbon", 8)
     # rear wing with swan-neck struts and endplates
-    foil = [(0.15, -0.004), (0.11, 0.03), (0.0, 0.042), (-0.11, 0.022), (-0.15, -0.002), (-0.11, -0.012), (0.0, -0.004), (0.11, -0.006)]
-    d.extrude_y(foil, -0.92, 0.92, "CarbonMatte", origin=(-2.02, 0, 1.31), rot=(0, -0.10, 0))
+    foil = [(0.20, -0.005), (0.15, 0.04), (0.0, 0.058), (-0.15, 0.03), (-0.20, -0.003), (-0.15, -0.016), (0.0, -0.006), (0.15, -0.008)]
+    d.extrude_y(foil, -1.00, 1.00, "CarbonMatte", origin=(-2.02, 0, 1.36), rot=(0, -0.12, 0))
+    d.extrude_y([(0.20, 0.03), (-0.2, 0.0), (-0.2, 0.03)], -1.0, 1.0, "Carbon", origin=(-2.02, 0, 1.40), rot=(0, -0.12, 0))
     flap = [(0.05, 0.0), (-0.06, 0.0), (-0.09, 0.03), (0.0, 0.05)]
     for sy in (-1, 1):
-        d.extrude_y([(-0.17, -0.10), (0.17, -0.10), (0.17, 0.11), (-0.13, 0.08)], sy * 0.92, sy * 0.92 + 0.012 * sy, "Carbon",
-                    origin=(-2.02, 0, 1.31))
-        d.tube([(-1.80, sy * 0.36, 0.97), (-1.88, sy * 0.36, 1.12), (-1.98, sy * 0.36, 1.24), (-2.02, sy * 0.36, 1.285)], 0.011, "Carbon")
-    d.box((-2.02, 0, 1.30), (0.02, 0.02, 0.02), "Carbon")
+        d.extrude_y([(-0.26, -0.16), (0.26, -0.16), (0.26, 0.17), (-0.20, 0.13)], sy * 1.00, sy * 1.00 + 0.014 * sy, "Carbon",
+                    origin=(-2.02, 0, 1.36))
+        d.tube([(-1.80, sy * 0.36, 0.98), (-1.86, sy * 0.36, 1.14), (-1.96, sy * 0.36, 1.28), (-2.02, sy * 0.36, 1.34)], 0.014, "Carbon")
+    # bolt-on widebody flare lips around every arch
+    for cx in (WHEELBASE_HALF, -WHEELBASE_HALF):
+        yy = WIDTH(cx) * 0.985
+        for sy in (-1, 1):
+            d.lathe_arc([(0.405, sy * (yy - 0.05)), (0.455, sy * (yy - 0.05)), (0.455, sy * (yy + 0.012)), (0.405, sy * (yy + 0.012))],
+                        "Carbon", -0.15, math.pi + 0.15, seg=48, center=(cx, 0, 0.335))
+            for j in range(9):     # rivets
+                a = -0.05 + (math.pi + 0.1) * j / 8
+                d.cyl((cx + 0.43 * math.cos(a), sy * (yy + 0.012), 0.335 + 0.43 * math.sin(a)),
+                      (cx + 0.43 * math.cos(a), sy * (yy + 0.02), 0.335 + 0.43 * math.sin(a)), 0.008, "Steel", 8)
     # exposed roll cage tubes (bevelled splines converted to mesh)
     cage = MB()
     def tube(pts): cage.tube(pts, 0.014, "Steel")
@@ -740,9 +773,34 @@ def build_body_details(coll):
     parts = [to_object("Details", d, coll), to_object("Interior", cage, coll)]
     # under-tray
     ut = MB()
-    ut.box((0.0, 0, 0.196), (3.40, 1.30, 0.02), "CarbonMatte")
+    ut.box((0.0, 0, 0.106), (3.40, 1.30, 0.02), "CarbonMatte")
     parts.append(to_object("Undertray", ut, coll))
     return parts
+
+
+def add_banner(coll):
+    """dark windshield-top banner with white lettering (generic text, no real brand)"""
+    th = 0.52                                    # windshield slope
+    R = Euler((0, th, 0)).to_matrix() @ Euler((0, 0, math.pi / 2)).to_matrix()
+    n = R @ Vector((0, 0, 1))
+    c = Vector((0.155, 0, 1.213)) + n * 0.004
+    mb = MB()
+    mb.box(c - n * 0.001, (0.09, 1.02, 0.006), "Interior", rot=(0, th, 0))
+    strip = to_object("BannerStrip", mb, coll)
+    cu = bpy.data.curves.new("BannerText", 'FONT')
+    cu.body = "TRACK RACING"
+    cu.size = 0.062; cu.extrude = 0.0015
+    cu.align_x = 'CENTER'; cu.align_y = 'CENTER'
+    ob = bpy.data.objects.new("BannerText", cu)
+    coll.objects.link(ob)
+    ob.matrix_world = Matrix.Translation(c + n * 0.003) @ R.to_4x4()
+    bpy.context.view_layer.objects.active = ob
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    ob.select_set(True)
+    bpy.ops.object.convert(target='MESH')
+    ob.data.materials.append(MAT["DecalWhite"])
+    return [strip, ob]
 
 
 def build_body(coll):
@@ -832,6 +890,7 @@ def main():
     add_splines(c_spl)
     body = build_body(c_body)
     det = build_body_details(c_body)
+    det += add_banner(c_body)
     wheels = build_wheels(c_wheels)
 
     variants = {"FrontBumper": {}, "RearBumper": {}, "SideSkirts": {}}
@@ -900,11 +959,11 @@ def main():
             render(os.path.join(OUT, f"var_skirt_{ss}.png"), cam, (3.8, -1.6, 0.45), (0.0, 0.0, 0.3), 45, res=(700, 420))
     if "--render" in args:
         show("Race", "Race", "Flat")
-        render(os.path.join(OUT, "preview_front34.png"), cam, (4.6, -5.3, 1.35), (0, -0.2, 0.62), 45)
+        render(os.path.join(OUT, "preview_front34.png"), cam, (3.9, -4.3, 0.85), (0, -0.35, 0.55), 40)
         render(os.path.join(OUT, "preview_rear34.png"), cam, (-4.2, 5.2, 1.5), (0, 0.2, 0.62), 45)
         render(os.path.join(OUT, "preview_side.png"), cam, (7.5, 0.0, 0.7), (0, 0.0, 0.62), 60)
         show("Stock", "Stock", "Stock")
-        render(os.path.join(OUT, "preview_stock34.png"), cam, (4.6, -5.3, 1.35), (0, -0.2, 0.62), 45)
+        render(os.path.join(OUT, "preview_stock34.png"), cam, (3.9, -4.3, 0.85), (0, -0.35, 0.55), 40)
 
 
 if __name__ == "__main__":

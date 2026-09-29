@@ -6,7 +6,7 @@ Original model inspired by a widebody FR-S/86 track car (no real brands or logos
 - `spline_car.blend` – full scene. Collections: `Body`, `Wheels`, `FrontBumpers`, `RearBumpers`, `SideSkirts`, `Construction_Splines` (hidden; editable Bezier curves).
 - `car_default.glb` – assembled car (Race front/rear bumper, Flat skirts). `car_base.glb` – body, wheels, wing and interior with no swap parts.
 - `FrontBumper_{Stock,Race,Street}.glb`, `RearBumper_{Stock,Race}.glb`, `SideSkirts_{Stock,Flat,Wing}.glb` – each shares the car's origin, so drop it in next to `car_base.glb`.
-- `preview_*.png`, `variants_sheet.png` – renders.
+- `preview_*.png` – renders.
 
 ## Swapping parts in Blender
 Toggle the eye icon on one object per collection (`FrontBumpers`, `RearBumpers`, `SideSkirts`). The body has a panel line at every seam, so every variant fits.
