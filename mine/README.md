@@ -2,6 +2,10 @@
 
 A procedural Three.js mine built entirely from separate named parts. Open `/mine/` while `npm start` is running.
 
+The layout replicates `reference.webp`. An orthographic camera was fitted to the reference image (`REFERENCE_VIEW` in `mine.js`), and every structure was placed by projecting points from the image back onto the ground. The viewer opens on that camera. Use the **overlay** slider (or open `/mine/?overlay`) to lay the reference over the render and compare them.
+
+Positions and sizes live in the layout constants at the top of `mine.js` (`PORTAL`, `BIN`, `BELT_TAIL`/`BELT_HEAD`, `HOPPER`, `BUILDING`, `ANNEX`, `HILL_EDGE`, `GROUND_EDGE`, `YARD`), so they're easy to tweak.
+
 ```js
 import { createMine } from './mine.js';
 const mine = createMine({ seed: 1, autoCycle: true, beltSpeed: 1.2 });

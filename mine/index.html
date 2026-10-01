@@ -8,6 +8,7 @@
   :root { --bg:#dcd6cb; --panel:rgba(30,28,24,.88); --fg:#eee6d8; --accent:#c9783a; }
   html,body { margin:0; height:100%; background:var(--bg); font:13px system-ui,sans-serif; overflow:hidden; }
   canvas { display:block; }
+  #ref { position:absolute; top:0; pointer-events:none; opacity:0; }
   #ui { position:absolute; top:12px; left:12px; width:250px; max-height:calc(100% - 24px); overflow:auto;
         background:var(--panel); color:var(--fg); border-radius:8px; padding:12px; box-sizing:border-box; }
   h1 { font-size:15px; margin:0 0 8px; } h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent); margin:14px 0 6px; }
@@ -29,63 +30,89 @@
   <h2>Conveyor</h2>
   <label><input type="checkbox" id="run" checked> running</label>
   <label><span>speed</span><input type="range" id="speed" min="0" max="3" step="0.1" value="1.2"></label>
-  <label><input type="checkbox" id="auto" checked> auto production cycle</label>
+  <label><input type="checkbox" id="auto"> auto production cycle</label>
   <h2>Fill levels</h2>
   <div id="fills"></div>
   <h2>Destroy</h2>
   <div id="destroy"></div>
   <button class="danger" id="all">Demolish all</button> <button id="rebuild">Rebuild</button>
+  <h2>View</h2>
+  <button id="refview">Reference camera</button>
+  <label><span>overlay</span><input type="range" id="refop" min="0" max="1" step="0.05" value="0"></label>
   <h2>Export</h2>
   <button id="export">Download .glb</button>
 </div>
+<img id="ref" src="reference.webp" alt="">
 <div id="hint">Click a part to destroy it · Shift+click destroys its whole section · drag to orbit</div>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { createMine } from './mine.js';
+import { createMine, REFERENCE_VIEW as RV } from './mine.js';
 
+const $ = id => document.getElementById(id);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdcd6cb);
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
-camera.position.set(22, 24, 30);
+// Orthographic camera matching the reference render (see REFERENCE_VIEW in mine.js).
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1, 0);
 controls.enableDamping = true;
-
-scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6a5a40, 1.4));
+function referenceView() {
+  const a = RV.azimuth, e = RV.elevation, s = RV.pxPerMetre, [W, H] = RV.size;
+  const right = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+  const up = new THREE.Vector3(-Math.sin(e) * Math.sin(a), Math.cos(e), -Math.sin(e) * Math.cos(a));
+  const back = new THREE.Vector3(Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a));
+  // world point under the centre of the reference image
+  const centre = right.multiplyScalar((W / 2 - RV.origin[0]) / s).add(up.multiplyScalar((RV.origin[1] - H / 2) / s));
+  controls.target.copy(centre);
+  camera.position.copy(centre).addScaledVector(back, 80);
+  camera.zoom = 1;
+  camera.lookAt(centre);
+  resize();
+}
+scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6a5a40, 1.8));
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
-sun.position.set(-12, 28, 16);
+sun.position.set(-14, 26, 10);
+sun.target.position.set(3, 0, -4);
+scene.add(sun.target);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 1, far: 80 });
+Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 80 });
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 
 const mine = createMine();
 scene.add(mine.root);
-mine.setFill('bin_0', 0.8, { instant: true });
-mine.setFill('bin_1', 0.6, { instant: true });
-mine.setFill('bin_2', 0.35, { instant: true });
-mine.setFill('hopper', 0.5, { instant: true });
+mine.setFill('bin_0', 1, { instant: true });
+mine.setFill('bin_1', 1, { instant: true });
+mine.setFill('bin_2', 1, { instant: true });
+mine.setFill('hopper', 1, { instant: true });
+mine.setAutoCycle(false);
 
 function resize() {
-  const a = innerWidth / innerHeight, s = 15;
-  Object.assign(camera, { left: -s * a, right: s * a, top: s, bottom: -s });
+  // keep the reference scale: the window height shows as much as the reference image height
+  const halfH = RV.size[1] / 2 / RV.pxPerMetre, a = innerWidth / innerHeight;
+  Object.assign(camera, { left: -halfH * a, right: halfH * a, top: halfH, bottom: -halfH });
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  const ref = $('ref');
+  const k = innerHeight / RV.size[1];
+  ref.style.width = RV.size[0] * k + 'px';
+  ref.style.height = innerHeight + 'px';
+  ref.style.left = (innerWidth - RV.size[0] * k) / 2 + 'px';
 }
-addEventListener('resize', resize); resize();
+addEventListener('resize', resize);
+referenceView();
 
 // ---- UI
-const $ = id => document.getElementById(id);
 $('run').onchange = e => mine.setConveyor({ running: e.target.checked });
 $('speed').oninput = e => mine.setConveyor({ speed: +e.target.value });
 $('auto').onchange = e => mine.setAutoCycle(e.target.checked);
@@ -104,6 +131,9 @@ for (const name of mine.sections) {
   b.onclick = () => mine.destroy(name);
   $('destroy').appendChild(b);
 }
+$('refview').onclick = referenceView;
+$('refop').oninput = e => $('ref').style.opacity = e.target.value;
+if (new URLSearchParams(location.search).has('overlay')) { $('ref').style.opacity = 0.5; $('refop').value = 0.5; }
 $('all').onclick = () => mine.destroyAll();
 $('rebuild').onclick = () => mine.rebuild();
 $('export').onclick = () => {
