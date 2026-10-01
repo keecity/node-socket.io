@@ -37,6 +37,7 @@
   <div id="destroy"></div>
   <button class="danger" id="all">Demolish all</button> <button id="rebuild">Rebuild</button>
   <h2>View</h2>
+  <label><input type="checkbox" id="terrain" checked> preview terrain</label>
   <button id="refview">Reference camera</button>
   <label><span>overlay</span><input type="range" id="refop" min="0" max="1" step="0.05" value="0"></label>
   <h2>Export</h2>
@@ -48,7 +49,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { createMine, REFERENCE_VIEW as RV } from './mine.js';
+import { createMine, REFERENCE_VIEW as RV, portalToWorld } from './mine.js';
 
 const $ = id => document.getElementById(id);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -91,6 +92,31 @@ scene.add(sun);
 
 const mine = createMine();
 scene.add(mine.root);
+
+// Viewer-only preview terrain (not part of the asset): flat ground + a mound the tunnel runs into.
+const preview = new THREE.Group();
+{
+  const g = new THREE.CircleGeometry(40, 64);
+  g.rotateX(-Math.PI / 2);
+  const ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x6c5d40, roughness: 1 }));
+  ground.receiveShadow = true;
+  preview.add(ground);
+  const hg = new THREE.IcosahedronGeometry(1, 5), p = hg.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const n = Math.sin(v.x * 7.1) * Math.sin(v.z * 6.3 + v.y * 3) * 0.05 + Math.sin(v.x * 17 + v.z * 13) * 0.02;
+    v.multiplyScalar(1 + n);
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  hg.computeVertexNormals();
+  const hill = new THREE.Mesh(hg, new THREE.MeshStandardMaterial({ color: 0x6a5d44, roughness: 1, flatShading: true }));
+  const [hx, hz] = portalToWorld(0, -15.5);
+  hill.position.set(hx, -0.5, hz);
+  hill.scale.set(10, 9, 10);
+  hill.castShadow = hill.receiveShadow = true;
+  preview.add(hill);
+}
+scene.add(preview);
 mine.setFill('bin_0', 1, { instant: true });
 mine.setFill('bin_1', 1, { instant: true });
 mine.setFill('bin_2', 1, { instant: true });
@@ -132,11 +158,13 @@ for (const name of mine.sections) {
   $('destroy').appendChild(b);
 }
 $('refview').onclick = referenceView;
+$('terrain').onchange = e => preview.visible = e.target.checked;
 $('refop').oninput = e => $('ref').style.opacity = e.target.value;
 if (new URLSearchParams(location.search).has('overlay')) { $('ref').style.opacity = 0.5; $('refop').value = 0.5; }
 $('all').onclick = () => mine.destroyAll();
 $('rebuild').onclick = () => mine.rebuild();
-$('export').onclick = () => {
+$('export').onclick = async () => {
+  await mine.ready;
   mine.rebuild();
   new GLTFExporter().parse(mine.root, glb => {
     const a = document.createElement('a');
@@ -160,6 +188,7 @@ renderer.domElement.addEventListener('pointerup', e => {
   }
 });
 
+window.__view = { camera, controls, mine, preview };
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   mine.update(clock.getDelta());

@@ -1,9 +1,13 @@
-// Procedural iron-ore mine for an RTS. Every piece is a separate named mesh so it can be
-// destroyed, every ore rock is its own mesh, the conveyor belt scrolls and carries ore,
-// and the bins/hopper can be filled or emptied with an animation.
+// Iron-ore mine for an RTS.
+// Every piece is a separate named mesh so it can be destroyed; every ore rock is its own mesh;
+// the belt scrolls and carries ore; the bins and hopper fill/empty with an animation.
+// Surfaces are textured from the supplied material atlas (atlas.webp); hard-surface parts are
+// chamfered solids. No terrain is included: footings, walls and the tunnel lining continue
+// below y = 0 and back into the hill so the asset sinks into the game terrain when placed.
 import * as THREE from 'three';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 
-// ---------------------------------------------------------------- noise / random
+// ---------------------------------------------------------------- math / random
 const fade = t => t * t * (3 - 2 * t);
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -30,146 +34,166 @@ function rng(seed) {
   let s = (seed >>> 0) || 1;
   return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
 }
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 
-// ---------------------------------------------------------------- textures (match the reference atlas)
-function makeTex(size, pixel, post) {
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(size, size);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const p = pixel(x, y), i = (y * size + x) * 4;
-    img.data[i] = p[0]; img.data[i + 1] = p[1]; img.data[i + 2] = p[2]; img.data[i + 3] = 255;
+// ---------------------------------------------------------------- material atlas
+// rect: [u, v, w, h] as fractions of the atlas image; size: metres covered by one tile [u, v].
+export const ATLAS_TILES = {
+  concrete:       { rect: [0.00, 0.00, 0.50, 0.25], size: [3.2, 1.6] },  // stained cast concrete with joints
+  corrugated:     { rect: [0.50, 0.00, 0.50, 0.25], size: [3.0, 1.5] },  // green corrugated sheet
+  greenPanel:     { rect: [0.00, 0.25, 0.25, 0.25], size: [1.6, 1.6] },  // riveted green plate, rust straps
+  corrugatedFine: { rect: [0.25, 0.25, 0.25, 0.25], size: [1.2, 1.2] },  // fine-rib green sheet
+  darkSteel:      { rect: [0.50, 0.25, 0.25, 0.25], size: [1.4, 1.4] },  // scratched dark steel
+  rustFrame:      { rect: [0.75, 0.25, 0.25, 0.25], size: [1.2, 1.2] },  // rusted bolted steel
+  rock:           { rect: [0.00, 0.50, 0.50, 0.25], size: [3.0, 1.5] },  // grey rock
+  ore:            { rect: [0.50, 0.50, 0.50, 0.25], size: [1.4, 0.7] },  // iron ore
+  galvanized:     { rect: [0.00, 0.75, 0.25, 0.25], size: [1.5, 1.5] },  // spangled galvanised sheet
+  grid:           { rect: [0.25, 0.75, 0.25, 0.25], size: [1.0, 1.0] },  // dark glazing / grid panel
+  plate:          { rect: [0.50, 0.75, 0.25, 0.25], size: [1.5, 1.5] },  // framed steel plate
+  concretePanel:  { rect: [0.75, 0.75, 0.25, 0.25], size: [2.2, 2.2] },  // precast concrete panel
+};
+
+function loadAtlas(url) {
+  const textures = {};
+  for (const key of Object.keys(ATLAS_TILES)) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 4;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#8a8478'; ctx.fillRect(0, 0, 4, 4);
+    const t = new THREE.CanvasTexture(c);
+    // the tiles are not authored to repeat seamlessly; mirrored repeats hide the seams
+    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    textures[key] = t;
   }
-  ctx.putImageData(img, 0, 0);
-  if (post) post(ctx, size, rng(size * 7 + 1));
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-function rustStreaks(ctx, S, r, n, alpha = 0.45) {
-  for (let i = 0; i < n; i++) {
-    const x = r() * S, y0 = r() * S, len = 20 + r() * S * 0.5, w = 1 + r() * 4;
-    const g = ctx.createLinearGradient(0, y0, 0, y0 + len);
-    g.addColorStop(0, `rgba(125,65,25,${alpha})`);
-    g.addColorStop(1, 'rgba(125,65,25,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y0, w, len);
-  }
-}
-function buildTextures() {
-  const T = {};
-  T.concrete = makeTex(256, (x, y) => {
-    const k = 0.8 + 0.32 * fbm(x / 22, y / 22, 1) + 0.08 * (hash3(x, y, 9) - 0.5);
-    return [186 * k, 174 * k, 152 * k];
-  }, (ctx, S, r) => {
-    ctx.strokeStyle = 'rgba(70,60,50,.6)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, 1); ctx.lineTo(S, 1); ctx.moveTo(1, 0); ctx.lineTo(1, S);
-    ctx.moveTo(0, S / 2); ctx.lineTo(S, S / 2); ctx.stroke();
-    rustStreaks(ctx, S, r, 14, 0.35);
-    ctx.fillStyle = 'rgba(60,50,40,.5)';
-    for (let i = 0; i < 40; i++) ctx.fillRect(r() * S, r() * S, 2, 2);
+  const ready = new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const W = img.naturalWidth, H = img.naturalHeight, inset = Math.round(W * 0.006);
+      for (const [key, { rect: [u, v, w, h] }] of Object.entries(ATLAS_TILES)) {
+        const sx = u * W + inset, sy = v * H + inset, sw = w * W - inset * 2, sh = h * H - inset * 2;
+        const c = textures[key].image;
+        c.width = Math.round(sw); c.height = Math.round(sh);
+        c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+        textures[key].dispose();
+        textures[key].needsUpdate = true;
+      }
+      resolve(textures);
+    };
+    img.onerror = reject;
+    img.src = url;
   });
-  T.corrugated = makeTex(256, (x, y) => {
-    const sh = 0.78 + 0.25 * Math.cos(((x % 16) / 16) * Math.PI * 2);
-    const n = 0.9 + 0.2 * fbm(x / 30, y / 30, 2, 3);
-    return [104 * sh * n, 118 * sh * n, 84 * sh * n];
-  }, (ctx, S, r) => rustStreaks(ctx, S, r, 30, 0.5));
-  T.panel = makeTex(256, (x, y) => {
-    const k = 0.85 + 0.25 * fbm(x / 25, y / 25, 3, 4);
-    return [96 * k, 110 * k, 70 * k];
-  }, (ctx, S, r) => {
-    ctx.fillStyle = 'rgba(110,58,28,.85)';
-    ctx.fillRect(0, 0, S, 8); ctx.fillRect(0, 0, 8, S); ctx.fillRect(0, S / 2 - 4, S, 8);
-    ctx.fillStyle = 'rgba(90,50,25,1)';
-    for (let i = 8; i < S; i += 32) { ctx.beginPath(); ctx.arc(4, i, 3, 0, 7); ctx.arc(i, 4, 3, 0, 7); ctx.fill(); }
-    rustStreaks(ctx, S, r, 10, 0.4);
-  });
-  T.rust = makeTex(256, (x, y) => {
-    const n = fbm(x / 18, y / 18, 3, 4), m = fbm(x / 40, y / 40, 5, 3);
-    const b = m > 0.55 ? [150, 78, 38] : m < 0.4 ? [70, 45, 32] : [100, 56, 34];
-    const k = 0.75 + 0.5 * n;
-    return [b[0] * k, b[1] * k, b[2] * k];
-  });
-  T.steel = makeTex(256, (x, y) => {
-    const k = 0.8 + 0.35 * fbm(x / 20, y / 20, 4, 4);
-    return [58 * k, 61 * k, 64 * k];
-  }, (ctx, S, r) => {
-    ctx.strokeStyle = 'rgba(160,160,160,.18)'; ctx.lineWidth = 1;
-    for (let i = 0; i < 40; i++) { const x = r() * S, y = r() * S; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (r() - .5) * 60, y + (r() - .5) * 60); ctx.stroke(); }
-    ctx.fillStyle = 'rgba(120,60,25,.35)';
-    for (let i = 0; i < 25; i++) ctx.fillRect(r() * S, r() * S, 3 + r() * 6, 2 + r() * 5);
-  });
-  T.rock = makeTex(256, (x, y) => {
-    const k = 0.55 + 0.75 * fbm(x / 14, y / 14, 4, 5);
-    return [140 * k, 132 * k, 118 * k];
-  });
-  T.ore = makeTex(256, (x, y) => {
-    const n = fbm(x / 12, y / 12, 6, 5), m = fbm(x / 30, y / 30, 7, 3);
-    const b = m > 0.58 ? [150, 88, 58] : m < 0.42 ? [55, 35, 28] : [112, 58, 40];
-    const k = 0.6 + 0.7 * n + (hash3(x, y, 3) > 0.985 ? 0.6 : 0);
-    return [b[0] * k, b[1] * k, b[2] * k];
-  });
-  T.ground = makeTex(256, (x, y) => {
-    let k = 0.72 + 0.4 * fbm(x / 20, y / 20, 8, 4);
-    if (hash3(x >> 1, y >> 1, 4) > 0.97) k *= 0.6;
-    return [255 * k, 250 * k, 240 * k];
-  });
-  T.paving = makeTex(256, (x, y) => {
-    const k = 0.78 + 0.3 * fbm(x / 18, y / 18, 13, 4) + 0.06 * (hash3(x >> 6, y >> 5, 14) - 0.5);
-    return [150 * k, 132 * k, 102 * k];
-  }, (ctx, S, r) => {
-    ctx.strokeStyle = 'rgba(60,48,32,.75)'; ctx.lineWidth = 3;
-    for (let y = 0; y <= S; y += S / 8) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(S, y); ctx.stroke(); }
-    for (let row = 0; row < 8; row++) for (let x = (row % 2) * S / 8; x <= S; x += S / 4) {
-      ctx.beginPath(); ctx.moveTo(x, row * S / 8); ctx.lineTo(x, (row + 1) * S / 8); ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(95,80,50,.35)';
-    for (let i = 0; i < 60; i++) ctx.fillRect(r() * S, r() * S, 2 + r() * 10, 2 + r() * 6);
-  });
-  T.grate = makeTex(128, (x, y) => {
-    const k = 0.75 + 0.3 * fbm(x / 10, y / 10, 15, 3);
-    return [150 * k, 140 * k, 120 * k];
-  }, (ctx, S) => {
-    ctx.fillStyle = 'rgba(55,48,40,.85)';
-    for (let x = 8; x < S - 8; x += 10) ctx.fillRect(x, 10, 4, S - 20);
-    ctx.strokeStyle = 'rgba(55,48,40,.9)'; ctx.lineWidth = 3; ctx.strokeRect(5, 5, S - 10, S - 10);
-  });
-  return T;
-}
-function makeBeltTexture() {
-  return makeTex(128, (x, y) => {
-    const k = 0.85 + 0.3 * hash3(x, y, 2);
-    return [34 * k, 34 * k, 35 * k];
-  }, (ctx, S) => { ctx.fillStyle = 'rgba(78,78,80,1)'; for (let x = 0; x < S; x += 32) ctx.fillRect(x, 0, 6, S); });
+  return { textures, ready };
 }
 
 // ---------------------------------------------------------------- geometry helpers
-function shadowed(m) { m.castShadow = true; m.receiveShadow = true; return m; }
-// Box with world-scaled UVs (texture tile = ts metres) so textures don't stretch.
-function box(w, h, d, mat, ts = 2) {
-  const g = new THREE.BoxGeometry(w, h, d);
-  const uv = g.attributes.uv;
-  const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
-  for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) {
-    const i = f * 4 + k;
-    uv.setXY(i, uv.getX(i) * dims[f][0] / ts, uv.getY(i) * dims[f][1] / ts);
+const _e1 = V(), _e2 = V(), _p0 = V();
+// Per-triangle box projection in metres (tile size from the material): no stretching on any shape.
+function projectUV(geo, size) {
+  if (geo.index) geo = geo.toNonIndexed();
+  const p = geo.attributes.position, uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i += 3) {
+    _p0.fromBufferAttribute(p, i);
+    _e1.fromBufferAttribute(p, i + 1).sub(_p0);
+    _e2.fromBufferAttribute(p, i + 2).sub(_p0);
+    _e1.cross(_e2);
+    const ax = Math.abs(_e1.x), ay = Math.abs(_e1.y), az = Math.abs(_e1.z);
+    for (let k = 0; k < 3; k++) {
+      const x = p.getX(i + k), y = p.getY(i + k), z = p.getZ(i + k);
+      let u, v;
+      if (ax >= ay && ax >= az) { u = z; v = y; } else if (ay >= az) { u = x; v = z; } else { u = x; v = y; }
+      uv[(i + k) * 2] = u / size[0];
+      uv[(i + k) * 2 + 1] = v / size[1];
+    }
   }
-  return shadowed(new THREE.Mesh(g, mat));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
 }
-// Box spanning two points in the XY plane (used for the portal's steel frame).
-function beamXY(x1, y1, x2, y2, thick, depth, mat) {
-  const len = Math.hypot(x2 - x1, y2 - y1);
-  const m = box(len + thick, thick, depth, mat, 1.5);
-  m.position.set((x1 + x2) / 2, (y1 + y2) / 2, 0);
-  m.rotation.z = Math.atan2(y2 - y1, x2 - x1);
-  return m;
+// Inset a convex polygon by c (either winding).
+function offsetConvex(pts, c) {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) { const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length]; area += x1 * y2 - x2 * y1; }
+  const P = area < 0 ? pts.slice().reverse() : pts.slice();
+  const n = P.length, lines = [];
+  for (let i = 0; i < n; i++) {
+    const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % n], dx = x2 - x1, dy = y2 - y1, l = Math.hypot(dx, dy);
+    lines.push([x1 - dy / l * c, y1 + dx / l * c, dx, dy]);
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const [ax, ay, adx, ady] = lines[(i - 1 + n) % n], [bx, by, bdx, bdy] = lines[i];
+    const cr = adx * bdy - ady * bdx;
+    const t = Math.abs(cr) < 1e-9 ? 0 : ((bx - ax) * bdy - (by - ay) * bdx) / cr;
+    out.push([ax + t * adx, ay + t * ady]);
+  }
+  return out;
+}
+// Convex 2D profile (XY) extruded along +Z by depth, every edge chamfered by c.
+function chamferPrismGeo(profile, depth, c) {
+  const inner = offsetConvex(profile, c), pts = [];
+  for (const [x, y] of inner) pts.push(V(x, y, 0), V(x, y, depth));
+  for (const [x, y] of profile) pts.push(V(x, y, c), V(x, y, depth - c));
+  return new ConvexGeometry(pts);
+}
+function chamferBoxGeo(w, h, d, c) {
+  c = Math.min(c, w * 0.3, h * 0.3, d * 0.3);
+  const g = chamferPrismGeo([[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]], d, c);
+  g.translate(0, 0, -d / 2);
+  return g;
+}
+// I-section along +Z (web along Y), with bevelled ends and edges.
+function iBeamGeo(len, w, h) {
+  const tf = h * 0.13, tw = Math.max(0.012, w * 0.16);
+  const s = new THREE.Shape([
+    [-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, -h / 2 + tf], [tw / 2, -h / 2 + tf], [tw / 2, h / 2 - tf], [w / 2, h / 2 - tf],
+    [w / 2, h / 2], [-w / 2, h / 2], [-w / 2, h / 2 - tf], [-tw / 2, h / 2 - tf], [-tw / 2, -h / 2 + tf], [-w / 2, -h / 2 + tf],
+  ].map(([x, y]) => new THREE.Vector2(x, y)));
+  const b = Math.min(0.006, tf * 0.3);
+  const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.01, len - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b * 0.6, bevelSegments: 1 });
+  g.translate(0, 0, b);
+  return g;
+}
+// C-channel along +Z, open toward +X.
+function channelGeo(len, h, f) {
+  const t = Math.max(0.012, h * 0.06);
+  const s = new THREE.Shape([[0, -h / 2], [f, -h / 2], [f, -h / 2 + t], [t, -h / 2 + t], [t, h / 2 - t], [f, h / 2 - t], [f, h / 2], [0, h / 2]].map(([x, y]) => new THREE.Vector2(x, y)));
+  return new THREE.ExtrudeGeometry(s, { depth: len, bevelEnabled: false });
+}
+// Corrugated sheet in the XZ plane; the wave runs along X so the ribs run along Z.
+function corrugatedGeo(len, width, pitch, amp, tile) {
+  const g = new THREE.PlaneGeometry(len, width, Math.ceil(len / pitch * 8), 1);
+  g.rotateX(-Math.PI / 2);
+  const p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    p.setY(i, amp * Math.sin((x / pitch) * Math.PI * 2));
+    uv.setXY(i, (x + len / 2) / tile[0], (z + width / 2) / tile[1]);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+// Grey vertex colours from a function of position (tunnel interior falloff).
+function shadeGeo(geo, f) {
+  const p = geo.attributes.position, col = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) { const k = f(p.getX(i), p.getY(i), p.getZ(i)); col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k; }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+// Orient an object whose local +Z is its length axis from a to b; `up` picks the roll.
+function orientAlong(obj, a, b, up = V(0, 1, 0)) {
+  const dir = b.clone().sub(a).normalize();
+  let u = up.clone();
+  if (Math.abs(u.dot(dir)) > 0.95) u = Math.abs(dir.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0);
+  const x = V().crossVectors(u, dir).normalize(), y = V().crossVectors(dir, x);
+  obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, dir));
+  obj.position.copy(a);
+  return obj;
 }
 function rockGeometry(seed, detail = 1) {
   const g = new THREE.IcosahedronGeometry(1, detail);
-  const p = g.attributes.position, v = new THREE.Vector3(), off = seed * 17.3;
+  const p = g.attributes.position, v = V(), off = seed * 17.3;
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
     v.multiplyScalar(0.7 + 0.6 * fbm(v.x * 1.2 + off, v.y * 1.2, v.z * 1.2, 3));
@@ -180,106 +204,32 @@ function rockGeometry(seed, detail = 1) {
   return g;
 }
 
-// Extruded prism from a 2D outline; UVs scaled to `ts` metres per texture tile.
-function prism(points, depth, mat, ts = 2) {
-  const g = new THREE.ExtrudeGeometry(new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y))), { depth, bevelEnabled: false });
-  const uv = g.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / ts, uv.getY(i) / ts);
-  return shadowed(new THREE.Mesh(g, mat));
-}
-// Box stretched between two world points (used for legs, braces, chutes).
-function beam(a, b, w, h, mat, ts = 1) {
-  const len = a.distanceTo(b);
-  const m = box(w, h, len, mat, ts);
-  m.position.copy(a).add(b).multiplyScalar(0.5);
-  m.lookAt(b);
-  return m;
-}
-
 // ---------------------------------------------------------------- layout
-// Metres. Matched to the reference render with a fitted orthographic camera (REFERENCE_VIEW).
-// +X runs down-right on screen along the bin row, +Z runs down-left toward the viewer.
+// Metres, matched to the reference render with a fitted orthographic camera (REFERENCE_VIEW).
+// +X runs down-right on screen along the bin row, +Z runs down-left toward the viewer. Ground is y = 0.
 export const REFERENCE_VIEW = { azimuth: 0.6023, elevation: 0.4456, pxPerMetre: 58.0176, origin: [470.05, 616.31], size: [1536, 1024] };
-
-const PORTAL = { x: -1.225, z: -6.04, rot: 1.133 };       // tunnel portal centre (face) and yaw
-const PT = [Math.cos(PORTAL.rot), -Math.sin(PORTAL.rot)];  // portal local +X in world xz
-const PN = [Math.sin(PORTAL.rot), Math.cos(PORTAL.rot)];   // portal local +Z (face normal)
-const toPortal = (x, z) => { const dx = x - PORTAL.x, dz = z - PORTAL.z; return [dx * PT[0] + dz * PT[1], dx * PN[0] + dz * PN[1]]; };
-
+export const PORTAL = { x: -1.225, z: -6.04, rot: 1.133 };   // tunnel portal (face centre) and yaw
+// portal-local (x along the face, z out of the face) → world xz
+export const portalToWorld = (lx, lz) => [
+  PORTAL.x + Math.cos(PORTAL.rot) * lx + Math.sin(PORTAL.rot) * lz,
+  PORTAL.z - Math.sin(PORTAL.rot) * lx + Math.cos(PORTAL.rot) * lz,
+];
 const BIN = { x0: 0, w: 4.2, d: 4.85, wall: 1.45, t: 0.45 };
-const BELT_TAIL = new THREE.Vector3(-1.58, 1.2, -7.64);
-const BELT_HEAD = new THREE.Vector3(8.95, 4.05, -3.0);
+const BELT_TAIL = V(-1.58, 1.2, -7.64);
+const BELT_HEAD = V(8.95, 4.05, -3.0);
 const HOPPER = { x: 9.95, z: -2.9, size: 2.7, top: 3.8, boxH: 1.45 };
-const BUILDING = { x0: 6.7, x1: 12.5, z0: -11.6, z1: -6.9, plinth: 0.4, eave: 3.3, ridge: 4.6, yaw: -0.15 };
+const BUILDING = { x0: 6.7, x1: 12.5, z0: -11.6, z1: -6.9, plinth: 0.45, eave: 3.3, ridge: 4.6, yaw: -0.15 };
 const ANNEX = { x0: 9.6, x1: 12.3, z0: -6.9, z1: -4.4, h: 2.8 };
-
-// Foot of the hill, ordered left-front → right-back (hill lies on the back side).
-const HILL_EDGE = [[-40, 12], [-15, 5.5], [-11, 4.3], [-6.5, 3.1], [-4.4, 0.6], [-3.3, -1.6], [-2.75, -2.9], [-1.0, -6.4], [0.4, -9.2], [3.0, -10.9], [5.2, -12.3], [9, -13.1], [14, -14.3], [20, -16], [45, -24]];
-// Outline of the ground tile.
-const GROUND_EDGE = [[-9.7, -0.7], [-7, 2.1], [-3.6, 4.3], [-2.0, 5.8], [1.4, 7.5], [5.7, 9.8], [9.6, 10.1], [13.4, 9.4], [15.7, 6.7], [16.9, 3.6], [17.3, -0.1], [17.2, -3.9], [16.3, -7.6], [13.6, -12.1], [11.5, -14.6], [7, -21], [-2, -23], [-11, -19], [-15.5, -10], [-13.5, -3.6]];
-// Paved yard between the portal, conveyor, hopper and bins.
-const YARD = [[-2.6, -2.4], [-1.6, -5.0], [-0.3, -8.4], [1.5, -9.4], [4.6, -8.6], [8.2, -6.0], [8.6, -1.3], [5.5, -0.6], [0.5, -0.5], [-1.8, -0.9]];
-
-function polyDist(poly, x, z) { // signed: >0 on the back (left-hand) side of the polyline
-  let best = 1e9, sgn = 1;
-  for (let i = 0; i < poly.length - 1; i++) {
-    const [ax, az] = poly[i], [bx, bz] = poly[i + 1], vx = bx - ax, vz = bz - az;
-    const t = clamp(((x - ax) * vx + (z - az) * vz) / (vx * vx + vz * vz), 0, 1);
-    const d = Math.hypot(x - ax - vx * t, z - az - vz * t);
-    if (d < best) { best = d; sgn = vx * (z - az) - vz * (x - ax) < 0 ? 1 : -1; }
-  }
-  return best * sgn;
-}
-function inPoly(poly, x, z) {
-  let c = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, zi] = poly[i], [xj, zj] = poly[j];
-    if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c;
-  }
-  return c;
-}
-function edgeDistClosed(poly, x, z) {
-  let best = 1e9;
-  for (let i = 0; i < poly.length; i++) {
-    const [ax, az] = poly[i], [bx, bz] = poly[(i + 1) % poly.length], vx = bx - ax, vz = bz - az;
-    const t = clamp(((x - ax) * vx + (z - az) * vz) / (vx * vx + vz * vz), 0, 1);
-    best = Math.min(best, Math.hypot(x - ax - vx * t, z - az - vz * t));
-  }
-  return inPoly(poly, x, z) ? best : -best;
-}
-
-export function heightAt(x, z) {
-  let h = 0.05 * (fbm(x * 0.6, z * 0.6, 3, 3) - 0.5);
-  const d = polyDist(HILL_EDGE, x, z) + 0.6 * (noise3(x * 0.5, z * 0.5, 41) - 0.5);
-  if (d > 0) {
-    // mound fitted to the reference silhouette, cut by the hill foot line, with ribs and gullies
-    const ramp = 1 - Math.exp(-d / 2.2);
-    const u = ((x - 1.125) / 12.55) ** 2 + ((z + 7.04) / 13.56) ** 2;
-    const [plx, plz] = toPortal(x, z);
-    const H = 16.5 * Math.max(0, 1 - u) ** 1.078 + 4 * Math.exp(-(plx * plx / 18 + (plz + 5) ** 2 / 10));
-    const gully = Math.abs(noise3(x * 0.3 + z * 0.12, z * 0.3, 31) - 0.5) * 2;
-    const rough = fbm(x * 0.9, z * 0.9, 33, 3) - 0.5;
-    const rim = smoothstep(0.3, 7, edgeDistClosed(GROUND_EDGE, x, z)) ** 0.8;
-    h += Math.max(0, H * ramp * (0.9 + 0.25 * (gully - 0.5)) + 0.5 * rough * ramp) * rim;
-  }
-  // the ground tile rolls off at its rim
-  h -= 0.35 * smoothstep(0.8, -0.2, edgeDistClosed(GROUND_EDGE, x, z));
-  // tunnel: clear the mouth, flatten the hill onto the lining roof over the bore
-  const [lx, lz] = toPortal(x, z);
-  if (Math.abs(lx) < 4.6 && lz < 3 && lz > -7) {
-    const k = smoothstep(3.7, 4.5, Math.abs(lx));
-    if (lz > -1.5) h *= k;
-    else h = lerp(Math.max(h, 5.3), h, Math.max(k, smoothstep(-5.9, -6.9, lz))); // keep the hill over the lining roof
-  }
-  return h;
-}
+const SINK = 0.6; // foundations and walls continue this far below y = 0
 
 // ---------------------------------------------------------------- main factory
 /**
  * createMine(options) → controller
+ *   options: { atlasUrl, tunnelLength = 12, beltSpeed, autoCycle, seed, groundHeight(x, z) }
  *   root                 THREE.Group to add to your scene
+ *   ready                Promise resolved once the atlas textures are in
  *   parts                { name: Object3D } every destroyable part (+ section groups)
- *   sections             section names: 'portal', 'conveyor', 'hopper', 'building', 'bin_0'...
+ *   sections             'portal', 'tunnel', 'conveyor', 'hopper', 'building', 'bin_0', 'bin_1', 'bin_2'
  *   update(dt)           call every frame
  *   setConveyor({running, speed})
  *   setFill(name, 0..1, {instant, rate}) / getFill(name)   name: 'bin_0'|'bin_1'|'bin_2'|'hopper'
@@ -288,225 +238,297 @@ export function heightAt(x, z) {
  *   partOf(object3D)     -> { part, section } for raycast picking
  */
 export function createMine(options = {}) {
-  const opts = Object.assign({ autoCycle: true, beltSpeed: 1.0, seed: 1 }, options);
+  const opts = Object.assign({
+    atlasUrl: new URL('./atlas.webp', import.meta.url).href,
+    tunnelLength: 12, beltSpeed: 1.0, autoCycle: true, seed: 1, groundHeight: () => 0,
+  }, options);
   const r = rng(opts.seed * 9973);
-  const T = buildTextures();
-  const beltTex = makeBeltTexture();
-  const std = (map, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ map, roughness: 0.9, metalness: 0.05 }, o));
+  const atlas = loadAtlas(opts.atlasUrl);
+  const T = atlas.textures;
+
+  const mat = (key, o = {}) => {
+    const m = new THREE.MeshStandardMaterial(Object.assign({ map: T[key], roughness: 0.85, metalness: 0.05 }, o));
+    m.userData.tile = ATLAS_TILES[key].size;
+    return m;
+  };
   const M = {
-    concrete: std(T.concrete),
-    roofGreen: std(T.corrugated, { roughness: 0.7, metalness: 0.2 }),
-    roofGreen2: std(T.corrugated, { roughness: 0.7, metalness: 0.2, side: THREE.DoubleSide }),
-    panel: std(T.panel, { roughness: 0.75, metalness: 0.2 }),
-    panel2: std(T.panel, { roughness: 0.75, metalness: 0.2, side: THREE.DoubleSide }),
-    rust: std(T.rust, { roughness: 0.85, metalness: 0.2 }),
-    steel: std(T.steel, { roughness: 0.6, metalness: 0.3 }),
-    grate: std(T.grate),
-    belt: std(beltTex, { roughness: 0.95 }),
-    rock: std(T.rock, { flatShading: true, roughness: 1 }),
-    ore: std(T.ore, { flatShading: true, roughness: 0.85 }),
-    ground: std(T.ground, { vertexColors: true, roughness: 1 }),
-    glass: new THREE.MeshStandardMaterial({ color: 0x1b2228, roughness: 0.3, metalness: 0.4 }),
-    void: new THREE.MeshBasicMaterial({ color: 0x060504, side: THREE.BackSide }),
+    concrete: mat('concrete'),
+    concretePanel: mat('concretePanel'),
+    tunnel: mat('concrete', { vertexColors: true }),
+    roof: mat('corrugated', { roughness: 0.6, metalness: 0.25, side: THREE.DoubleSide }),
+    roofSolid: mat('corrugated', { roughness: 0.6, metalness: 0.25 }),
+    greenPanel: mat('greenPanel', { roughness: 0.65, metalness: 0.25 }),
+    doorSheet: mat('corrugatedFine', { roughness: 0.6, metalness: 0.25 }),
+    steel: mat('darkSteel', { roughness: 0.5, metalness: 0.45 }),
+    rust: mat('rustFrame', { roughness: 0.8, metalness: 0.3 }),
+    galv: mat('galvanized', { roughness: 0.45, metalness: 0.5 }),
+    glazing: mat('grid', { roughness: 0.25, metalness: 0.35 }),
+    plate: mat('plate', { roughness: 0.6, metalness: 0.4 }),
+    belt: mat('darkSteel', { roughness: 0.9, metalness: 0.05, color: 0x505050, side: THREE.DoubleSide }),
+    ore: mat('ore', { flatShading: true, roughness: 0.8, color: 0xcfa592 }),
+    rock: mat('rock', { flatShading: true, roughness: 0.95 }),
+    void: new THREE.MeshBasicMaterial({ color: 0x030303 }),
+  };
+  // the belt surface scrolls, so it gets its own texture instance (sharing the tile canvas)
+  const beltTex = T.darkSteel.clone();
+  M.belt.map = beltTex;
+  atlas.ready.then(() => { beltTex.needsUpdate = true; });
+
+  const shadowed = m => { m.castShadow = true; m.receiveShadow = true; return m; };
+  const meshOf = (geo, m) => shadowed(new THREE.Mesh(projectUV(geo, m.userData.tile || [1, 1]), m));
+  const cbox = (w, h, d, m, c = 0.04) => meshOf(chamferBoxGeo(w, h, d, c), m);
+  const cprism = (profile, depth, m, c = 0.05) => meshOf(chamferPrismGeo(profile, depth, c), m);
+  const member = (a, b, w, h, m, up, c = 0.015) => {   // chamfered rectangular member a → b
+    const len = a.distanceTo(b), g = chamferBoxGeo(w, h, len, c);
+    g.translate(0, 0, len / 2);
+    return orientAlong(meshOf(g, m), a, b, up);
+  };
+  const ibeam = (a, b, w, h, m, up) => orientAlong(meshOf(iBeamGeo(a.distanceTo(b), w, h), m), a, b, up);
+  const bolt = (m = M.steel, s = 0.03) => shadowed(new THREE.Mesh(projectUV(new THREE.CylinderGeometry(s, s, s * 0.8, 6), [0.3, 0.3]), m));
+  const cyl = (rad, len, m, seg = 16) => {             // cylinder along local Z
+    const g = new THREE.CylinderGeometry(rad, rad, len, seg);
+    g.rotateX(Math.PI / 2);
+    return shadowed(new THREE.Mesh(projectUV(g, m.userData.tile || [1, 1]), m));
   };
   const oreGeos = Array.from({ length: 12 }, (_, i) => rockGeometry(i + opts.seed * 31, i % 3 ? 0 : 1));
-  const cliffGeos = Array.from({ length: 10 }, (_, i) => rockGeometry(i * 3 + 7 + opts.seed * 31, 0));
+  const rock = (m, s) => {
+    const k = shadowed(new THREE.Mesh(oreGeos[Math.floor(r() * oreGeos.length)], m));
+    k.scale.setScalar(s);
+    k.rotation.set(r() * 6.28, r() * 6.28, r() * 6.28);
+    return k;
+  };
 
   const root = new THREE.Group();
   root.name = 'Mine';
-  const parts = {};
-  const sections = [];
+  const parts = {}, sections = [];
   const P = (name, obj, parent) => { obj.name = name; obj.userData.part = name; parts[name] = obj; parent.add(obj); return obj; };
   const S = name => { const g = new THREE.Group(); P(name, g, root); sections.push(name); return g; };
-  const rock = (mat, s, geos = oreGeos) => {
-    const m = shadowed(new THREE.Mesh(geos[Math.floor(r() * geos.length)], mat));
-    m.scale.setScalar(s);
-    m.rotation.set(r() * 6.28, r() * 6.28, r() * 6.28);
-    return m;
-  };
-  const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
-  // ---------------- terrain (static)
-  {
-    const g = new THREE.PlaneGeometry(40, 40, 200, 200);
-    g.rotateX(-Math.PI / 2);
-    g.translate(3, 0, -5.5);
-    const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) p.setY(i, heightAt(p.getX(i), p.getZ(i)));
-    g.computeVertexNormals();
-    const n = g.attributes.normal, col = [], c = new THREE.Color();
-    const C = (r_, g_, b_) => new THREE.Color().setRGB(r_, g_, b_, THREE.SRGBColorSpace);
-    const dirt = C(0.5, 0.42, 0.28), olive = C(0.53, 0.48, 0.27), dry = C(0.58, 0.5, 0.34), stone = C(0.44, 0.4, 0.34);
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-      c.copy(dirt).lerp(olive, smoothstep(0.35, 0.7, fbm(x * 0.3, z * 0.3, 11, 3)));
-      c.lerp(dry, 0.5 * smoothstep(0.5, 0.75, fbm(x * 0.8, z * 0.8, 17, 3)));
-      const steep = smoothstep(0.8, 0.55, n.getY(i)) * smoothstep(0.8, 2, y);
-      c.lerp(stone, clamp(steep * 0.45, 0, 1));
-      col.push(c.r, c.g, c.b);
-    }
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 11, uv.getY(i) * 11);
-    const idx = g.index.array, keep = [];
-    for (let i = 0; i < idx.length; i += 3) {
-      const cx = (p.getX(idx[i]) + p.getX(idx[i + 1]) + p.getX(idx[i + 2])) / 3;
-      const cz = (p.getZ(idx[i]) + p.getZ(idx[i + 1]) + p.getZ(idx[i + 2])) / 3;
-      const [lx, lz] = toPortal(cx, cz);
-      const low = Math.max(p.getY(idx[i]), p.getY(idx[i + 1]), p.getY(idx[i + 2])) < 5.0;
-      if (low && Math.abs(lx) < 2.45 && lz < -0.1 && lz > -5.6) continue; // tunnel bore
-      if (edgeDistClosed(GROUND_EDGE, cx, cz) + 0.12 * (hash3(cx * 13, cz * 13, 1) - 0.5) + 0.5 * (noise3(cx * 1.4, cz * 1.4, 2) - 0.5) + 0.6 * (noise3(cx * 0.5, cz * 0.5, 3) - 0.5) > 0)
-        keep.push(idx[i], idx[i + 1], idx[i + 2]);
-    }
-    g.setIndex(keep);
-    const terrain = new THREE.Mesh(g, M.ground);
-    terrain.receiveShadow = true;
-    terrain.userData.static = true;
-    P('terrain', terrain, root);
-
-    // paved yard: a draped decal with a soft, ragged edge
-    const yg = new THREE.PlaneGeometry(14, 12, 70, 60);
-    yg.rotateX(-Math.PI / 2);
-    yg.translate(3, 0, -4.8);
-    const yp = yg.attributes.position, yc = [];
-    for (let i = 0; i < yp.count; i++) {
-      const x = yp.getX(i), z = yp.getZ(i);
-      yp.setY(i, heightAt(x, z) + 0.025);
-      const e = edgeDistClosed(YARD, x, z) + 0.7 * (noise3(x * 0.9, z * 0.9, 51) - 0.5);
-      yc.push(1, 1, 1, smoothstep(-0.1, 0.6, e));
-    }
-    yg.setAttribute('color', new THREE.Float32BufferAttribute(yc, 4));
-    const yuv = yg.attributes.uv;
-    for (let i = 0; i < yuv.count; i++) yuv.setXY(i, yuv.getX(i) * 14 / 4.8, yuv.getY(i) * 12 / 4.8);
-    const yard = new THREE.Mesh(yg, std(T.paving, { vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
-    yard.receiveShadow = true;
-    yard.userData.static = true;
-    P('yard_paving', yard, root);
-  }
-
-  // ---------------- tunnel portal
+  // ================================================================ tunnel portal
   {
     const sec = S('portal');
     sec.position.set(PORTAL.x, 0, PORTAL.z);
     sec.rotation.y = PORTAL.rot;
     const add = (name, m, x = 0, y = 0, z = 0) => { m.position.set(x, y, z); return P('portal_' + name, m, sec); };
-    const D = 1.7; // frame depth, face at local z = 0
+    const D = 1.8; // frame depth; face at local z = 0, outward +Z
     const frame = {
-      pillar_left: [[-3.5, 0], [-2.45, 0], [-2.45, 2.85], [-3.5, 3.45]],
+      pillar_left: [[-3.5, -SINK], [-2.45, -SINK], [-2.45, 2.85], [-3.5, 3.45]],
       haunch_left: [[-3.5, 3.45], [-2.45, 2.85], [-1.65, 3.65], [-1.65, 4.75], [-2.45, 4.75]],
       lintel: [[-1.65, 3.65], [1.65, 3.65], [1.65, 4.75], [-1.65, 4.75]],
     };
-    frame.haunch_right = frame.haunch_left.map(([x, y]) => [-x, y]).reverse();
-    frame.pillar_right = frame.pillar_left.map(([x, y]) => [-x, y]).reverse();
-    for (const [n, pts] of Object.entries(frame)) add(n, prism(pts, D, M.concrete), 0, 0, -D);
-    // outer chamfered rim of the frame
-    const rim = { left: [[-3.75, 0], [-3.5, 0], [-3.5, 3.45], [-2.45, 4.75], [-2.45, 5.0], [-3.75, 3.55]], top: [[-2.45, 4.75], [2.45, 4.75], [2.45, 5.0], [-2.45, 5.0]] };
-    rim.right = rim.left.map(([x, y]) => [-x, y]).reverse();
-    for (const [n, pts] of Object.entries(rim)) add('rim_' + n, prism(pts, D - 0.3, M.concrete), 0, 0, -D + 0.1);
-    // inner rusted steel frame following the chamfered opening
-    const inner = [[-2.3, 0], [-2.3, 2.8], [-1.55, 3.55], [1.55, 3.55], [2.3, 2.8], [2.3, 0]];
-    const names = ['post_left', 'brace_left', 'header', 'brace_right', 'post_right'];
+    frame.haunch_right = frame.haunch_left.map(([x, y]) => [-x, y]);
+    frame.pillar_right = frame.pillar_left.map(([x, y]) => [-x, y]);
+    for (const [n, pts] of Object.entries(frame)) add(n, cprism(pts, D, M.concrete, 0.07), 0, 0, -D);
+    // proud outer rim, chamfered
+    const rim = {
+      rim_left: [[-3.85, -SINK], [-3.5, -SINK], [-3.5, 3.45], [-3.85, 3.62]],
+      rim_left_chamfer: [[-3.85, 3.62], [-3.5, 3.45], [-2.45, 4.75], [-2.45, 5.1]],
+      rim_top: [[-2.45, 4.75], [2.45, 4.75], [2.45, 5.1], [-2.45, 5.1]],
+    };
+    rim.rim_right = rim.rim_left.map(([x, y]) => [-x, y]);
+    rim.rim_right_chamfer = rim.rim_left_chamfer.map(([x, y]) => [-x, y]);
+    for (const [n, pts] of Object.entries(rim)) add(n, cprism(pts, D + 0.12, M.concrete, 0.06), 0, 0, -D);
+    // inner rusted I-beam frame following the chamfered opening, base plates, anchors, knee gussets
+    const inner = [[-2.28, 0], [-2.28, 2.78], [-1.56, 3.5], [1.56, 3.5], [2.28, 2.78], [2.28, 0]];
+    const names = ['post_left', 'knee_left', 'header', 'knee_right', 'post_right'];
     for (let i = 0; i < 5; i++) {
       const [x1, y1] = inner[i], [x2, y2] = inner[i + 1];
-      const m = P('portal_steel_' + names[i], beamXY(x1, y1, x2, y2, 0.3, 0.3, M.rust), sec);
-      m.position.z = 0.12;
-      const fl = P('portal_steel_' + names[i] + '_flange', beamXY(x1, y1, x2, y2, 0.46, 0.06, M.rust), sec);
-      fl.position.z = 0.3;
+      P('portal_steel_' + names[i], ibeam(V(x1, y1, 0.16), V(x2, y2, 0.16), 0.32, 0.3, M.rust, V(0, 0, 1)), sec);
     }
-    add('steel_band', box(4.9, 0.32, 0.18, M.rust, 1), 0, 4.2, 0.1);
-    add('steel_band_low', box(3.5, 0.14, 0.14, M.rust, 1), 0, 3.85, 0.12);
-    [-1.3, 0, 1.3].forEach((x, i) => add('plate_' + i, box(0.55, 0.14, 0.05, M.concrete, 1), x, 4.22, 0.21));
-    // forward buttress on the left, low retaining wall stepping into the hill, big block on the right
-    add('buttress_left', box(1.05, 2.3, 1.5, M.concrete), -3.0, 1.15, 0.7);
-    const lw = add('retaining_wall_left', box(3.2, 1.35, 0.5, M.concrete), -4.9, 0.67, 0.55);
+    for (const sx of [-1, 1]) {
+      const s = sx < 0 ? 'l' : 'r';
+      add('steel_baseplate_' + s, cbox(0.5, 0.05, 0.45, M.steel, 0.01), sx * 2.28, 0.025, 0.16);
+      for (const [dx, dz] of [[-0.17, -0.15], [0.17, -0.15], [-0.17, 0.15], [0.17, 0.15]])
+        add(`steel_anchor_${s}_${dx > 0 ? 1 : 0}${dz > 0 ? 1 : 0}`, bolt(), sx * 2.28 + dx, 0.06, 0.16 + dz);
+      add('steel_gusset_' + s, cbox(0.5, 0.5, 0.03, M.rust, 0.01), sx * 2.0, 3.05, 0.33).rotation.z = Math.PI / 4;
+    }
+    // lintel band: rust channel with three plates and bolts
+    add('band', cbox(5.0, 0.34, 0.2, M.rust, 0.03), 0, 4.2, 0.1);
+    add('band_lower', cbox(3.6, 0.14, 0.15, M.rust, 0.02), 0, 3.86, 0.1);
+    [-1.3, 0, 1.3].forEach((x, i) => {
+      add('plate_' + i, cbox(0.62, 0.16, 0.05, M.galv, 0.012), x, 4.22, 0.23);
+      for (const dx of [-0.25, 0.25]) add(`plate_bolt_${i}_${dx > 0 ? 'r' : 'l'}`, bolt(M.steel, 0.022), x + dx, 4.22, 0.265).rotation.x = Math.PI / 2;
+    });
+    for (let i = 0; i < 8; i++) add('band_bolt_' + i, bolt(M.steel, 0.025), -2.2 + i * 0.63, 4.32, 0.21).rotation.x = Math.PI / 2;
+    // buttress, retaining wall running back into the terrain, big block and wing walls
+    add('buttress_left', cbox(1.05, 2.3 + SINK, 1.6, M.concrete, 0.07), -3.0, (2.3 - SINK) / 2, 0.7);
+    const lw = add('retaining_wall_left', cbox(4.4, 1.35 + SINK, 0.55, M.concrete, 0.06), -5.2, (1.35 - SINK) / 2, 0.15);
     lw.rotation.y = -0.55;
-    add('retaining_cap_left', box(0.7, 1.45, 0.7, M.concrete, 1), -6.3, 0.72, -0.35);
-    add('block_right', box(1.9, 2.45, 2.0, M.concrete), 3.95, 1.22, 0.55);
-    add('block_right_cap', box(2.0, 0.12, 2.1, M.concrete, 1), 3.95, 2.5, 0.55);
-    // bore: lining walls + roof slab under the hill, dark interior
-    add('lining_left', box(0.6, 4.0, 4.0, M.concrete), -2.75, 2.0, -D - 2.0);
-    add('lining_right', box(0.6, 4.0, 4.0, M.concrete), 2.75, 2.0, -D - 2.0);
-    add('lining_roof', box(6.4, 1.0, 4.3, M.rock, 3), 0, 4.6, -D - 2.0);
-    const voidBox = new THREE.Mesh(new THREE.BoxGeometry(4.55, 3.95, 5.6), M.void);
-    voidBox.position.set(0, 1.97, -2.75);
-    voidBox.userData.static = true;
-    sec.add(voidBox);
-    for (let i = 0; i < 6; i++) add('sleeper_' + i, box(1.6, 0.08, 0.22, M.steel, 1), 1.3, 0.05, 0.2 - i * 0.7);
-    for (let i = 0; i < 10; i++) {
-      const s = 0.15 + r() * 0.25;
-      add('rubble_' + i, rock(r() < 0.5 ? M.ore : M.rock, s), -1.9 + r() * 2.2, s * 0.5, -1.2 - r() * 3.2);
+    const lwc = add('retaining_wall_left_coping', cbox(4.5, 0.12, 0.7, M.concrete, 0.03), -5.2, 1.4, 0.15);
+    lwc.rotation.y = -0.55;
+    add('retaining_wall_left_end', cbox(0.75, 1.5 + SINK, 0.75, M.concrete, 0.06), -6.25, (1.5 - SINK) / 2, 0.85);
+    add('block_right', cbox(1.9, 2.45 + SINK, 2.2, M.concrete, 0.08), 3.95, (2.45 - SINK) / 2, 0.45);
+    add('block_right_coping', cbox(2.05, 0.12, 2.35, M.concrete, 0.03), 3.95, 2.51, 0.45);
+    add('wing_right', cbox(0.55, 1.8 + SINK, 3.5, M.concrete, 0.06), 4.6, (1.8 - SINK) / 2, -2.2);
+    add('wing_left', cbox(0.55, 2.4 + SINK, 3.5, M.concrete, 0.06), -3.7, (2.4 - SINK) / 2, -2.6);
+  }
+
+  // ================================================================ tunnel lining (long, sinks into the terrain)
+  {
+    const sec = S('tunnel');
+    sec.position.set(PORTAL.x, 0, PORTAL.z);
+    sec.rotation.y = PORTAL.rot;
+    const add = (name, m, x = 0, y = 0, z = 0) => { m.position.set(x, y, z); return P('tunnel_' + name, m, sec); };
+    const D = 1.8, TL = opts.tunnelLength;
+    const falloff = depth => lerp(1, 0.05, smoothstep(0.1, 2.4, depth));
+    const ring = {
+      wall_left: [[-3.05, -SINK], [-2.45, -SINK], [-2.45, 2.85], [-3.05, 3.17]],
+      haunch_left: [[-3.05, 3.17], [-2.45, 2.85], [-1.65, 3.65], [-1.65, 4.25], [-2.0, 4.25]],
+      crown: [[-1.65, 3.65], [1.65, 3.65], [1.65, 4.25], [-1.65, 4.25]],
+    };
+    ring.haunch_right = ring.haunch_left.map(([x, y]) => [-x, y]);
+    ring.wall_right = ring.wall_left.map(([x, y]) => [-x, y]);
+    for (const [n, pts] of Object.entries(ring)) {
+      const g = chamferPrismGeo(pts, TL, 0.05);
+      g.translate(0, 0, -TL);
+      add(n, shadowed(new THREE.Mesh(shadeGeo(projectUV(g, M.tunnel.userData.tile), (x, y, z) => falloff(-z)), M.tunnel)), 0, 0, -D + 0.02);
+    }
+    const fg = chamferBoxGeo(4.95, 0.35 + SINK, TL + D, 0.04);
+    fg.translate(0, -(0.35 + SINK) / 2 + 0.02, -(TL + D) / 2);
+    add('floor', shadowed(new THREE.Mesh(shadeGeo(projectUV(fg, M.tunnel.userData.tile), (x, y, z) => falloff(-z - D)), M.tunnel)));
+    // steel arch sets, sleepers and rails, darkening with depth
+    const depthMat = new Map();
+    const dm = (base, depth) => {
+      const k = Math.round(falloff(depth) * 20) / 20, key = base.uuid + k;
+      if (!depthMat.has(key)) { const m = base.clone(); m.color.multiplyScalar(k); depthMat.set(key, m); }
+      return depthMat.get(key);
+    };
+    const arch = [[-2.3, 0], [-2.3, 2.76], [-1.58, 3.5], [1.58, 3.5], [2.3, 2.76], [2.3, 0]];
+    for (let s = 0, z = -D - 0.5; z > -D - 2.4; z -= 0.9, s++) {
+      for (let i = 0; i < 5; i++) {
+        const [x1, y1] = arch[i], [x2, y2] = arch[i + 1];
+        P(`tunnel_set_${s}_${i}`, ibeam(V(x1, y1, z), V(x2, y2, z), 0.22, 0.2, dm(M.rust, -z - D), V(0, 0, 1)), sec);
+      }
+    }
+    for (let i = 0, z = 0.4; z > -D - 2.4; z -= 0.65, i++) add('sleeper_' + i, cbox(1.7, 0.1, 0.24, dm(M.steel, Math.max(0, -z - D)), 0.02), 1.3, 0.07, z);
+    for (const sx of [-1, 1]) P('tunnel_rail_' + (sx < 0 ? 'left' : 'right'), member(V(1.3 + sx * 0.5, 0.17, 0.5), V(1.3 + sx * 0.5, 0.17, -D - 2.35), 0.07, 0.1, M.steel, V(0, 1, 0), 0.01), sec);
+    const PLUG = 2.4; // metres inside the frame where the bore fades to black and is closed
+    const bore = new THREE.Shape([[-2.46, -0.1], [2.46, -0.1], [2.46, 2.85], [1.66, 3.66], [-1.66, 3.66], [-2.46, 2.85]].map(([x, y]) => new THREE.Vector2(x, y)));
+    const cap = new THREE.Mesh(new THREE.ShapeGeometry(bore), M.void);
+    cap.position.set(0, 0, -D - PLUG);
+    cap.userData.static = true;
+    sec.add(cap);
+    for (let i = 0; i < 14; i++) {
+      const s = 0.14 + r() * 0.22;
+      add('spill_' + i, rock(i % 3 ? M.ore : M.rock, s), -2.0 + r() * 2.0, 0.17 + s * 0.4, -0.4 - r() * 3.2);
     }
   }
 
-  // ---------------- conveyor
+  // ================================================================ conveyor
   const beltDir = BELT_HEAD.clone().sub(BELT_TAIL);
   const beltLen = beltDir.length();
   beltDir.normalize();
-  const side = new THREE.Vector3().crossVectors(beltDir, V(0, 1, 0)).normalize();
-  const upv = new THREE.Vector3().crossVectors(side, beltDir);
+  const side = V().crossVectors(beltDir, V(0, 1, 0)).normalize();
+  const upv = V().crossVectors(side, beltDir);
   const beltOre = [], rollers = [];
-  const BELT_TILE = 0.6;
+  const BELT_TILE = M.belt.userData.tile[0];
+  const TROUGH = 0.13; // wing rise of the troughed belt
   {
     const sec = S('conveyor');
     const frame = new THREE.Group();
     frame.position.copy(BELT_TAIL);
     frame.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(beltDir, upv, side));
     sec.add(frame);
-    const mid = beltLen / 2;
-    const add = (name, m, x, y, z) => { m.position.set(x, y, z); return P('conveyor_' + name, m, frame); };
-    // channel frame: tall side stringers, belt, return strand
-    add('stringer_left', box(beltLen, 0.42, 0.1, M.steel, 1), mid, -0.02, -0.58);
-    add('stringer_right', box(beltLen, 0.42, 0.1, M.steel, 1), mid, -0.02, 0.58);
-    add('skirt_left', box(beltLen - 0.4, 0.14, 0.05, M.rust, 1), mid, 0.25, -0.5);
-    add('skirt_right', box(beltLen - 0.4, 0.14, 0.05, M.rust, 1), mid, 0.25, 0.5);
-    add('return_strand', box(beltLen, 0.04, 0.9, M.belt, BELT_TILE), mid, -0.2, 0);
-    const belt = add('belt', box(beltLen, 0.05, 1.0, M.belt, BELT_TILE), mid, 0.1, 0);
-    belt.material = M.belt;
-    add('tail_housing', box(0.9, 0.7, 1.3, M.steel, 1), 0.25, 0.05, 0);
-    for (const [n, x, rad] of [['head', beltLen, 0.16], ['tail', 0, 0.16]]) {
-      const rl = add('roller_' + n, shadowed(new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, 1.1, 12), M.steel)), x, 0, 0);
-      rl.userData.spin = 0; rl.rotation.set(Math.PI / 2, 0, 0);
-      rollers.push(rl);
+    const add = (name, m, x = 0, y = 0, z = 0) => { m.position.set(x, y, z); return P('conveyor_' + name, m, frame); };
+    // C-channel stringers (frame-local: x along the belt, y up, z across)
+    for (const sz of [-1, 1]) {
+      const g = channelGeo(beltLen + 0.6, 0.34, 0.09);
+      g.rotateY(Math.PI / 2);
+      if (sz > 0) g.scale(1, 1, -1);
+      add('stringer_' + (sz < 0 ? 'left' : 'right'), shadowed(new THREE.Mesh(projectUV(g, M.steel.userData.tile), M.steel)), -0.3, -0.05, sz * 0.66);
+      add('stringer_cap_' + (sz < 0 ? 'left' : 'right'), cbox(beltLen + 0.6, 0.03, 0.12, M.rust, 0.008), beltLen / 2, 0.13, sz * 0.62);
     }
-    for (let i = 0; i < 10; i++) {
-      const rl = add('idler_' + i, shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.05, 8), M.steel)), (i + 0.5) * beltLen / 10, 0.04, 0);
-      rl.userData.spin = 0; rl.rotation.set(Math.PI / 2, 0, 0);
-      rollers.push(rl);
+    // troughed belt: flat centre and raised wings; UVs run along the belt so the texture scrolls
+    {
+      const zs = [-0.5, -0.19, 0.19, 0.5], ys = [TROUGH, 0, 0, TROUGH], seg = Math.ceil(beltLen / 0.25);
+      const pos = [], uv = [], idx = [];
+      for (let i = 0; i <= seg; i++) {
+        const x = (i / seg) * beltLen;
+        for (let j = 0; j < 4; j++) { pos.push(x, 0.1 + ys[j], zs[j]); uv.push(x / BELT_TILE, (zs[j] + 0.5) / 1.4); }
+      }
+      for (let i = 0; i < seg; i++) for (let j = 0; j < 3; j++) {
+        const a = i * 4 + j, b = a + 4;
+        idx.push(a, a + 1, b, a + 1, b + 1, b);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      add('belt', shadowed(new THREE.Mesh(g, M.belt)));
+      const rg = new THREE.PlaneGeometry(beltLen, 0.9);
+      rg.rotateX(-Math.PI / 2);
+      rg.translate(beltLen / 2, 0, 0);
+      add('return_belt', shadowed(new THREE.Mesh(rg, M.belt)), 0, -0.24, 0);
     }
-    const N = 26;
-    for (let i = 0; i < N; i++) {
-      const s = 0.13 + r() * 0.12;
-      const m = P('conveyor_ore_' + i, rock(M.ore, s), frame);
-      beltOre.push({ mesh: m, s: i / N + r() * 0.015, z: (r() - 0.5) * 0.5, h: s * 0.6 });
+    // troughed idler sets + return idlers
+    const n = Math.floor(beltLen / 1.05);
+    for (let i = 1; i < n; i++) {
+      const x = (i / n) * beltLen;
+      add(`idler_frame_${i}`, cbox(0.08, 0.06, 1.25, M.rust, 0.01), x, -0.06, 0);
+      [[0, 0.035, 0.36, 0], [-0.345, 0.105, 0.3, Math.atan2(TROUGH, 0.31)], [0.345, 0.105, 0.3, -Math.atan2(TROUGH, 0.31)]].forEach(([z, y, len, tilt], k) => {
+        const rl = add(`idler_${i}_${k}`, cyl(0.05, len, M.steel, 10), x, y, z);
+        rl.userData.radius = 0.05; rl.userData.tilt = tilt; rl.userData.spin = 0;
+        rl.rotation.set(tilt, 0, 0);
+        rollers.push(rl);
+      });
+      if (i % 2) {
+        const rr = add(`return_idler_${i}`, cyl(0.045, 1.0, M.steel, 10), x, -0.3, 0);
+        rr.userData.radius = 0.045; rr.userData.tilt = 0; rr.userData.spin = 0;
+        rollers.push(rr);
+      }
     }
-    // H-frame supports on paired concrete footings (positions taken from the reference)
+    for (const [nme, x, rad] of [['head_pulley', beltLen, 0.19], ['tail_pulley', 0, 0.17]]) {
+      const pl = add(nme, cyl(rad, 1.08, M.steel, 20), x, -0.02, 0);
+      pl.userData.radius = rad; pl.userData.tilt = 0; pl.userData.spin = 0;
+      rollers.push(pl);
+      for (const sz of [-1, 1]) add(`${nme}_bearing_${sz < 0 ? 'l' : 'r'}`, cbox(0.22, 0.16, 0.1, M.rust, 0.015), x, -0.02, sz * 0.7);
+    }
+    // drive: motor + gearbox beside the head pulley; head hood over the hopper; tail take-up
+    add('motor', cyl(0.16, 0.55, M.greenPanel, 16), beltLen - 0.45, 0.02, 1.05);
+    add('motor_fan_cover', cyl(0.17, 0.08, M.steel, 16), beltLen - 0.45, 0.02, 1.36);
+    add('gearbox', cbox(0.42, 0.36, 0.3, M.greenPanel, 0.03), beltLen - 0.02, 0.02, 0.88);
+    add('motor_base', cbox(0.9, 0.05, 0.5, M.steel, 0.01), beltLen - 0.25, -0.18, 1.0);
+    add('head_hood', cbox(0.6, 0.55, 1.25, M.greenPanel, 0.03), beltLen + 0.05, 0.3, 0);
+    add('tail_takeup_left', cbox(0.8, 0.12, 0.08, M.rust, 0.01), 0.25, -0.02, -0.72);
+    add('tail_takeup_right', cbox(0.8, 0.12, 0.08, M.rust, 0.01), 0.25, -0.02, 0.72);
+    for (let i = 0, s = 0; i < 46; i++) {
+      const sz = 0.07 + r() * 0.1;
+      s += 1 / 46 * (0.4 + r() * 1.2);
+      const m = P('conveyor_ore_' + i, rock(M.ore, sz), frame);
+      beltOre.push({ mesh: m, s: s % 1, z: (r() - 0.5) * 0.42, h: sz * 0.55 });
+    }
+    // trestle bents: splayed I-beam legs, top and mid ties, X bracing, base plates, anchored footings
     const yaw = Math.atan2(side.x, side.z);
-    [[-1.1, -7.45], [2.45, -5.87], [5.34, -4.56]].forEach(([fx, fz], i) => {
-      const L = (fx - BELT_TAIL.x) / beltDir.x;
-      const p = BELT_TAIL.clone().addScaledVector(beltDir, L);
-      const top = p.y - 0.22;
-      for (const sgn of [-1, 1]) {
-        const lp = p.clone().addScaledVector(side, sgn * 0.62);
-        const tag = `${i}_${sgn < 0 ? 'l' : 'r'}`;
-        const leg = P('conveyor_leg_' + tag, box(0.16, top - 0.3, 0.16, M.steel, 1), sec);
-        leg.position.set(lp.x, 0.3 + (top - 0.3) / 2, lp.z);
-        const foot = P('conveyor_footing_' + tag, box(0.6, 0.45, 0.6, M.concrete, 1), sec);
-        foot.position.set(lp.x, 0.225, lp.z);
-        foot.rotation.y = yaw;
+    const along = V(beltDir.x, 0, beltDir.z).normalize();
+    [-1.1, 2.45, 5.34].forEach((fx, i) => {
+      const p = BELT_TAIL.clone().addScaledVector(beltDir, (fx - BELT_TAIL.x) / beltDir.x);
+      const top = p.y - 0.42;
+      const foot = sz => p.clone().setY(0.32).addScaledVector(side, sz * 0.82);
+      const head = sz => p.clone().setY(top).addScaledVector(side, sz * 0.62);
+      for (const sz of [-1, 1]) {
+        const tag = `${i}_${sz < 0 ? 'l' : 'r'}`, fp = foot(sz);
+        P('conveyor_leg_' + tag, ibeam(fp, head(sz), 0.16, 0.16, M.steel, beltDir), sec);
+        const ft = P('conveyor_footing_' + tag, cbox(0.75, 0.3 + SINK, 0.75, M.concrete, 0.05), sec);
+        ft.position.set(fp.x, (0.3 - SINK) / 2, fp.z); ft.rotation.y = yaw;
+        const bp = P('conveyor_baseplate_' + tag, cbox(0.38, 0.03, 0.38, M.steel, 0.008), sec);
+        bp.position.set(fp.x, 0.315, fp.z); bp.rotation.y = yaw;
+        for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]])
+          P(`conveyor_anchor_${tag}_${a}${b}`, bolt(), sec).position.copy(fp).addScaledVector(side, a * 0.13).addScaledVector(along, b * 0.13).setY(0.34);
       }
-      for (const [k, y] of [['top', top], ['mid', 0.3 + (top - 0.3) * 0.45]]) {
-        const cb = P(`conveyor_cross_${i}_${k}`, box(0.12, 0.14, 1.4, M.steel, 1), sec);
-        cb.position.set(p.x, y, p.z);
-        cb.rotation.y = yaw;
-      }
+      P(`conveyor_tie_${i}_top`, ibeam(head(-1).addScaledVector(side, -0.15), head(1).addScaledVector(side, 0.15), 0.14, 0.16, M.steel, V(0, 1, 0)), sec);
+      const mid = sz => foot(sz).lerp(head(sz), 0.42);
+      P(`conveyor_tie_${i}_mid`, member(mid(-1), mid(1), 0.08, 0.08, M.steel, V(0, 1, 0)), sec);
+      P(`conveyor_brace_${i}_a`, member(mid(-1), head(1), 0.05, 0.05, M.rust, beltDir), sec);
+      P(`conveyor_brace_${i}_b`, member(mid(1), head(-1), 0.05, 0.05, M.rust, beltDir), sec);
     });
   }
 
-  // ---------------- fillables (bins + hopper)
+  // ================================================================ fillables (bins + hopper)
   const fills = {};
   function makeFill(name, parent, { cx, cz, floorY, w, d, maxH, count, smin = 0.17, smax = 0.36 }) {
     const items = [];
-    const sp = (smin + smax) * 0.95;
+    const sp = (smin + smax) * 0.95; // a floor-covering base layer first, then the heap
     for (let gx = -w / 2 + sp / 2; gx < w / 2; gx += sp) for (let gz = -d / 2 + sp / 2; gz < d / 2; gz += sp) {
       const s = smin + r() * (smax - smin);
       items.push({ base: V(cx + gx + (r() - 0.5) * sp * 0.4, floorY + s * 0.4, cz + gz + (r() - 0.5) * sp * 0.4), s });
@@ -528,204 +550,169 @@ export function createMine(options = {}) {
     fills[name] = { items, level: 0, target: 0, rate: 0.5 };
   }
 
-  // ---------------- hopper (green bin on legs, funnel bottom, chute into the annex)
+  // ================================================================ hopper
   {
     const sec = S('hopper');
-    const { x: HX, z: HZ, size: Hs, top: Ht, boxH } = HOPPER, h2 = Hs / 2, yb = Ht - boxH;
-    const add = (name, m, x, y, z) => { m.position.set(x, y, z); return P('hopper_' + name, m, sec); };
-    add('wall_front', box(Hs, boxH, 0.08, M.panel, 1.2), HX, yb + boxH / 2, HZ + h2);
-    add('wall_back', box(Hs, boxH, 0.08, M.panel, 1.2), HX, yb + boxH / 2, HZ - h2);
-    add('wall_left', box(0.08, boxH, Hs, M.panel, 1.2), HX - h2, yb + boxH / 2, HZ);
-    add('wall_right', box(0.08, boxH, Hs, M.panel, 1.2), HX + h2, yb + boxH / 2, HZ);
-    add('rim_front', box(Hs + 0.16, 0.1, 0.16, M.rust, 1), HX, Ht, HZ + h2);
-    add('rim_back', box(Hs + 0.16, 0.1, 0.16, M.rust, 1), HX, Ht, HZ - h2);
-    add('rim_left', box(0.16, 0.1, Hs, M.rust, 1), HX - h2, Ht, HZ);
-    add('rim_right', box(0.16, 0.1, Hs, M.rust, 1), HX + h2, Ht, HZ);
-    add('band', box(Hs + 0.12, 0.1, Hs + 0.12, M.rust, 1), HX, yb + 0.05, HZ);
-    const fun = add('funnel', shadowed(new THREE.Mesh(new THREE.CylinderGeometry(1, 0.28, 1.25, 4, 1, true), M.panel2)), HX, yb - 0.625, HZ);
-    fun.rotation.y = Math.PI / 4; fun.scale.set(h2 / 0.707, 1, h2 / 0.707);
-    add('outlet', box(0.45, 0.35, 0.45, M.steel, 1), HX, yb - 1.4, HZ);
-    for (const [n, sx, sz] of [['fl', -1, 1], ['fr', 1, 1], ['bl', -1, -1], ['br', 1, -1]]) {
-      const x = HX + sx * (h2 - 0.05), z = HZ + sz * (h2 - 0.05);
-      add('leg_' + n, box(0.16, yb - 0.35 + boxH, 0.16, M.panel, 1), x, 0.35 + (yb - 0.35 + boxH) / 2, z);
-      add('footing_' + n, box(0.7, 0.4, 0.7, M.concrete, 1), x, 0.2, z);
+    const { x: HX, z: HZ, size: Hs, top: Ht, boxH } = HOPPER, h2 = Hs / 2, yb = Ht - boxH, yc = yb + boxH / 2;
+    const add = (name, m, x = 0, y = 0, z = 0) => { m.position.set(x, y, z); return P('hopper_' + name, m, sec); };
+    add('wall_front', cbox(Hs, boxH, 0.08, M.greenPanel, 0.02), HX, yc, HZ + h2);
+    add('wall_back', cbox(Hs, boxH, 0.08, M.greenPanel, 0.02), HX, yc, HZ - h2);
+    add('wall_left', cbox(0.08, boxH, Hs, M.greenPanel, 0.02), HX - h2, yc, HZ);
+    add('wall_right', cbox(0.08, boxH, Hs, M.greenPanel, 0.02), HX + h2, yc, HZ);
+    for (const [n, w, d, z, x] of [['front', Hs + 0.2, 0.14, HZ + h2, HX], ['back', Hs + 0.2, 0.14, HZ - h2, HX], ['left', 0.14, Hs, HZ, HX - h2], ['right', 0.14, Hs, HZ, HX + h2]]) {
+      add('rim_' + n, cbox(w, 0.12, d, M.rust, 0.02), x, Ht + 0.02, z);
+      add('stiffener_' + n, cbox(w, 0.09, d, M.rust, 0.015), x, yb + 0.55, z);
+      add('skirt_' + n, cbox(w, 0.1, d, M.rust, 0.015), x, yb + 0.04, z);
     }
-    P('hopper_brace_front', beam(V(HX - h2, 0.5, HZ + h2), V(HX + h2, yb - 0.2, HZ + h2), 0.08, 0.08, M.rust), sec);
-    P('hopper_brace_left', beam(V(HX - h2, 0.5, HZ - h2), V(HX - h2, yb - 0.2, HZ + h2), 0.08, 0.08, M.rust), sec);
-    P('hopper_chute', beam(V(HX, yb - 1.45, HZ), V(HX + 0.6, 1.25, ANNEX.z1 + 0.05), 0.4, 0.3, M.steel), sec);
-    makeFill('hopper', sec, { cx: HX, cz: HZ, floorY: yb - 0.1, w: Hs - 0.3, d: Hs - 0.3, maxH: boxH + 0.7, count: 55, smin: 0.16, smax: 0.32 });
+    for (const [n, sx, sz] of [['fl', -1, 1], ['fr', 1, 1], ['bl', -1, -1], ['br', 1, -1]])
+      add('corner_' + n, cbox(0.12, boxH + 0.1, 0.12, M.rust, 0.015), HX + sx * h2, yc, HZ + sz * h2);
+    // funnel: truncated pyramid (ore sits on its top face), outlet, gate, chute into the annex
+    const fp = [];
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) fp.push(V(sx * (h2 - 0.02), 0, sz * (h2 - 0.02)), V(sx * 0.32, -1.3, sz * 0.32));
+    add('funnel', meshOf(new ConvexGeometry(fp), M.greenPanel), HX, yb, HZ);
+    add('outlet', cbox(0.72, 0.36, 0.72, M.rust, 0.03), HX, yb - 1.45, HZ);
+    add('gate', cbox(0.9, 0.06, 0.5, M.steel, 0.01), HX + 0.2, yb - 1.62, HZ);
+    P('hopper_chute', member(V(HX, yb - 1.55, HZ), V(HX + 0.7, 1.15, ANNEX.z1 + 0.1), 0.5, 0.36, M.greenPanel, V(0, 1, 0), 0.02), sec);
+    // legs, X-bracing on two faces, ties, base plates, footings, access ladder
+    const legTop = yb + 0.15, legBot = 0.32;
+    const c = (sx, sz, y) => V(HX + sx * (h2 - 0.06), y, HZ + sz * (h2 - 0.06));
+    for (const [n, sx, sz] of [['fl', -1, 1], ['fr', 1, 1], ['bl', -1, -1], ['br', 1, -1]]) {
+      const b = c(sx, sz, legBot);
+      P('hopper_leg_' + n, ibeam(b, c(sx, sz, legTop), 0.18, 0.18, M.greenPanel, V(1, 0, 0)), sec);
+      add('footing_' + n, cbox(0.8, 0.32 + SINK, 0.8, M.concrete, 0.05), b.x, (0.32 - SINK) / 2, b.z);
+      add('baseplate_' + n, cbox(0.4, 0.03, 0.4, M.steel, 0.008), b.x, 0.335, b.z);
+      for (const [a, k] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) add(`anchor_${n}_${a}${k}`, bolt(), b.x + a * 0.14, 0.36, b.z + k * 0.14);
+    }
+    P('hopper_brace_front_a', member(c(-1, 1, 0.5), c(1, 1, legTop - 0.25), 0.06, 0.06, M.rust, V(0, 0, 1)), sec);
+    P('hopper_brace_front_b', member(c(1, 1, 0.5), c(-1, 1, legTop - 0.25), 0.06, 0.06, M.rust, V(0, 0, 1)), sec);
+    P('hopper_brace_left_a', member(c(-1, -1, 0.5), c(-1, 1, legTop - 0.25), 0.06, 0.06, M.rust, V(1, 0, 0)), sec);
+    P('hopper_brace_left_b', member(c(-1, 1, 0.5), c(-1, -1, legTop - 0.25), 0.06, 0.06, M.rust, V(1, 0, 0)), sec);
+    P('hopper_tie_front', member(c(-1, 1, 1.3), c(1, 1, 1.3), 0.08, 0.1, M.steel, V(0, 1, 0)), sec);
+    P('hopper_tie_left', member(c(-1, -1, 1.3), c(-1, 1, 1.3), 0.08, 0.1, M.steel, V(0, 1, 0)), sec);
+    const lx = HX + h2 + 0.18;
+    for (const dz of [-0.22, 0.22]) P(`hopper_ladder_rail_${dz > 0 ? 'r' : 'l'}`, member(V(lx, 0, HZ + dz), V(lx, Ht + 0.9, HZ + dz), 0.045, 0.06, M.steel, V(1, 0, 0), 0.008), sec);
+    for (let i = 0; i < 14; i++) P('hopper_ladder_rung_' + i, member(V(lx, 0.3 + i * 0.3, HZ - 0.22), V(lx, 0.3 + i * 0.3, HZ + 0.22), 0.03, 0.03, M.steel, V(0, 1, 0), 0.006), sec);
+    makeFill('hopper', sec, { cx: HX, cz: HZ, floorY: yb - 0.05, w: Hs - 0.35, d: Hs - 0.35, maxH: boxH + 0.6, count: 80, smin: 0.12, smax: 0.22 });
   }
 
-  // ---------------- processing building (gable roof along X, sliding door on the +X gable)
+  // ================================================================ processing building
   {
     const sec = S('building');
     const B = BUILDING, cx = (B.x0 + B.x1) / 2, cz = (B.z0 + B.z1) / 2, L = B.x1 - B.x0, Wd = B.z1 - B.z0;
-    // the reference building sits slightly skewed to the yard: rotate the whole section about its centre
     sec.position.set(cx, 0, cz);
-    sec.rotation.y = B.yaw;
+    sec.rotation.y = B.yaw; // the reference building sits slightly skewed to the yard
     const local = new THREE.Group();
     local.position.set(-cx, 0, -cz);
     sec.add(local);
+    const add = (name, m, x = 0, y = 0, z = 0) => { m.position.set(x, y, z); return P('building_' + name, m, local); };
     const wallH = B.eave - B.plinth, wy = B.plinth + wallH / 2;
-    const add = (name, m, x, y, z) => { m.position.set(x, y, z); return P('building_' + name, m, local); };
-    add('plinth', box(L + 0.5, B.plinth, Wd + 0.5, M.concrete), cx, B.plinth / 2, cz);
-    add('wall_front', box(L, wallH, 0.22, M.concrete), cx, wy, B.z1);
-    add('wall_back', box(L, wallH, 0.22, M.concrete), cx, wy, B.z0);
-    add('wall_left', box(0.22, wallH, Wd, M.concrete), B.x0, wy, cz);
-    add('wall_right', box(0.22, wallH, Wd, M.concrete), B.x1, wy, cz);
-    for (const [n, x, z] of [['fl', B.x0, B.z1], ['fr', B.x1, B.z1], ['bl', B.x0, B.z0], ['br', B.x1, B.z0]])
-      add('corner_' + n, box(0.3, wallH + 0.05, 0.3, M.steel, 1), x, wy, z);
-    add('eave_beam_front', box(L + 0.3, 0.18, 0.3, M.steel, 1), cx, B.eave, B.z1);
-    add('eave_beam_back', box(L + 0.3, 0.18, 0.3, M.steel, 1), cx, B.eave, B.z0);
+    add('plinth', cbox(L + 0.5, B.plinth + SINK, Wd + 0.5, M.concrete, 0.06), cx, (B.plinth - SINK) / 2, cz);
+    add('wall_front', cbox(L, wallH, 0.25, M.concretePanel, 0.03), cx, wy, B.z1);
+    add('wall_back', cbox(L, wallH, 0.25, M.concretePanel, 0.03), cx, wy, B.z0);
+    add('wall_left', cbox(0.25, wallH, Wd, M.concretePanel, 0.03), B.x0, wy, cz);
+    add('wall_right', cbox(0.25, wallH, Wd, M.concretePanel, 0.03), B.x1, wy, cz);
+    for (const [n, x, z] of [['fl', B.x0, B.z1], ['fr', B.x1, B.z1], ['bl', B.x0, B.z0], ['br', B.x1, B.z0], ['fm', cx, B.z1 + 0.02], ['bm', cx, B.z0 - 0.02]])
+      add('pilaster_' + n, cbox(0.34, wallH + 0.04, 0.34, M.steel, 0.03), x, wy, z);
+    add('eave_beam_front', cbox(L + 0.35, 0.22, 0.32, M.rust, 0.03), cx, B.eave - 0.14, B.z1);
+    add('eave_beam_back', cbox(L + 0.35, 0.22, 0.32, M.rust, 0.03), cx, B.eave - 0.14, B.z0);
     const half = Wd / 2, rise = B.ridge - B.eave;
-    for (const [n, x] of [['left', B.x0 - 0.11], ['right', B.x1 - 0.11]]) {
-      const g = add('gable_' + n, prism([[-half, 0], [half, 0], [0, rise]], 0.22, M.concrete), x, B.eave, cz);
-      g.rotation.y = Math.PI / 2;
+    for (const [n, x] of [['left', B.x0 - 0.125], ['right', B.x1 - 0.125]])
+      add('gable_' + n, cprism([[-half, 0], [half, 0], [0, rise]], 0.25, M.concretePanel, 0.03), x, B.eave, cz).rotation.y = Math.PI / 2;
+    // corrugated roof sheets, fascia, barge boards, ridge cap, gutters, downpipes
+    const a = Math.atan2(rise, half), slant = Math.hypot(rise, half), over = 0.45, pw = slant + over, rl = L + 0.8;
+    for (const [n, sg] of [['front', 1], ['back', -1]]) {
+      const sheet = add('roof_' + n, shadowed(new THREE.Mesh(corrugatedGeo(rl, pw, 0.3, 0.035, ATLAS_TILES.corrugated.size), M.roof)));
+      sheet.rotation.x = sg * a;
+      sheet.position.set(cx, B.ridge + 0.15 - Math.sin(a) * pw / 2, cz + sg * Math.cos(a) * pw / 2);
+      const eaveY = B.eave - Math.sin(a) * over + 0.15, eaveZ = cz + sg * (half + Math.cos(a) * over);
+      add('fascia_' + n, cbox(rl + 0.06, 0.2, 0.05, M.rust, 0.012), cx, eaveY - 0.06, eaveZ + sg * 0.02).rotation.x = sg * a;
+      add('gutter_' + n, cbox(rl, 0.12, 0.16, M.galv, 0.02), cx, eaveY - 0.16, eaveZ + sg * 0.1);
+      for (const [e, x] of [['left', B.x0 - 0.4], ['right', B.x1 + 0.4]])
+        add(`barge_${n}_${e}`, cbox(0.07, 0.22, pw + 0.04, M.rust, 0.012), x, B.ridge - Math.sin(a) * pw / 2 + 0.11, cz + sg * Math.cos(a) * pw / 2).rotation.x = sg * a;
+      for (const [e, x] of [['left', B.x0 + 0.15], ['right', B.x1 - 0.15]])
+        add(`downpipe_${n}_${e}`, cyl(0.055, eaveY - 0.2, M.galv, 10), x, (eaveY - 0.2) / 2, eaveZ + sg * 0.12).rotation.x = Math.PI / 2;
+      add('ridge_cap_' + n, cbox(rl + 0.05, 0.035, 0.32, M.galv, 0.01), cx, B.ridge + 0.17, cz + sg * 0.13).rotation.x = sg * a;
     }
-    const a = Math.atan2(rise, half), slant = Math.hypot(rise, half), over = 0.4, pw = slant + over;
-    for (const [n, sgn] of [['front', 1], ['back', -1]]) {
-      const rf = add('roof_' + n, box(L + 0.7, 0.09, pw, M.roofGreen, 1.6), cx, 0, 0);
-      rf.rotation.x = sgn * a;
-      const midS = (slant + over) / 2; // distance from ridge along the slope to the panel centre
-      rf.position.set(cx, B.ridge - Math.sin(a) * midS + 0.07, cz + sgn * Math.cos(a) * midS);
-      const trim = add('roof_trim_' + n, box(L + 0.75, 0.12, 0.14, M.rust, 1), cx, B.eave - Math.sin(a) * over + 0.04, cz + sgn * (half + Math.cos(a) * over));
-      trim.rotation.x = sgn * a;
+    for (const sg of [-1, 1]) for (let k = 0; k < 3; k++) {
+      const t = (k + 0.5) / 3, z = cz + sg * half * t, y = B.ridge - (B.ridge - B.eave) * t + 0.05;
+      add(`purlin_${sg > 0 ? 'f' : 'b'}${k}`, cbox(L + 0.7, 0.1, 0.08, M.steel, 0.01), cx, y, z).rotation.x = sg * a;
     }
-    add('roof_ridge', box(L + 0.75, 0.14, 0.4, M.panel, 1), cx, B.ridge + 0.1, cz);
-    const roofY = z => B.ridge - Math.abs(z - cz) * Math.tan(a) + 0.05;
-    [[B.x0 + 1.6, cz + 0.6], [B.x0 + 3.9, cz + 1.3]].forEach(([x, z], i) => {
-      add('roof_vent_' + i, box(0.95, 0.5, 0.75, M.panel, 1), x, roofY(z) + 0.2, z);
-      add('roof_vent_cap_' + i, box(1.15, 0.1, 0.95, M.roofGreen, 1), x, roofY(z) + 0.5, z);
+    const roofY = z => B.ridge - Math.abs(z - cz) * Math.tan(a) + 0.17;
+    // louvred roof monitors and chimney
+    [[B.x0 + 1.5, cz + 0.55, 1.1], [B.x0 + 3.6, cz + 1.25, 1.0]].forEach(([x, z, w], i) => {
+      const base = roofY(z) - 0.15, hh = 0.55;
+      add(`vent_${i}_body`, cbox(w, hh + 0.2, 0.8, M.greenPanel, 0.025), x, base + (hh + 0.2) / 2, z);
+      for (let k = 0; k < 4; k++) add(`vent_${i}_louvre_${k}`, cbox(w - 0.12, 0.05, 0.07, M.steel, 0.01), x, base + 0.3 + k * 0.11, z + 0.42).rotation.x = -0.5;
+      add(`vent_${i}_cap`, cbox(w + 0.3, 0.08, 1.05, M.roofSolid, 0.02), x, base + hh + 0.26, z);
+      add(`vent_${i}_cap_trim`, cbox(w + 0.34, 0.05, 1.09, M.rust, 0.01), x, base + hh + 0.21, z);
     });
-    add('chimney', box(0.42, 1.3, 0.42, M.concrete, 1), B.x1 - 0.9, roofY(cz + 1.2) + 0.55, cz + 1.2);
-    add('chimney_cap', box(0.56, 0.1, 0.56, M.steel, 1), B.x1 - 0.9, roofY(cz + 1.2) + 1.25, cz + 1.2);
-    // big green sliding door + rail on the +X gable, high strip windows
-    add('door', box(0.1, 2.5, 1.9, M.panel, 1.2), B.x1 + 0.13, B.plinth + 1.25, B.z1 - 1.35);
-    add('door_rail', box(0.14, 0.12, 3.6, M.steel, 1), B.x1 + 0.17, B.plinth + 2.6, B.z1 - 1.8);
-    add('door_frame_left', box(0.14, 2.6, 0.12, M.steel, 1), B.x1 + 0.15, B.plinth + 1.3, B.z1 - 2.35);
-    add('door_frame_right', box(0.14, 2.6, 0.12, M.steel, 1), B.x1 + 0.15, B.plinth + 1.3, B.z1 - 0.35);
-    add('window_gable', box(0.06, 0.45, 1.3, M.glass), B.x1 + 0.12, B.plinth + 2.3, B.z0 + 1.0);
-    [[B.x0 + 0.9, 1.0], [B.x0 + 2.4, 1.0], [B.x0 + 3.6, 0.6]].forEach(([x, w], i) => {
-      add('window_front_' + i, box(w, 0.42, 0.06, M.glass), x, B.eave - 0.45, B.z1 + 0.12);
-      add('window_front_sill_' + i, box(w + 0.15, 0.07, 0.12, M.steel, 1), x, B.eave - 0.7, B.z1 + 0.14);
-    });
-    [B.x0 + 1.5, B.x0 + 4.2].forEach((x, i) => add('window_back_' + i, box(1.2, 0.42, 0.06, M.glass), x, B.eave - 0.45, B.z0 - 0.12));
-    // annex in front (receives the hopper chute)
-    const A = ANNEX, ax = (A.x0 + A.x1) / 2, az = (A.z0 + A.z1) / 2, aw = A.x1 - A.x0, ad = A.z1 - A.z0;
-    add('annex_plinth', box(aw + 0.4, B.plinth, ad + 0.2, M.concrete), ax, B.plinth / 2, az + 0.1);
-    add('annex_wall_front', box(aw, A.h - B.plinth, 0.22, M.concrete), ax, B.plinth + (A.h - B.plinth) / 2, A.z1);
-    add('annex_wall_left', box(0.22, A.h - B.plinth, ad, M.concrete), A.x0, B.plinth + (A.h - B.plinth) / 2, az);
-    add('annex_wall_right', box(0.22, A.h - B.plinth, ad, M.concrete), A.x1, B.plinth + (A.h - B.plinth) / 2, az);
-    add('annex_corner', box(0.28, A.h - B.plinth, 0.28, M.steel, 1), A.x0, B.plinth + (A.h - B.plinth) / 2, A.z1);
-    const ar = add('annex_roof', box(aw + 0.5, 0.16, ad + 0.6, M.concrete, 1.2), ax, A.h + 0.1, az + 0.15);
-    ar.rotation.x = 0.08;
-    for (let i = 0; i < 4; i++) add('annex_roof_seam_' + i, box(0.06, 0.04, ad + 0.6, M.steel, 1), A.x0 + 0.6 + i * (aw - 1.2) / 3, A.h + 0.2, az + 0.15).rotation.x = 0.08;
-    add('annex_window', box(0.06, 0.4, 1.2, M.glass), A.x1 + 0.12, A.h - 0.6, az);
-    add('annex_pipe', box(0.1, A.h - 0.4, 0.1, M.rust, 1), A.x1 + 0.15, A.h / 2 + 0.1, A.z1 - 0.2);
-    // low concrete platform at the hill end of the building
-    add('platform', box(2.2, 1.2, 2.6, M.concrete), 4.3, 0.6, -9.3);
-    add('platform_cap', box(2.3, 0.1, 2.7, M.concrete, 1), 4.3, 1.25, -9.3);
+    const chx = B.x1 - 0.9, chz = cz + 1.2, chy = roofY(chz);
+    add('chimney', cbox(0.46, 1.5, 0.46, M.concrete, 0.04), chx, chy + 0.5, chz);
+    add('chimney_band', cbox(0.52, 0.1, 0.52, M.concrete, 0.02), chx, chy + 1.05, chz);
+    add('chimney_cap', cbox(0.62, 0.08, 0.62, M.steel, 0.02), chx, chy + 1.38, chz);
+    add('chimney_flue', cyl(0.09, 0.3, M.rust, 12), chx, chy + 1.48, chz).rotation.x = Math.PI / 2;
+    // sliding door on the +X gable: sheet, frame, diagonal brace, track, hangers, handle
+    const dz = B.z1 - 1.4, dw = 2.0, dh = 2.55, dx = B.x1;
+    add('door', cbox(0.09, dh, dw, M.doorSheet, 0.02), dx + 0.2, B.plinth + dh / 2 + 0.02, dz);
+    add('door_frame_top', cbox(0.12, 0.12, dw + 0.16, M.steel, 0.015), dx + 0.26, B.plinth + dh + 0.04, dz);
+    add('door_frame_bottom', cbox(0.12, 0.08, dw + 0.16, M.steel, 0.015), dx + 0.26, B.plinth + 0.04, dz);
+    add('door_frame_left', cbox(0.12, dh, 0.1, M.steel, 0.015), dx + 0.26, B.plinth + dh / 2, dz - dw / 2 - 0.03);
+    add('door_frame_right', cbox(0.12, dh, 0.1, M.steel, 0.015), dx + 0.26, B.plinth + dh / 2, dz + dw / 2 + 0.03);
+    add('door_brace', cbox(0.05, 0.08, Math.hypot(dw, dh) - 0.3, M.steel, 0.01), dx + 0.26, B.plinth + dh / 2, dz).rotation.x = Math.atan2(dh, dw);
+    add('door_track', cbox(0.1, 0.12, dw * 2 + 0.4, M.steel, 0.015), dx + 0.22, B.plinth + dh + 0.22, dz - dw / 2);
+    for (const k of [-1, 1]) add(`door_hanger_${k > 0 ? 'r' : 'l'}`, cyl(0.07, 0.06, M.rust, 12), dx + 0.3, B.plinth + dh + 0.16, dz + k * dw * 0.32).rotation.y = Math.PI / 2;
+    add('door_handle', cbox(0.05, 0.4, 0.05, M.rust, 0.01), dx + 0.28, B.plinth + 1.2, dz - dw / 2 + 0.2);
+    // windows: grid glazing in steel frames with concrete sills
+    const win = (name, x, y, z, w, h, face) => {
+      const nx = face === 'x' ? 1 : 0, nz = face === 'z' ? 1 : face === '-z' ? -1 : 0, ax = face === 'x';
+      const dims = (len, hh, th) => (ax ? [th, hh, len] : [len, hh, th]);
+      add(name, cbox(...dims(w, h, 0.05), M.glazing, 0.01), x + nx * 0.13, y, z + nz * 0.13);
+      const f = (n, ww, hh, o, oy) => add(`${name}_frame_${n}`, cbox(...dims(ww, hh, 0.08), M.steel, 0.012), x + nx * 0.15 + (ax ? 0 : o), y + oy, z + nz * 0.15 + (ax ? o : 0));
+      f('top', w + 0.12, 0.07, 0, h / 2); f('bottom', w + 0.12, 0.07, 0, -h / 2);
+      f('left', 0.07, h, -w / 2, 0); f('right', 0.07, h, w / 2, 0);
+      add(`${name}_sill`, cbox(...dims(w + 0.2, 0.07, 0.18), M.concrete, 0.015), x + nx * 0.17, y - h / 2 - 0.06, z + nz * 0.17);
+    };
+    [[B.x0 + 0.9, 1.1], [B.x0 + 2.3, 1.1]].forEach(([x, w], i) => win('window_front_' + i, x, B.eave - 0.5, B.z1, w, 0.5, 'z'));
+    win('window_gable', B.x1, B.plinth + 2.25, B.z0 + 0.95, 1.3, 0.5, 'x');
+    [B.x0 + 1.4, B.x0 + 3.9].forEach((x, i) => win('window_back_' + i, x, B.eave - 0.5, B.z0, 1.3, 0.5, '-z'));
+    // annex (receives the hopper chute)
+    const A = ANNEX, ax = (A.x0 + A.x1) / 2, az = (A.z0 + A.z1) / 2, aw = A.x1 - A.x0, ad = A.z1 - A.z0, ah = A.h - B.plinth;
+    add('annex_plinth', cbox(aw + 0.4, B.plinth + SINK, ad + 0.3, M.concrete, 0.05), ax, (B.plinth - SINK) / 2, az + 0.12);
+    add('annex_wall_front', cbox(aw, ah, 0.24, M.concretePanel, 0.03), ax, B.plinth + ah / 2, A.z1);
+    add('annex_wall_left', cbox(0.24, ah, ad, M.concretePanel, 0.03), A.x0, B.plinth + ah / 2, az);
+    add('annex_wall_right', cbox(0.24, ah, ad, M.concretePanel, 0.03), A.x1, B.plinth + ah / 2, az);
+    for (const [n, x] of [['l', A.x0], ['r', A.x1]]) add('annex_pilaster_' + n, cbox(0.3, ah, 0.3, M.steel, 0.03), x, B.plinth + ah / 2, A.z1);
+    add('annex_roof', cbox(aw + 0.5, 0.14, ad + 0.55, M.galv, 0.03), ax, A.h + 0.1, az + 0.15).rotation.x = 0.07;
+    for (let i = 0; i < 5; i++) add('annex_roof_seam_' + i, cbox(0.05, 0.05, ad + 0.55, M.galv, 0.01), A.x0 + 0.35 + i * (aw - 0.7) / 4, A.h + 0.19, az + 0.15).rotation.x = 0.07;
+    add('annex_flashing_front', cbox(aw + 0.55, 0.16, 0.06, M.rust, 0.01), ax, A.h + 0.02, A.z1 + 0.42);
+    add('annex_door', cbox(1.0, 2.0, 0.07, M.greenPanel, 0.015), A.x1 - 0.85, B.plinth + 1.0, A.z1 + 0.14);
+    add('annex_door_frame', cbox(1.16, 0.08, 0.1, M.steel, 0.01), A.x1 - 0.85, B.plinth + 2.04, A.z1 + 0.15);
+    win('annex_window', A.x1, A.h - 0.75, az, 1.1, 0.45, 'x');
+    add('annex_downpipe', cyl(0.05, A.h, M.galv, 10), A.x0 + 0.2, A.h / 2, A.z1 + 0.2).rotation.x = Math.PI / 2;
+    add('annex_chute_collar', cbox(0.75, 0.6, 0.12, M.rust, 0.02), HOPPER.x + 0.7, 1.15, A.z1 + 0.13);
+    // low concrete platform at the hill end
+    add('platform', cbox(2.2, 1.2 + SINK, 2.6, M.concrete, 0.06), 4.3, (1.2 - SINK) / 2, -9.3);
+    add('platform_coping', cbox(2.32, 0.1, 2.72, M.concrete, 0.025), 4.3, 1.25, -9.3);
   }
 
-  // ---------------- three storage bins
-  const dividerProfile = [[-BIN.t, 0], [BIN.d + 0.55, 0], [BIN.d + 0.55, 0.4], [BIN.d - 0.15, BIN.wall], [-BIN.t, BIN.wall]];
+  // ================================================================ storage bins
+  const dividerProfile = [[-BIN.t, -SINK], [BIN.d + 0.55, -SINK], [BIN.d + 0.55, 0.4], [BIN.d - 0.15, BIN.wall], [-BIN.t, BIN.wall]];
   for (let b = 0; b < 3; b++) {
     const sec = S('bin_' + b);
     const x0 = BIN.x0 + b * BIN.w, x1 = x0 + BIN.w, cx = (x0 + x1) / 2, cz = BIN.d / 2;
-    const add = (name, m, x, y, z) => { m.position.set(x, y, z); return P(`bin_${b}_${name}`, m, sec); };
-    add('floor', box(BIN.w, 0.14, BIN.d, M.concrete), cx, 0.07, cz);
-    add('wall_back', box(BIN.w + BIN.t, BIN.wall, BIN.t, M.concrete), cx, BIN.wall / 2, -BIN.t / 2);
-    const dividers = b === 2 ? [['left', x0], ['right', x1]] : [['left', x0]];
-    for (const [n, x] of dividers) {
-      const dv = add('divider_' + n, prism(dividerProfile, BIN.t, M.concrete), x + BIN.t / 2, 0, 0);
-      dv.rotation.y = -Math.PI / 2;
-      add('divider_cap_' + n, box(BIN.t + 0.06, 0.08, BIN.d, M.concrete, 1), x, BIN.wall + 0.04, BIN.d / 2 - BIN.t / 2);
+    const add = (name, m, x = 0, y = 0, z = 0) => { m.position.set(x, y, z); return P(`bin_${b}_${name}`, m, sec); };
+    add('floor', cbox(BIN.w, 0.16 + SINK, BIN.d, M.concrete, 0.03), cx, (0.16 - SINK) / 2, cz);
+    add('wall_back', cbox(BIN.w + BIN.t, BIN.wall + SINK, BIN.t, M.concrete, 0.05), cx, (BIN.wall - SINK) / 2, -BIN.t / 2);
+    for (const [n, x] of (b === 2 ? [['left', x0], ['right', x1]] : [['left', x0]])) {
+      add('divider_' + n, cprism(dividerProfile, BIN.t, M.concrete, 0.05), x + BIN.t / 2, 0, 0).rotation.y = -Math.PI / 2;
+      add('divider_coping_' + n, cbox(BIN.t + 0.08, 0.08, BIN.d + 0.3, M.concrete, 0.02), x, BIN.wall + 0.04, BIN.d / 2 - BIN.t / 2 - 0.15);
     }
-    add('curb', box(BIN.w - BIN.t, 0.45, 0.4, M.concrete, 1.5), cx, 0.225, BIN.d + 0.2);
-    for (let g = 0; g < 2; g++) add('grate_' + g, box(1.5, 0.26, 0.04, M.grate, 1.5), cx + (g - 0.5) * 1.8, 0.22, BIN.d + 0.41);
-    makeFill('bin_' + b, sec, { cx, cz: cz + 0.1, floorY: 0.14, w: BIN.w - 0.65, d: BIN.d - 0.3, maxH: 1.75, count: 170, smin: 0.15, smax: 0.34 });
-  }
-
-  // ---------------- rocks: cliff ribs running down the hill, scree and gravel (every rock separate)
-  const nearStructure = (x, z) => {
-    const [lx, lz] = toPortal(x, z), h = heightAt(x, z);
-    if (Math.abs(lx) < 4.6 && lz > -6.5 && lz < 2.5 && h < 6.2) return true;
-    if (x > 3 && x < 14 && z > -12.6 && z < -1 && h < 1.2) return true;
-    if (x > -0.8 && x < 13.5 && z > -1 && z < 6.2) return true;
-    return false;
-  };
-  {
-    const sec = S('hill_rocks');
-    let n = 0;
-    const grad = (x, z) => [heightAt(x + 0.2, z) - heightAt(x - 0.2, z), heightAt(x, z + 0.2) - heightAt(x, z - 0.2)];
-    const starts = [];
-    for (let gx = -12; gx <= 15; gx += 1.8) for (let gz = -20; gz <= 0; gz += 1.8) starts.push([gx + (r() - 0.5) * 1.8, gz + (r() - 0.5) * 1.8]);
-    for (let si = 0, rib = 0; si < starts.length; si++) {
-      if (r() < 0.3) continue;
-      let [x, z] = starts[si];
-      if (heightAt(x, z) < 3.5 || nearStructure(x, z)) continue;
-      rib++;
-      const big = 0.45 + r() * 0.45, width = 0.9 + r() * 1.3;
-      for (let step = 0; step < 9 + r() * 14; step++) {
-        const h = heightAt(x, z);
-        if (h < 0.8 || nearStructure(x, z)) break;
-        const [gx, gz] = grad(x, z), gl = Math.hypot(gx, gz) || 1;
-        const nx = -gz / gl, nz = gx / gl; // across the slope
-        for (let k = 0; k < 3; k++) {
-          if (r() > 0.6) continue;
-          const s = big * (0.4 + r() * 0.7);
-          const m = P('hill_rock_' + n++, rock(M.rock, 1, cliffGeos), sec);
-          const o = (r() - 0.5) * width, px = x + nx * o, pz = z + nz * o;
-          const [hx, hz] = grad(px, pz), normal = V(-hx / 0.4, 1, -hz / 0.4).normalize();
-          m.quaternion.setFromUnitVectors(V(0, 1, 0), normal).multiply(new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), r() * 6.28));
-          m.scale.set(s * (1 + r() * 0.7), s * (0.45 + r() * 0.45), s * (0.8 + r() * 0.6));
-          m.position.set(px, heightAt(px, pz) - 0.05 * s, pz);
-        }
-        x -= gx / gl * 0.3 + (r() - 0.5) * 0.2;
-        z -= gz / gl * 0.3 + (r() - 0.5) * 0.2;
-      }
+    add('curb', cbox(BIN.w - BIN.t, 0.45 + SINK, 0.42, M.concrete, 0.04), cx, (0.45 - SINK) / 2, BIN.d + 0.21);
+    for (let g = 0; g < 2; g++) {
+      add('grate_' + g, cbox(1.5, 0.24, 0.05, M.glazing, 0.012), cx + (g - 0.5) * 1.8, 0.22, BIN.d + 0.43);
+      add('grate_frame_' + g, cbox(1.6, 0.32, 0.03, M.steel, 0.01), cx + (g - 0.5) * 1.8, 0.22, BIN.d + 0.415);
     }
-    for (let i = 0, tries = 0; i < 90 && tries < 2000; tries++) {
-      const x = -13 + r() * 28, z = -20 + r() * 25;
-      const h = heightAt(x, z);
-      if (h < 0.3 || nearStructure(x, z) || edgeDistClosed(GROUND_EDGE, x, z) < 0.3) continue;
-      i++;
-      const s = 0.12 + r() * 0.3;
-      const m = P('hill_rock_' + n++, rock(M.rock, s, cliffGeos), sec);
-      m.position.set(x, h + s * 0.2, z);
-    }
-  }
-  {
-    const sec = S('ground_rocks');
-    let n = 0;
-    const place = (x, z, s, ore) => {
-      const m = P('ground_rock_' + n++, rock(ore ? M.ore : M.rock, s, ore ? oreGeos : cliffGeos), sec);
-      m.position.set(x, heightAt(x, z) + s * 0.3, z);
-    };
-    // gravel strip along the bin fronts and ends
-    for (let i = 0; i < 110; i++) {
-      const t = r();
-      let x, z;
-      if (t < 0.7) { x = -0.6 + r() * 13.8; z = BIN.d + 0.6 + r() * r() * 1.4; }
-      else if (t < 0.85) { x = -0.6 - r() * 1.2; z = -0.3 + r() * 5.5; }
-      else { x = 12.9 + r() * 1.3; z = -0.3 + r() * 5.8; }
-      place(x, z, 0.06 + r() * r() * 0.28, r() < 0.12);
-    }
-    // scree at the hill foot / portal, around hopper and building
-    for (let i = 0, tries = 0; i < 110 && tries < 4000; tries++) {
-      const x = -10 + r() * 27, z = -14 + r() * 24;
-      const e = edgeDistClosed(GROUND_EDGE, x, z), hd = polyDist(HILL_EDGE, x, z);
-      if (e < 0.3 || heightAt(x, z) > 0.4) continue;
-      const nearHill = hd > -1.8, nearHop = Math.hypot(x - HOPPER.x, z - HOPPER.z) < 2.6 && Math.hypot(x - HOPPER.x, z - HOPPER.z) > 1.6;
-      const nearBld = x > 12.9 && x < 14.5 && z > -11 && z < -4;
-      if (!(nearHill || nearHop || nearBld || r() < 0.08)) continue;
-      if (x > -0.8 && x < 13.5 && z > -1 && z < 5.6) continue;
-      const [lx, lz] = toPortal(x, z);
-      if (Math.abs(lx) < 2.3 && lz > -0.5 && lz < 2) continue;
-      if (Math.abs((x - BELT_TAIL.x) * side.x + (z - BELT_TAIL.z) * side.z) < 1.0 && x < BELT_HEAD.x + 0.5) continue;
-      i++;
-      place(x, z, 0.08 + r() * r() * 0.4, r() < 0.15);
-    }
+    makeFill('bin_' + b, sec, { cx, cz: cz + 0.1, floorY: 0.16, w: BIN.w - 0.65, d: BIN.d - 0.3, maxH: 1.75, count: 210, smin: 0.13, smax: 0.27 });
   }
 
   // tag meshes with their section, remember original transforms for rebuild
@@ -734,7 +721,8 @@ export function createMine(options = {}) {
     if (o.isMesh && !o.userData.static) o.userData.orig = { parent: o.parent, p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() };
   });
 
-  // ---------------------------------------------------------------- runtime
+  // ================================================================ runtime
+  const groundAt = opts.groundHeight;
   const state = { running: true, speed: opts.beltSpeed, autoCycle: opts.autoCycle, activeBin: 0 };
   const flying = [], dust = [], queue = [];
   let time = 0;
@@ -756,29 +744,29 @@ export function createMine(options = {}) {
     }
   }
 
-  const tmpBox = new THREE.Box3(), tmpV = new THREE.Vector3();
+  const tmpBox = new THREE.Box3(), tmpV = V();
   function destroy(name) {
     const target = parts[name];
     if (!target) return;
     const meshes = [];
     target.traverse(o => { if (o.isMesh && o.userData.orig && !o.userData.debris && !o.userData.flying) meshes.push(o); });
     if (!meshes.length) return;
-    const center = tmpBox.setFromObject(target).getCenter(V(0, 0, 0));
+    const center = tmpBox.setFromObject(target).getCenter(V());
     const size = tmpBox.getSize(tmpV).length();
     center.y = Math.max(0, center.y - size * 0.25);
     for (const m of meshes) {
       if (!m.visible) { m.userData.debris = true; continue; }
       root.attach(m);
-      const dims = new THREE.Box3().setFromBufferAttribute(m.geometry.attributes.position).getSize(V(0, 0, 0)).multiply(m.scale);
-      const minHalf = Math.min(dims.x, dims.y, dims.z) / 2;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      const dims = m.geometry.boundingBox.getSize(V()).multiply(m.scale);
       const vol = dims.x * dims.y * dims.z;
-      const dir = m.getWorldPosition(V(0, 0, 0)).sub(center);
+      const dir = m.getWorldPosition(V()).sub(center);
       dir.y = Math.abs(dir.y) + 0.5;
       dir.normalize();
       const speed = (2.5 + Math.random() * 4) / (1 + Math.cbrt(vol) * 0.6);
       m.userData.flying = true;
       flying.push({
-        m, r: minHalf, life: 0,
+        m, r: Math.min(dims.x, dims.y, dims.z) / 2, life: 0,
         v: dir.multiplyScalar(speed).add(V(0, 2 + Math.random() * 3, 0)),
         w: V(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(8 / (1 + Math.cbrt(vol))),
       });
@@ -787,7 +775,7 @@ export function createMine(options = {}) {
   }
 
   function destroyAll() {
-    ['conveyor', 'hopper', 'building', 'portal', 'bin_0', 'bin_1', 'bin_2'].forEach((n, i) => queue.push({ t: time + i * 0.45, name: n }));
+    ['conveyor', 'hopper', 'building', 'portal', 'tunnel', 'bin_0', 'bin_1', 'bin_2'].forEach((n, i) => queue.push({ t: time + i * 0.45, name: n }));
     queue.sort((a, b) => a.t - b.t);
   }
 
@@ -847,8 +835,8 @@ export function createMine(options = {}) {
       const d = state.speed * dt;
       beltTex.offset.x -= d / BELT_TILE;
       for (const rl of rollers) if (alive(rl.name)) {
-        rl.userData.spin -= d / rl.geometry.parameters.radiusTop;
-        rl.rotation.set(Math.PI / 2, rl.userData.spin, 0);
+        rl.userData.spin -= d / rl.userData.radius;
+        rl.rotation.set(rl.userData.tilt, 0, rl.userData.spin);
       }
       for (const o of beltOre) {
         if (!alive(o.mesh.name)) continue;
@@ -857,7 +845,7 @@ export function createMine(options = {}) {
           o.s -= 1;
           if (fillAlive('hopper')) fills.hopper.target = Math.min(1, fills.hopper.target + 0.03);
         }
-        o.mesh.position.set(o.s * beltLen, 0.14 + o.h, o.z);
+        o.mesh.position.set(o.s * beltLen, 0.12 + o.h, o.z);
         o.mesh.visible = o.s > 0.04 && o.s < 0.985;
       }
     }
@@ -887,7 +875,7 @@ export function createMine(options = {}) {
       f.v.y -= 12 * dt;
       m.position.addScaledVector(f.v, dt);
       m.rotation.x += f.w.x * dt; m.rotation.y += f.w.y * dt; m.rotation.z += f.w.z * dt;
-      const g = heightAt(m.position.x, m.position.z) + f.r;
+      const g = groundAt(m.position.x, m.position.z) + f.r;
       let grounded = false;
       if (m.position.y < g) {
         m.position.y = g; grounded = true;
@@ -912,7 +900,7 @@ export function createMine(options = {}) {
   }
 
   return {
-    root, parts, sections, heightAt,
+    root, parts, sections, ready: atlas.ready,
     fillNames: Object.keys(fills),
     update, destroy, destroyAll, rebuild,
     setConveyor({ running, speed } = {}) {
