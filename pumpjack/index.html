@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pumpjack Viewer</title>
+<style>
+  :root { --bg: #f2f1ee; --panel: rgba(255,255,255,0.88); --ink: #222; --accent: #b4532a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #ui { position: absolute; top: 12px; left: 12px; background: var(--panel); padding: 12px 14px; border-radius: 10px;
+        box-shadow: 0 2px 12px rgba(0,0,0,.12); display: grid; gap: 8px; min-width: 220px; }
+  #ui h1 { font-size: 15px; margin: 0 0 2px; }
+  #ui label { display: grid; grid-template-columns: 70px 1fr 36px; align-items: center; gap: 6px; }
+  #ui .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button, select { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #bbb; background: #fff; cursor: pointer; }
+  button.danger { background: var(--accent); color: #fff; border-color: var(--accent); }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="ui">
+  <h1>Pumpjack</h1>
+  <label>Speed <input id="speed" type="range" min="0" max="3" step="0.05" value="1"><span id="speedV">1.0</span></label>
+  <label>Health <input id="health" type="range" min="0" max="1" step="0.01" value="1"><span id="healthV">100</span></label>
+  <div class="row">
+    <select id="part"></select><button id="break">Break part</button>
+  </div>
+  <div class="row">
+    <button id="destroy" class="danger">Destroy</button>
+    <button id="reset">Reset</button>
+    <button id="export">Export GLB</button>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { createPumpjack, PUMPJACK_PARTS } from './pumpjack.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf2f1ee);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 500);
+camera.position.set(-9, 11, 22);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(1.2, 3, 0);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8070, 0.8));
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(-8, 18, 14);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14 });
+scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.ShadowMaterial({ opacity: 0.18 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const pj = createPumpjack({ phase: 1.2 });
+scene.add(pj.object);
+window.pj = pj;
+
+const $ = (id) => document.getElementById(id);
+for (const p of PUMPJACK_PARTS.filter((p) => p !== 'base')) $('part').add(new Option(p, p));
+$('speed').oninput = (e) => { pj.speed = +e.target.value; $('speedV').textContent = pj.speed.toFixed(1); };
+$('health').oninput = (e) => { pj.setHealth(+e.target.value); $('healthV').textContent = Math.round(pj.health * 100); };
+$('break').onclick = () => pj.breakPart($('part').value);
+$('destroy').onclick = () => { pj.destroy(); $('health').value = 0; $('healthV').textContent = 0; };
+$('reset').onclick = () => { pj.reset(); $('health').value = 1; $('healthV').textContent = 100; };
+$('export').onclick = () => {
+  new GLTFExporter().parse(pj.exportRoot(), (glb) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+    a.download = 'pumpjack.glb';
+    a.click();
+  }, console.error, { binary: true });
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  pj.update(clock.getDelta());
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
