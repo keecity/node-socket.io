@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mine Viewer</title>
+<style>
+  :root { --bg:#dcd6cb; --panel:rgba(30,28,24,.88); --fg:#eee6d8; --accent:#c9783a; }
+  html,body { margin:0; height:100%; background:var(--bg); font:13px system-ui,sans-serif; overflow:hidden; }
+  canvas { display:block; }
+  #ui { position:absolute; top:12px; left:12px; width:250px; max-height:calc(100% - 24px); overflow:auto;
+        background:var(--panel); color:var(--fg); border-radius:8px; padding:12px; box-sizing:border-box; }
+  h1 { font-size:15px; margin:0 0 8px; } h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent); margin:14px 0 6px; }
+  label { display:flex; align-items:center; gap:8px; margin:4px 0; } label span { width:70px; } input[type=range] { flex:1; }
+  button { background:#4a4438; color:var(--fg); border:0; border-radius:4px; padding:5px 8px; margin:2px; cursor:pointer; }
+  button:hover { background:var(--accent); } .danger { background:#7a2f22; }
+  #hint { position:absolute; bottom:10px; right:12px; color:#3a352c; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="ui">
+  <h1>Iron Mine</h1>
+  <h2>Conveyor</h2>
+  <label><input type="checkbox" id="run" checked> running</label>
+  <label><span>speed</span><input type="range" id="speed" min="0" max="3" step="0.1" value="1.2"></label>
+  <label><input type="checkbox" id="auto" checked> auto production cycle</label>
+  <h2>Fill levels</h2>
+  <div id="fills"></div>
+  <h2>Destroy</h2>
+  <div id="destroy"></div>
+  <button class="danger" id="all">Demolish all</button> <button id="rebuild">Rebuild</button>
+  <h2>Export</h2>
+  <button id="export">Download .glb</button>
+</div>
+<div id="hint">Click a part to destroy it · Shift+click destroys its whole section · drag to orbit</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { createMine } from './mine.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdcd6cb);
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
+camera.position.set(22, 24, 30);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1, 0);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6a5a40, 1.4));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
+sun.position.set(-12, 28, 16);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 1, far: 80 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+const mine = createMine();
+scene.add(mine.root);
+mine.setFill('bin_0', 0.8, { instant: true });
+mine.setFill('bin_1', 0.6, { instant: true });
+mine.setFill('bin_2', 0.35, { instant: true });
+mine.setFill('hopper', 0.5, { instant: true });
+
+function resize() {
+  const a = innerWidth / innerHeight, s = 15;
+  Object.assign(camera, { left: -s * a, right: s * a, top: s, bottom: -s });
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+addEventListener('resize', resize); resize();
+
+// ---- UI
+const $ = id => document.getElementById(id);
+$('run').onchange = e => mine.setConveyor({ running: e.target.checked });
+$('speed').oninput = e => mine.setConveyor({ speed: +e.target.value });
+$('auto').onchange = e => mine.setAutoCycle(e.target.checked);
+const sliders = {};
+for (const name of mine.fillNames) {
+  const row = document.createElement('label');
+  row.innerHTML = `<span>${name}</span><input type="range" min="0" max="1" step="0.01">`;
+  const input = row.querySelector('input');
+  input.oninput = () => mine.setFill(name, +input.value, { rate: 0.8 });
+  sliders[name] = input;
+  $('fills').appendChild(row);
+}
+for (const name of mine.sections) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => mine.destroy(name);
+  $('destroy').appendChild(b);
+}
+$('all').onclick = () => mine.destroyAll();
+$('rebuild').onclick = () => mine.rebuild();
+$('export').onclick = () => {
+  mine.rebuild();
+  new GLTFExporter().parse(mine.root, glb => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+    a.download = 'mine.glb'; a.click();
+  }, console.error, { binary: true, onlyVisible: false });
+};
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let down;
+renderer.domElement.addEventListener('pointerdown', e => down = [e.clientX, e.clientY]);
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+  ndc.set(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  for (const hit of ray.intersectObject(mine.root, true)) {
+    const info = mine.partOf(hit.object);
+    if (!info || !info.section || hit.object.userData.debris || hit.object.userData.flying) continue;
+    mine.destroy(e.shiftKey ? info.section : info.part);
+    break;
+  }
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  mine.update(clock.getDelta());
+  for (const n in sliders) if (document.activeElement !== sliders[n]) sliders[n].value = mine.getFill(n);
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
