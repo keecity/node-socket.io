@@ -47,7 +47,8 @@ const XMAX = 14.2, ZMAX = 7.2;
 
 // ====================================================================== players
 const CLIPS = { Idle: 1, Dribble: 1, Shoot: 0, Dunk: 0, Run: 1, DribbleRun: 1, Defend: 1, Block: 0, Ready: 1, Pass: 0, Steal: 0, SlideL: 1, SlideR: 1 };
-const RUN_NATIVE = 0.30 / (0.5 * 0.42) * S, SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
+const RUN_NATIVE = 0.23 / (0.44 * 0.32) * S,      // ground speed the Run cycle covers at 1x (feet don't skate when matched)
+     DRUN_NATIVE = 0.30 / (0.5 * 0.42) * S, SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
 const NAMES = [['Jax', 'Rook', 'Blaze'], ['Kai', 'Nova', 'Ziggy']];
 const P = [];
 function makePlayer(team, idx) {
@@ -264,14 +265,14 @@ function laneClear(a, b, pad, t) {   // no player of team t near segment a->b
 function animMove(p, dt, mode) {
   const sp = p.vel.length();
   if (mode === 'handler') {
-    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, Math.max(0.6, sp / RUN_NATIVE)); }
+    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, Math.max(0.6, sp / DRUN_NATIVE)); }
     else setAnim(p, 'Dribble', 0.2);
   } else if (mode === 'stance') {
-    if (sp > 2.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, Math.max(0.7, sp / RUN_NATIVE)); return; }
+    if (sp > 2.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, Math.min(1.35, Math.max(0.7, sp / RUN_NATIVE))); return; }
     const lat = p.vel.dot(left(p));
     if (lat > 0.45) setAnim(p, 'SlideL', 0.15, Math.max(0.6, lat / SLIDE_NATIVE)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, Math.max(0.6, -lat / SLIDE_NATIVE)); else setAnim(p, 'Defend', 0.2);
   } else {
-    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, Math.max(0.6, sp / RUN_NATIVE)); }
+    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, Math.min(1.35, Math.max(0.6, sp / RUN_NATIVE))); }
     else setAnim(p, 'Ready', 0.25);
   }
 }

@@ -276,19 +276,38 @@ def legs_cycle(t, c, period=RUN_T, stride=STRIDE, lift=0.075, width=0.085):
     bob = np.cos(4 * np.pi * (ph - STANCE / 2)); sway = np.sin(2 * np.pi * ph)
     return ph, bob, sway
 
-def run():
-    def ovr(t, c):
-        ph, bob, sway = legs_cycle(t, c)
-        c['hips'] = np.array([0.006 * sway, -0.03 - 0.014 * bob, 0.0]); c['hipsR'] = np.array([12, -8 * sway, 2 * sway])
-        c['spineR'] = np.array([4, 0, 0]); c['chestR'] = np.array([2, 13 * sway, -1.5 * sway])
-        c['neckR'] = np.array([-6, 0, 0]); c['headR'] = np.array([-12, -4 * sway, 0])
+def run_body(t, c, r, arms=True):
+    """legs + pelvis + torso + head for the run gait r (gait.Run). ph_L = 0 at left heel strike."""
+    T = r.T; phL = (t / T) % 1.0; phR = (phL + 0.5) % 1.0
+    for S, sg, ph in (('L', 1, phL), ('R', -1, phR)):
+        z, lift, pitch = r.foot(ph)
+        c[f'f{S}'] = np.array([sg * r.track, lift, z]); c[f'fr{S}'] = np.array([pitch, sg * 4.0]); c[f'frel{S}'] = np.array([0.0])
+        c[f'fk{S}'] = np.array([sg * 0.08, 0.0, 1.0])
+    w = 2 * np.pi * phL
+    down = np.cos(2 * w - 2 * np.pi * r.s)                   # +1 at mid-stance of either foot (lowest), -1 in flight
+    lat = np.cos(w - np.pi * r.s)                            # +1 when the left foot is mid-stance
+    c['hips'] = np.array([0.008 * lat, r.hip_h - r.bob * (0.5 + 0.5 * down), 0.0])
+    # pelvis yaws so the swinging leg's hip goes forward; drops on the swing side; leans into the run
+    yaw = 9 * np.sin(w - np.pi * r.s)                        # + = left hip back (left leg in stance, pushing)
+    c['hipsR'] = np.array([r.lean + 2.5 * down, -yaw, -3.0 * lat])
+    c['spineR'] = np.array([6.0, yaw * 0.6, 1.5 * lat]); c['chestR'] = np.array([3.0 + 2.0 * down, yaw * 1.2, 1.0 * lat])
+    c['neckR'] = np.array([-5.0, -yaw * 0.6, -lat]); c['headR'] = np.array([-10.0 - 2.0 * down, -yaw * 0.5, -1.0 * lat])
+    if arms:
         for S, sg in (('L', 1), ('R', -1)):
-            a = -sg * sway                                   # arm swings opposite to the same-side leg
-            c[f'hp{S}'] = np.array([sg * 0.17, -0.06 + 0.06 * max(a, 0), 0.04 + 0.13 * a])
-            c[f'hn{S}'] = np.array([-sg * 1.0, 0, 0.1]); c[f'hf{S}'] = np.array([0, 0.25 + 0.4 * max(a, 0), 1])
-            c[f'he{S}'] = np.array([sg * 0.3, -0.3, -1]); c[f'hw{S}'] = np.array([0.]); c[f'hsp{S}'] = np.array([0.])
-        c['ball'] = np.array([0, -0.6, -0.4])           # hidden in game; parked behind the body
-    return bake(build_track([(0, READY), (RUN_T, {})], loop=True), RUN_T, override=ovr)
+            a = -sg * np.sin(w - np.pi * r.s + 0.35)        # arm forward when the opposite leg is forward; slight lag
+            fwd = max(a, 0.0)
+            back = max(-a, 0.0)
+            c[f'hp{S}'] = np.array([sg * (0.16 - 0.035 * fwd), -0.10 + 0.10 * fwd + 0.01 * back, 0.03 + 0.14 * fwd - 0.13 * back])
+            c[f'hn{S}'] = np.array([-sg * 0.9, -0.15, 0.25 * a]); c[f'hf{S}'] = np.array([sg * 0.15, 0.35 + 0.45 * fwd, 1.0])
+            c[f'he{S}'] = np.array([sg * 0.35, -0.25, -1.0]); c[f'hw{S}'] = np.array([0.0]); c[f'hsp{S}'] = np.array([0.0])
+            c[f'sh{S}'] = np.array([0, -4 * a, 0])
+    c['ball'] = np.array([0, -0.6, -0.4])
+    return phL
+
+def run():
+    from gait import Run
+    r = Run()
+    return bake(build_track([(0, READY), (r.T, {})], loop=True), r.T, override=lambda t, c: run_body(t, c, r))
 
 def dribble_run():
     period = RUN_T * 2   # one bounce per stride pair
