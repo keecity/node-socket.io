@@ -57,6 +57,8 @@ function noTreesAt(xw, zw) {                    // world units: keep forests off
   for (const p of pumpjacks) if (PJ_BOX && inPumpLot(p, wm(xw / S), wm(zw / S), 0.3)) return true;
   for (const f of oilFields) if (wdist2(f.x, f.z, xw / S, zw / S) < OIL_R * 1.1) return true;
   for (const p of camps) if (WC_BOX && inCampLot(p, wm(xw / S), wm(zw / S), 0.15)) return true;
+  for (const p of farms) if (inFarmLot(p, wm(xw / S), wm(zw / S), 0.15)) return true;
+  for (const w of warehouses) if (inWhLot(w, wm(xw / S), wm(zw / S), 0.25)) return true;
   return false;
 }
 // terrain-aware link route (demo units in/out): A* over a coarse grid that penalises grade, high ground and water,
@@ -613,7 +615,7 @@ function checkIntegrity(p) {
 }
 // damage everything within radius of a point (pt in demo units, any wrapped copy)
 function impact(pt, radius, dir, power, kind = 'hit') {
-  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
+  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
   const seen = new Set(); let any = false;
   for (let gx = pt.x - radius - GRID; gx <= pt.x + radius + GRID; gx += GRID) for (let gz = pt.z - radius - GRID; gz <= pt.z + radius + GRID; gz += GRID) for (const p of propsNear(gx, gz)) {
     if (seen.has(p) || !p.alive) continue; seen.add(p);
@@ -634,7 +636,7 @@ function impact(pt, radius, dir, power, kind = 'hit') {
 function pointInProp(p, pt) { if (pt.y > p.h + 0.01 || pt.y < p.y0 - 0.05) return false; const dx = wd(pt.x - p.x), dz = wd(pt.z - p.z);
   if (p.hw) { const c = Math.cos(-p.rotY), s = Math.sin(-p.rotY); const lx = dx * c - dz * s, lz = dx * s + dz * c; return Math.abs(lx) < p.hw && Math.abs(lz) < p.hd; }
   return Math.hypot(dx, dz) < p.r; }
-function propHit(pos) { if (outpostAt(pos) || airbaseAt(pos) || pumpAt(pos) || campAt(pos) || mineAt(pos)) return true; for (const p of propsNear(pos.x, pos.z)) if (p.alive && pointInProp(p, pos)) return true; return false; }
+function propHit(pos) { if (outpostAt(pos) || airbaseAt(pos) || pumpAt(pos) || campAt(pos) || mineAt(pos) || warehouseAt(pos)) return true; for (const p of propsNear(pos.x, pos.z)) if (p.alive && pointInProp(p, pos)) return true; return false; }
 const _corner = new THREE.Vector3();
 function updateDebris(dt) {
   for (const t of towns) for (const k in t.G) t.G[k].touched = false;
@@ -697,6 +699,8 @@ const battleAssets = Promise.all([loadGLBParts(['assets/mech.0.b64.txt', 'assets
 const pumpAssets = loadGLB('assets/pumpjack.b64.txt').then(preparePump, e => { console.error('pump model', e); PUMP_ERR = String(e && e.message || e); });
 const woodAssets = loadGLB('assets/woodcutter.b64.txt').then(prepareWood, e => { console.error('woodcutter model', e); WOOD_ERR = String(e && e.message || e); });
 const mineAssets = loadGLB('assets/mine.b64.txt').then(prepareMine, e => { console.error('mine model', e); MINE_ERR = String(e && e.message || e); });
+const farmAssets = loadGLB('assets/farm.b64.txt').then(prepareFarm, e => { console.error('farm model', e); FARM_ERR = String(e && e.message || e); });
+const semiAssets = loadGLB('assets/semi.b64.txt').then(prepareSemi, e => { console.error('semi model', e); SEMI_ERR = String(e && e.message || e); });
 const scaffoldAssets = Promise.all([loadGLB('assets/scaffold_wall.b64.txt'), loadGLB('assets/scaffold_top.b64.txt')]).then(([w, t]) => { scWallProto = w.scene; scTopProto = t.scene; }, e => console.error('scaffold models', e));
 
 // ------------------------------------------------------------------ road meshes (built from the merged chains)
@@ -993,7 +997,7 @@ function canPlaceOutpost(team, xw, zw) { const x = wm(xw / S), z = wm(zw / S);
   if (!inTerritory(team, x, z)) return 'Outside your territory';
   for (const f of oilFields) if (wdist2(f.x, f.z, x, z) < OIL_R + OUTPOST_W * 0.5) return 'Oil fields are for oil pumps';
   if (Hd(x, z) < 2 / S * 1.2 || heightAt(xw, zw) < 2.5) return 'Cannot build on water';
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]]) if (roadAt((x + dx * OUTPOST_W / 2) * S, (z + dz * OUTPOST_W / 2) * S) > 0.05) return 'Blocked by a road';
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]]) if (roadAt((x + dx * OUTPOST_W / 2) * S, (z + dz * OUTPOST_W / 2) * S) > 0.5) return 'Blocked by a road';
   const e = OUTPOST_W / 2; let lo = 1e9, hi = -1e9; for (const [a, b] of [[-e, -e], [e, -e], [e, e], [-e, e], [0, 0]]) { const h = Hd(x + a, z + b); lo = Math.min(lo, h); hi = Math.max(hi, h); } if (hi - lo > 0.9) return 'Ground too steep';
   for (const o of outposts) if (o.alive && wdist2(o.x, o.z, x, z) < OUTPOST_W * 1.6) return 'Too close to another outpost';
   for (const [a, b] of [[0, 0], [e, 0], [-e, 0], [0, e], [0, -e]]) for (const p of propsNear(x + a, z + b)) if (p.alive && wdist2(p.x, p.z, x, z) < p.r + e * 0.9) return 'Blocked by a building';
@@ -1046,7 +1050,7 @@ function canPlaceAirbase(team, xw, zw, rot = 0) { const b = { x: wm(xw / S), z: 
   let lo = 1e9, hi = -1e9;
   for (const p of pts) { if (!inTerritory(team, p.x, p.z)) return 'Must fit inside your territory';
     const h = Hd(p.x, p.z); if (h < 2 / S * 1.2) return 'Cannot build on water'; lo = Math.min(lo, h); hi = Math.max(hi, h);
-    if (roadAt(p.x * S, p.z * S) > 0.05) return 'Blocked by a road';
+    if (roadAt(p.x * S, p.z * S) > 0.5) return 'Blocked by a road';
     for (const f of oilFields) if (wdist2(f.x, f.z, p.x, p.z) < OIL_R) return 'Oil fields are for oil pumps';
     for (const q of propsNear(p.x, p.z)) if (q.alive && wdist2(q.x, q.z, p.x, p.z) < q.r + 0.25) return 'Blocked by a building'; }
   if (hi - lo > 1.1) return 'Ground too uneven';
@@ -1091,6 +1095,8 @@ function groundLocked(xw, zw, self) { const x = xw / S, z = wm(zw / S), xx = wm(
   for (const b of airbases) if (b !== self && b.alive && wdist2(b.x, b.z, xx, z) < 4.5) { const { lx, lz } = abLocal(b, xx, z); const mm = 1 + m / AB_K; if (lx > AB_EXT[0] - mm && lx < AB_EXT[1] + mm && lz > AB_EXT[2] - mm && lz < AB_EXT[3] + mm) return true; }
   for (const p of pumpjacks) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 2) { if (inPumpLot(p, xx, z, 0.15 + m)) return true; }
   for (const p of camps) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 2.2) { if (inCampLot(p, xx, z, 0.15 + m)) return true; }
+  for (const w of warehouses) if (w !== self && w.alive && wdist2(w.x, w.z, xx, z) < 4) { if (inWhLot(w, xx, z, 0.1 + m)) return true; }
+  for (const p of farms) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 2) { if (inFarmLot(p, xx, z, 0.1 + m)) return true; }
   for (const p of mines) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 3) { const { lx, lz } = mnLocal(p, xx, z); if (inRect(MN_YARD, lx, lz, 0.15 + m) || inRect(MN_TUN, lx, lz, 0.15 + m)) return true; }
   return false; }
 function inAirbaseLot(b, x, z) { if (wdist2(b.x, b.z, x, z) > 4) return false; const { lx, lz } = abLocal(b, x, z); return lx > AB_EXT[0] - 3 && lx < AB_EXT[1] + 3 && lz > AB_EXT[2] - 3 && lz < AB_EXT[3] + 3; }
@@ -1195,7 +1201,7 @@ function canPlacePump(team, xw, zw, rot = 0) { if (!PJ_BOX) return 'Pump model s
   for (let i = 0; i <= 6; i++) for (let j = 0; j <= 3; j++) { const q = pjWorld(p, PJ_BOX.x0 + (PJ_BOX.x1 - PJ_BOX.x0) * i / 6, PJ_BOX.z0 + (PJ_BOX.z1 - PJ_BOX.z0) * j / 3);
     if (!inTerritory(team, q.x, q.z)) return 'Must fit inside your territory';
     const h = Hd(q.x, q.z); if (h < 2 / S * 1.2) return 'Cannot build on water'; lo = Math.min(lo, h); hi = Math.max(hi, h);
-    if (roadAt(q.x * S, q.z * S) > 0.05) return 'Blocked by a road';
+    if (roadAt(q.x * S, q.z * S) > 0.5) return 'Blocked by a road';
     if (groundLocked(q.x * S, q.z * S, null)) return 'Too close to another building';
     for (const pr of propsNear(q.x, q.z)) if (pr.alive && wdist2(pr.x, pr.z, q.x, q.z) < pr.r + 0.15) return 'Blocked by a building'; }
   if (hi - lo > 0.9) return 'Ground too uneven';
@@ -1243,7 +1249,7 @@ function canPlaceCamp(team, xw, zw, rot = 0) { if (!WC_BOX) return 'Camp model s
   for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) { const q = wcWorld(p, WC_BOX.x0 + (WC_BOX.x1 - WC_BOX.x0) * i / 4, WC_BOX.z0 + (WC_BOX.z1 - WC_BOX.z0) * j / 4);
     if (!inTerritory(team, q.x, q.z)) return 'Must fit inside your territory';
     const h = Hd(q.x, q.z); if (h < 2 / S * 1.2) return 'Cannot build on water'; lo = Math.min(lo, h); hi = Math.max(hi, h);
-    if (roadAt(q.x * S, q.z * S) > 0.05) return 'Blocked by a road';
+    if (roadAt(q.x * S, q.z * S) > 0.5) return 'Blocked by a road';
     if (groundLocked(q.x * S, q.z * S, null)) return 'Too close to another building';
     for (const f of oilFields) if (wdist2(f.x, f.z, q.x, q.z) < OIL_R) return 'Oil fields are for oil pumps';
     for (const pr of propsNear(q.x, q.z)) if (pr.alive && wdist2(pr.x, pr.z, q.x, q.z) < pr.r + 0.15) return 'Blocked by a building'; }
@@ -1294,10 +1300,11 @@ function updateCamps(dt) { const c = camD();
         const sp = wcWorld(p, -1 * WC_K, 0.7 * WC_K); FX.dust(new THREE.Vector3(sp.x, p.y + 0.15, sp.z), 6, { size: [0.03, 0.12], life: [0.5, 1], vel: 0.15, up: 0.06, a: 0.5, col: [0.85, 0.72, 0.5] }); } }
     // 3) full stacks (or the last boards once the forest is gone) are picked up and banked
     const last = p.noTrees && !p.logs && p.boards > 0;
-    if (!p.pickT && (p.boards >= p.boardCap || last)) p.pickT = WC_PICKUP;
+    if (hasWarehouse(p.team)) { if (!p.truck && (p.boards >= p.boardCap || last)) sendTruck(p, 'wood'); }
+    else if (!p.pickT && (p.boards >= p.boardCap || last)) p.pickT = WC_PICKUP;
     if (p.pickT) { p.pickT -= dt; if (p.pickT <= 0) { p.pickT = 0; WOOD[p.team] += p.boards * WOOD_PER_BOARD; p.boards = 0; changed = true; } }
     if (changed) showStock(p);
-    if (p.noTrees && !p.logs && !p.boards && !p.pickT) { p.depleted = true;
+    if (p.noTrees && !p.logs && !p.boards && !p.pickT && !p.truck) { p.depleted = true;
       if (p.team === 0 && window.onOutpostAlert) window.onOutpostAlert('WOODCUTTER DEPLETED', 'No trees left in reach. Build a new camp near a forest.', { x: p.x * S, z: p.z * S }); } } }
 const woodRate = team => camps.filter(p => p.team === team && p.alive && p.done && !p.noTrees).length * BOARDS_PER_LOG * WOOD_PER_BOARD * 60 / Math.max(WC_SAW, WC_FELL / 2);   // the slower of felling and sawing sets the pace
 // ------------------------------------------------------------------ mines
@@ -1343,7 +1350,7 @@ function canPlaceMine(team, xw, zw, rot) { if (!mineProto) return 'Mine model st
   for (let i = 0; i <= 5; i++) for (let j = 0; j <= 5; j++) { const q = mnWorld(p, (MN_YARD[0] + (MN_YARD[1] - MN_YARD[0]) * i / 5) * MN_K, (MN_YARD[2] + (MN_YARD[3] - MN_YARD[2]) * j / 5) * MN_K);
     if (!inTerritory(team, q.x, q.z)) return 'Must fit inside your territory';
     if (Hd(q.x, q.z) < 2 / S * 1.2) return 'Cannot build on water';
-    if (roadAt(q.x * S, q.z * S) > 0.05) return 'Blocked by a road';
+    if (roadAt(q.x * S, q.z * S) > 0.5) return 'Blocked by a road';
     if (groundLocked(q.x * S, q.z * S, null)) return 'Too close to another building';
     for (const f of oilFields) if (wdist2(f.x, f.z, q.x, q.z) < OIL_R) return 'Oil fields are for oil pumps';
     for (const pr of propsNear(q.x, q.z)) if (pr.alive && wdist2(pr.x, pr.z, q.x, q.z) < pr.r + 0.15) return 'Blocked by a building'; }
@@ -1384,9 +1391,222 @@ function updateMines(dt) { const c = camD(), ax = BELT_B.clone().sub(BELT_A);
     if (p.hopper >= 1 && !p.dumpT) p.dumpT = 1;
     if (p.dumpT) { const i = p.bins.findIndex(f => f < 1); if (i < 0) p.dumpT = 0; else { const k = Math.min(dt / 4, p.hopper); p.hopper -= k; p.bins[i] = Math.min(1, p.bins[i] + k / 1); changed = true; if (p.hopper <= 0) { p.hopper = 0; p.dumpT = 0; } } }
     // all three full: picked up (the truck, later) and banked
-    if (full) { p.pickT = (p.pickT || 8) - dt; if (p.pickT <= 0) { p.pickT = 0; p.bins = [0, 0, 0]; ORE[p.team] += MN_ORE_PER_LOAD; changed = true; } }
+    if (full && hasWarehouse(p.team)) { if (!p.truck) sendTruck(p, 'ore'); }
+    else if (full) { p.pickT = (p.pickT || 8) - dt; if (p.pickT <= 0) { p.pickT = 0; p.bins = [0, 0, 0]; ORE[p.team] += MN_ORE_PER_LOAD; changed = true; } }
     if (changed) showMineStock(p); } }
 const oreRate = team => mines.filter(p => p.team === team && p.alive && p.done).length * Math.round(MN_ORE_PER_LOAD / ((3 * (MN_LOAD * MN_BELT_T / 46 + 4) + 8) / 60));
+// ------------------------------------------------------------------ farms
+// One crop per farm (picked at random for now), planted in all four plots. Crops grow out of the ground, are harvested
+// when ripe for food, and are replanted.
+let farmProto = null, FARM_ERR = null; const farms = [], FOOD = [0, 0], FM_K = 0.25, FM_COST = 400, FM_HP = 500, FM_GROW = 90, FM_HARVEST = 120;
+const FM_HALF = 3.4, CROPS = ['Wheat', 'Cabbage', 'Lettuce', 'Carrot'], PLOTS = [[-1.58, 1.58], [1.58, 1.58], [-1.58, -1.58], [1.58, -1.58]];
+const soilMat = (() => { const L = new THREE.TextureLoader(), map = L.load('assets/farm_soil.jpg'), h = L.load('assets/farm_soil_h.jpg'); map.encoding = THREE.sRGBEncoding;
+  for (const t of [map, h]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
+  return new THREE.MeshStandardMaterial({ map, bumpMap: h, bumpScale: 1.2, roughness: 1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }); })();
+function prepareFarm(g) { farmProto = g.scene; farmProto.updateMatrixWorld(true); const drop = [];
+  farmProto.traverse(o => { if (!o.isMesh) return; o.castShadow = o.receiveShadow = true; if (/^Farm_(Soil_Surface|Earth_Base)/.test(o.name)) drop.push(o); }); drop.forEach(o => o.parent.remove(o)); }
+// the field's soil: a patch laid on the terrain itself (follows the ground), textured with the farm dirt
+// the field's soil: a patch laid on the terrain itself (follows the ground), textured with the farm dirt. Its edge is
+// ragged and soft: the plots are fully covered, beyond them the soil frays out into the surrounding ground.
+const soilFadeMat = (() => { const m = soilMat.clone(); m.transparent = true; m.depthWrite = false;
+  m.onBeforeCompile = sh => { sh.vertexShader = 'attribute float aMask;\nvarying float vMask;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvMask = aMask;');
+    sh.fragmentShader = 'varying float vMask;\n' + sh.fragmentShader.replace('#include <alphamap_fragment>', '#include <alphamap_fragment>\ndiffuseColor.a *= vMask;'); };
+  m.customProgramCacheKey = () => 'soilfade'; return m; })();
+function soilPatch(p) { const in0 = FM_HALF * FM_K, e = in0 * 1.3, n = 48, geo = new THREE.PlaneGeometry(2 * e, 2 * e, n, n).rotateX(-Math.PI / 2), P = geo.attributes.position, uv = geo.attributes.uv, TILE = 0.65;
+  const r = mulberry(Math.round(p.x * 997 + p.z * 131)), H = [...Array(7)].map((_, k) => [k + 2, (0.5 + r()) / (k + 2), r() * 6.283]), mask = new Float32Array(P.count);
+  for (let i = 0; i < P.count; i++) { const lx = P.getX(i), lz = P.getZ(i), w = fmWorld(p, lx, lz); P.setY(i, Hd(w.x, w.z) - p.y + 0.004); uv.setXY(i, (lx + e) / TILE, (lz + e) / TILE);
+    const u = lx / in0, v = lz / in0, ang = Math.atan2(v, u), d = Math.pow(Math.pow(Math.abs(u), 5) + Math.pow(Math.abs(v), 5), 1 / 5);
+    const edge = 1.04 + 0.2 * (0.5 + 0.5 * H.reduce((s, [k, am, ph]) => s + am * Math.sin(k * ang + ph), 0)) + (r() - 0.5) * 0.05; mask[i] = clamp((edge - d) / 0.09, 0, 1); }
+  geo.setAttribute('aMask', new THREE.BufferAttribute(mask, 1)); geo.computeVertexNormals(); const m = new THREE.Mesh(geo, soilFadeMat); m.receiveShadow = true; m.renderOrder = 1; return m; }
+const fmLocal = (p, x, z) => { const dx = wd(x - p.x), dz = wd(z - p.z), c = Math.cos(p.rot), s = Math.sin(p.rot); return { lx: dx * c - dz * s, lz: dx * s + dz * c }; };
+const fmWorld = (p, lx, lz) => { const c = Math.cos(p.rot), s = Math.sin(p.rot); return { x: wm(p.x + lx * c + lz * s), z: wm(p.z - lx * s + lz * c) }; };
+const inFarmLot = (p, x, z, m) => { const { lx, lz } = fmLocal(p, x, z), e = FM_HALF * FM_K + m; return Math.abs(lx) < e && Math.abs(lz) < e; };
+function canPlaceFarm(team, xw, zw, rot = 0) { if (!farmProto) return 'Farm model still loading'; const p = { x: wm(xw / S), z: wm(zw / S), rot }, e = FM_HALF * FM_K; let lo = 1e9, hi = -1e9;
+  for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) { const q = fmWorld(p, -e + 2 * e * i / 4, -e + 2 * e * j / 4);
+    if (!inTerritory(team, q.x, q.z)) return 'Must fit inside your territory';
+    const h = Hd(q.x, q.z); if (h < 2 / S * 1.2) return 'Cannot build on water'; lo = Math.min(lo, h); hi = Math.max(hi, h);
+    if (roadAt(q.x * S, q.z * S) > 0.5) return 'Blocked by a road';
+    if (groundLocked(q.x * S, q.z * S, null)) return 'Too close to another building';
+    for (const f of oilFields) if (wdist2(f.x, f.z, q.x, q.z) < OIL_R) return 'Oil fields are for oil pumps';
+    for (const pr of propsNear(q.x, q.z)) if (pr.alive && wdist2(pr.x, pr.z, q.x, q.z) < pr.r + 0.15) return 'Blocked by a building'; }
+  if (hi - lo > 0.8) return 'Ground too uneven'; return null; }
+function makeFarmModel(ghost, crop) { const g = farmProto.clone(true); g.scale.setScalar(FM_K); const holder = new THREE.Group(); holder.add(g); const crops = [];
+  const keep = g.getObjectByName('Crop_' + crop); CROPS.forEach(c => { const o = g.getObjectByName('Crop_' + c); if (o && o !== keep) o.parent.remove(o); });
+  if (keep) { const [ox, oz] = PLOTS[CROPS.indexOf(crop)], base = keep.position.clone();   // the crop's own plot; copies are offset from it
+    for (const [px, pz] of PLOTS) { const o = px === ox && pz === oz ? keep : keep.clone(); o.position.set(base.x + px - ox, base.y, base.z + pz - oz);
+      if (o !== keep) keep.parent.add(o); if (o.morphTargetInfluences) o.morphTargetInfluences = o.morphTargetInfluences.slice(); crops.push(o); } }
+  if (ghost) { const gm = GHOST_MAT.clone(); gm.morphTargets = true; gm.color = GHOST_MAT.color;   // same colour object: turns red/green with the placement check
+    g.traverse(o => { if (o.isMesh) { o.material = gm; o.castShadow = false; if (o.morphTargetInfluences) o.morphTargetInfluences[0] = 1; } }); }
+  holder.userData.crops = crops; return holder; }
+function buildFarm(team, xw, zw, rot = 0, crop) { if (!farmProto) return null; crop = crop || CROPS[Math.floor(Math.random() * 4)]; const p = { kind: 'farm', team, x: wm(xw / S), z: wm(zw / S), rot, crop }, e = FM_HALF * FM_K;
+  let sum = 0, n = 0; for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) { const q = fmWorld(p, -e + 2 * e * i / 4, -e + 2 * e * j / 4); sum += Hd(q.x, q.z); n++; }
+  p.y = Math.max(2 / S * 1.3, sum / n);
+  if (window.levelTerrain) { levelTerrain(p.x * S, p.z * S, 2.4 * S, (xw, zw) => { if (groundLocked(xw, zw, null)) return 0; const { lx, lz } = fmLocal(p, xw / S, zw / S);
+      const d = Math.hypot(Math.max(Math.abs(lx) - e - 0.05, 0), Math.max(Math.abs(lz) - e - 0.05, 0)); return smoothW(d, 0.8); }, p.y * S); refreshOilNear(p.x, p.z, 2.4); }
+  p.obj = makeFarmModel(false, crop); p.obj.rotation.y = rot; battleRoot.add(p.obj); p.obj.children[0].position.y = -0.25 * FM_K; p.obj.add(soilPatch(p));   // plants grow straight out of the ground
+  Object.assign(p, { hp: FM_HP, maxHp: FM_HP, alive: true, vel: new THREE.Vector3(), pos: new THREE.Vector3(p.x, p.y + 0.1, p.z), crops: p.obj.userData.crops, grow: 0, ripeT: 0 });
+  setGrowth(p); farms.push(p); if (window.clearTreesIn) clearTreesIn((xw, zw) => inFarmLot(p, xw / S, zw / S, 0.15));
+  p.done = true; log(team, `<b>${TEAM_NAME[team]}</b> ${crop.toLowerCase()} farm planted`); return p; }   // fields need no construction
+function setGrowth(p) { const g = p.grow, ease = g * g * (3 - 2 * g); for (const o of p.crops) { if (o.morphTargetInfluences) o.morphTargetInfluences[0] = ease; o.visible = g > 0.005; } }
+function farmAt(pos) { for (const p of farms) if (p.alive && wdist2(p.x, p.z, pos.x, pos.z) < 1.8 && inFarmLot(p, pos.x, pos.z, 0) && pos.y < p.y + 0.15) return p; return null; }
+function farmHit(p, amount) { if (!p.alive) return; p.hp -= amount; if (p.hp <= 0) { p.alive = false; scorchMarks.add(p.x, p.z, 0, 1.4, 1.4); fires.push({ x: p.x, z: p.z, t: 15 }); p.grow = 0; setGrowth(p); log(p.team, `<b>${TEAM_NAME[p.team]}</b> farm destroyed`); } return 'hit'; }
+function farmImpact(pt, radius, power, kind) { for (const p of farms) { if (!p.alive || wdist2(p.x, p.z, pt.x, pt.z) > radius + 1.8) continue; if (!inFarmLot(p, pt.x, pt.z, radius)) continue;
+  if (kind === 'step' && p.grow > 0.2) { p.grow = Math.max(0.05, p.grow - 0.15); setGrowth(p); }   // trampled
+  farmHit(p, kind === 'bullet' ? 1 : kind === 'step' ? 2 : 40 * power); } }
+// crops grow while the farm stands; ripe crops are harvested (food banked) and the plots replanted
+function updateFarms(dt) { const c = camD();
+  for (const p of farms) { p.obj.position.set(disp(p.x, c.x), p.y, disp(p.z, c.z)); if (!p.alive || !p.done) continue;
+    if (p.grow < 1) { p.grow = Math.min(1, p.grow + dt / FM_GROW); setGrowth(p); }
+    else if (hasWarehouse(p.team)) { if (!p.truck) sendTruck(p, 'food'); }   // ripe crops wait for a truck
+    else { p.ripeT += dt; if (p.ripeT > 6) { p.ripeT = 0; p.grow = 0; FOOD[p.team] += FM_HARVEST; setGrowth(p);
+        FX.dust(new THREE.Vector3(p.x, p.y + 0.05, p.z), 20, { size: [0.1, 0.5], life: [0.8, 1.6], vel: 0.5, up: 0.1, a: 0.4, col: [0.5, 0.4, 0.3] }); } } } }
+const foodRate = team => Math.round(farms.filter(p => p.team === team && p.alive && p.done).length * FM_HARVEST * 60 / (FM_GROW + 6));
+// ------------------------------------------------------------------ logistics: warehouses and semi trucks
+// Trucks wait inside their warehouse. When a lumber mill or mine has a full load, a truck drives out, takes the roads to it,
+// loads (the stock disappears), drives back and pulls into the warehouse, where the load is banked. Spare trailers rest on
+// their landing gear in the lot. Without a warehouse, loads are collected the old way.
+let semiParts = null, SEMI_ERR = null; const warehouses = [], trucks = [], SEMI_K = 0.5;   // demo units per model unit (a trailer is ~16 world units long)
+const WH_COST = 1000, WH_HP = 2000, WH_W = 2.0, WH_D = 1.35, WH_H = 0.62, WH_LOT = 1.5, WH_TRUCKS = 2;
+// split the model sheet into cab, box trailer, flatbed trailer and landing-gear stand; each re-centred so it sits on y = 0,
+// the cab's origin at its fifth wheel and each trailer's origin at its kingpin, both facing -x
+function prepareSemi(g) { let mesh = null; g.scene.updateMatrixWorld(true); g.scene.traverse(o => { if (o.isMesh && !mesh) mesh = o; });
+  const g0 = new THREE.BufferGeometry(); for (const n of ['position', 'normal', 'uv']) if (mesh.geometry.attributes[n]) g0.setAttribute(n, floatAttr(mesh.geometry.attributes[n])); if (mesh.geometry.index) g0.setIndex(mesh.geometry.index.clone());
+  const src = g0.index ? g0.toNonIndexed() : g0; src.applyMatrix4(mesh.matrixWorld);   /* plain float copy (the loaded data may be interleaved) */
+  const pos = src.attributes.position, nv = pos.count, par = new Int32Array(nv).map((_, i) => i), find = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; }, uni = (a, b) => { a = find(a); b = find(b); if (a !== b) par[a] = b; };
+  const key = new Map(); for (let i = 0; i < nv; i++) { const k = Math.round(pos.getX(i) * 1e4) + ',' + Math.round(pos.getY(i) * 1e4) + ',' + Math.round(pos.getZ(i) * 1e4); const j = key.get(k); if (j === undefined) key.set(k, i); else uni(i, j); }
+  for (let t = 0; t < nv; t += 3) { uni(t, t + 1); uni(t, t + 2); }
+  const comps = new Map(); for (let t = 0; t < nv; t += 3) { const r = find(t); let c = comps.get(r); if (!c) comps.set(r, c = { tris: [], box: new THREE.Box3() }); c.tris.push(t); for (let v = 0; v < 3; v++) c.box.expandByPoint(new THREE.Vector3().fromBufferAttribute(pos, t + v)); }
+  const bands = { truck: [], box: [], flat: [], stand: [], tire: [] };
+  for (const c of comps.values()) { const cy = (c.box.min.y + c.box.max.y) / 2, cx = (c.box.min.x + c.box.max.x) / 2, cz = (c.box.min.z + c.box.max.z) / 2;
+    const k = cy > 0.64 ? 'truck' : cy > 0.31 ? 'box' : cy > 0.175 && cz < 0.26 ? 'flat' : cx < -0.3 ? 'stand' : 'tire'; bands[k].push(c); }
+  const build = (list, originX) => { const box = new THREE.Box3(); list.forEach(c => box.union(c.box)); const tris = list.flatMap(c => c.tris), out = new THREE.BufferGeometry();
+    for (const n in src.attributes) { const a = src.attributes[n], arr = new Float32Array(tris.length * 3 * a.itemSize); tris.forEach((t, i) => { for (let v = 0; v < 3; v++) for (let q = 0; q < a.itemSize; q++) arr[(i * 3 + v) * a.itemSize + q] = a.array[(t + v) * a.itemSize + q]; }); out.setAttribute(n, new THREE.BufferAttribute(arr, a.itemSize)); }
+    const ox = originX(box); out.translate(-ox, -box.min.y, -(box.min.z + box.max.z) / 2); out.scale(SEMI_K, SEMI_K, SEMI_K); out.computeVertexNormals(); out.computeBoundingBox(); return { geo: out, len: (box.max.x - box.min.x) * SEMI_K, front: (box.min.x - ox) * SEMI_K }; };
+  const mat = mesh.material; mat.side = THREE.DoubleSide;   /* some tyre faces point inward in the source model */
+  semiParts = { mat, truck: build(bands.truck, b => 0.12), box: build(bands.box, b => b.min.x + 0.03), flat: build(bands.flat.filter(c => c.box.min.y > 0.15), b => b.min.x + 0.05), stand: build(bands.stand, b => b.min.x) };
+  semiParts.flat.geo.computeBoundingBox();
+  // the cab's road wheels: the loose tyre on the sheet, centred and scaled to fit the cab's hubs (the cab has none of its own)
+  const tc = bands.tire.sort((a, c) => c.tris.length - a.tris.length)[0];
+  if (tc) { const tg = build([tc], b => (b.min.x + b.max.x) / 2); tg.geo.computeBoundingBox(); const bb = tg.geo.boundingBox, d = bb.max.y - bb.min.y, k = 0.092 * SEMI_K / d;
+    tg.geo.translate(0, -(bb.max.y + bb.min.y) / 2, 0); tg.geo.scale(k, k, k); semiParts.tire = tg; } }
+// the cab with its wheels: one front axle, two rear axles (model hub positions), wheels resting on the ground
+const CAB_AXLES = [-0.41, 0.055, 0.183], CAB_SIDES = [-0.1, 0.1], WHEEL_R = 0.046;
+function makeCab() { const g = new THREE.Group(), body = semiMesh('truck'); body.position.y = (WHEEL_R - 0.024) * SEMI_K; g.add(body);
+  if (semiParts.tire) for (const ax of CAB_AXLES) for (const sz of CAB_SIDES) { const w = new THREE.Mesh(semiParts.tire.geo, semiParts.mat); w.position.set((ax - 0.12) * SEMI_K, WHEEL_R * SEMI_K, sz * 1.08 * SEMI_K); w.castShadow = true; g.add(w); }
+  return g; }
+const semiMesh = part => { const m = new THREE.Mesh(semiParts[part].geo, semiParts.mat); m.castShadow = m.receiveShadow = true; return m; };
+// a trailer as its own group (origin at the kingpin); a lumber load can be shown on the flatbed
+function makeTrailer(kind) { const g = new THREE.Group(); g.add(semiMesh(kind)); if (kind === 'flat') { const b = semiParts.flat.geo.boundingBox, L = (b.max.x - b.min.x) * 0.8;
+    const load = new THREE.Mesh(new THREE.BoxGeometry(L, 0.14, (b.max.z - b.min.z) * 0.75), new THREE.MeshStandardMaterial({ color: 0xd6a463, roughness: 0.9 })); load.position.set((b.min.x + b.max.x) / 2 + 0.03, b.max.y + 0.07, 0); load.castShadow = true; load.visible = false; g.add(load); g.userData.load = load; } return g; }
+// ---- the warehouse: house-style siding walls, metal roof, a drive-in bay on the front, a lot for parked trailers
+const WH_MAT = (() => { const wall = canvasTex(256, (g, Z) => { g.fillStyle = '#b8b1a2'; g.fillRect(0, 0, Z, Z); const r = mulberry(11);   // corrugated cladding
+    for (let x = 0; x < Z; x += 8) { const gr = g.createLinearGradient(x, 0, x + 8, 0); gr.addColorStop(0, '#9c968a'); gr.addColorStop(0.5, '#d4cdbd'); gr.addColorStop(1, '#9c968a'); g.fillStyle = gr; g.fillRect(x, 0, 8, Z); }
+    for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(110,80,50,${r() * 0.12})`; g.fillRect(r() * Z, r() * Z * 0.6, 2 + r() * 6, 20 + r() * 80); }
+    g.fillStyle = 'rgba(60,60,60,0.35)'; g.fillRect(0, Z - 18, Z, 18); }); wall.repeat.set(6, 1); const roof = tex('roof_metal.jpg'); roof.repeat.set(4, 3);
+  return { wall: new THREE.MeshStandardMaterial({ map: wall, roughness: 0.9, side: THREE.DoubleSide }), roof: new THREE.MeshStandardMaterial({ map: roof, roughness: 0.55, metalness: 0.35, side: THREE.DoubleSide }),
+    trim: new THREE.MeshStandardMaterial({ color: 0x8c8a85, roughness: 0.8 }), floor: new THREE.MeshStandardMaterial({ color: 0x55534f, roughness: 0.95 }), lot: new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 0.95 }),
+    line: new THREE.MeshStandardMaterial({ color: 0xe8e2c8, roughness: 0.8 }), dark: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 1 }) }; })();
+const BAY_W = 0.5, BAY_H = 0.42;
+function makeWarehouse(ghost) { const g = new THREE.Group(), B = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; g.add(m); return m; }, t = 0.06;
+  B(WH_W, 0.06, WH_D, WH_MAT.floor, 0, 0.0, 0);                                                         // floor slab
+  B(WH_W, WH_H, t, WH_MAT.wall, 0, WH_H / 2, -WH_D / 2); B(t, WH_H, WH_D, WH_MAT.wall, -WH_W / 2, WH_H / 2, 0); B(t, WH_H, WH_D, WH_MAT.wall, WH_W / 2, WH_H / 2, 0);
+  const side = (WH_W - BAY_W) / 2; B(side, WH_H, t, WH_MAT.wall, -WH_W / 2 + side / 2, WH_H / 2, WH_D / 2); B(side, WH_H, t, WH_MAT.wall, WH_W / 2 - side / 2, WH_H / 2, WH_D / 2);   // front, open bay in the middle
+  B(BAY_W, WH_H - BAY_H, t, WH_MAT.wall, 0, BAY_H + (WH_H - BAY_H) / 2, WH_D / 2);
+  for (const sx of [-1, 1]) B(0.07, BAY_H, 0.09, WH_MAT.trim, sx * BAY_W / 2, BAY_H / 2, WH_D / 2 + 0.01); B(BAY_W + 0.14, 0.07, 0.09, WH_MAT.trim, 0, BAY_H, WH_D / 2 + 0.01);
+  B(BAY_W, 0.06, 0.04, WH_MAT.trim, 0, BAY_H - 0.06, WH_D / 2 + 0.03);                                // rolled-up door
+  // gable roof
+  const rh = 0.26, rw = Math.hypot(WH_W / 2 + 0.12, rh); for (const sx of [-1, 1]) { const r = B(rw, 0.04, WH_D + 0.24, WH_MAT.roof, sx * (WH_W / 4 + 0.03), WH_H + rh / 2, 0); r.rotation.z = -sx * Math.atan2(rh, WH_W / 2 + 0.12); }
+  for (const sz of [-1, 1]) { const gs = new THREE.Shape([new THREE.Vector2(-WH_W / 2, 0), new THREE.Vector2(WH_W / 2, 0), new THREE.Vector2(0, rh)]), m = new THREE.Mesh(new THREE.ShapeGeometry(gs), WH_MAT.wall); m.position.set(0, WH_H, sz * WH_D / 2); m.material = WH_MAT.wall; g.add(m); }
+  B(0.3, 0.15, 0.04, WH_MAT.dark, -WH_W / 2 + 0.3, WH_H - 0.18, WH_D / 2 + 0.03); B(0.3, 0.15, 0.04, WH_MAT.dark, WH_W / 2 - 0.3, WH_H - 0.18, WH_D / 2 + 0.03);   // windows
+  // the lot in front: asphalt with parking lines
+  B(WH_W, 0.03, WH_LOT, WH_MAT.lot, 0, 0.0, WH_D / 2 + WH_LOT / 2);
+  for (let i = 0; i < 4; i++) B(0.02, 0.035, WH_LOT * 0.62, WH_MAT.line, WH_W / 2 - 0.13 - i * 0.26, 0.0, WH_D / 2 + WH_LOT * 0.38);
+  if (ghost) g.traverse(o => { if (o.isMesh) { o.material = GHOST_MAT; o.castShadow = false; } });
+  return g; }
+const whLocal = (w, x, z) => { const dx = wd(x - w.x), dz = wd(z - w.z), c = Math.cos(w.rot), s = Math.sin(w.rot); return { lx: dx * c - dz * s, lz: dx * s + dz * c }; };
+const whWorld = (w, lx, lz) => { const c = Math.cos(w.rot), s = Math.sin(w.rot); return { x: wm(w.x + lx * c + lz * s), z: wm(w.z - lx * s + lz * c) }; };
+const inWhLot = (w, x, z, m) => { const { lx, lz } = whLocal(w, x, z); return Math.abs(lx) < WH_W / 2 + m && lz > -WH_D / 2 - m && lz < WH_D / 2 + WH_LOT + m; };
+function canPlaceWarehouse(team, xw, zw, rot = 0) { const w = { x: wm(xw / S), z: wm(zw / S), rot }; let lo = 1e9, hi = -1e9;
+  for (let i = 0; i <= 5; i++) for (let j = 0; j <= 5; j++) { const q = whWorld(w, -WH_W / 2 + WH_W * i / 5, -WH_D / 2 + (WH_D + WH_LOT) * j / 5);
+    if (!inTerritory(team, q.x, q.z)) return 'Must fit inside your territory';
+    const h = Hd(q.x, q.z); if (h < 2 / S * 1.2) return 'Cannot build on water'; lo = Math.min(lo, h); hi = Math.max(hi, h);
+    if (roadAt(q.x * S, q.z * S) > 0.5) return 'Blocked by a road';
+    if (groundLocked(q.x * S, q.z * S, null)) return 'Too close to another building';
+    for (const f of oilFields) if (wdist2(f.x, f.z, q.x, q.z) < OIL_R) return 'Oil fields are for oil pumps';
+    for (const pr of propsNear(q.x, q.z)) if (pr.alive && wdist2(pr.x, pr.z, q.x, q.z) < pr.r + 0.15) return 'Blocked by a building'; }
+  if (hi - lo > 1.0) return 'Ground too uneven'; return null; }
+function buildWarehouse(team, xw, zw, rot = 0) { if (!semiParts) return null; const w = { kind: 'warehouse', team, x: wm(xw / S), z: wm(zw / S), rot };
+  let sum = 0, n = 0; for (let i = 0; i <= 5; i++) for (let j = 0; j <= 5; j++) { const q = whWorld(w, -WH_W / 2 + WH_W * i / 5, -WH_D / 2 + (WH_D + WH_LOT) * j / 5); sum += Hd(q.x, q.z); n++; }
+  w.y = Math.max(2 / S * 1.3, sum / n);
+  if (window.levelTerrain) { levelTerrain(w.x * S, w.z * S, 4 * S, (xw2, zw2) => { if (groundLocked(xw2, zw2, null)) return 0; const { lx, lz } = whLocal(w, xw2 / S, zw2 / S);
+      const d = Math.hypot(Math.max(Math.abs(lx) - WH_W / 2 - 0.05, 0), Math.max(-WH_D / 2 - 0.05 - lz, lz - WH_D / 2 - WH_LOT - 0.05, 0)); return smoothW(d, 0.9); }, w.y * S); refreshOilNear(w.x, w.z, 4); }
+  w.obj = new THREE.Group(); w.obj.add(makeWarehouse(false)); w.obj.rotation.y = rot; battleRoot.add(w.obj);
+  // spare trailers in the lot, resting on their landing gear
+  for (let i = 0; i < 3; i++) { const tr = makeTrailer(i === 1 ? 'box' : 'flat'), x = WH_W / 2 - 0.26 - i * 0.26, z0 = WH_D / 2 + 0.15; tr.rotation.y = -Math.PI / 2; tr.position.set(x, 0.015, z0);
+    const st = semiMesh('stand'); st.position.set(0.02, 0, 0); tr.add(st); w.obj.add(tr); }
+  Object.assign(w, { hp: WH_HP, maxHp: WH_HP, alive: true, vel: new THREE.Vector3(), pos: new THREE.Vector3(w.x, w.y + 0.4, w.z) });
+  warehouses.push(w); if (window.clearTreesIn) clearTreesIn((x2, z2) => inWhLot(w, x2 / S, z2 / S, 0.25));
+  startSite(w, [-WH_W / 2, WH_W / 2, -WH_D / 2, WH_D / 2], WH_H + 0.45, 30, () => { log(team, `<b>${TEAM_NAME[team]}</b> warehouse open`); for (let i = 0; i < WH_TRUCKS; i++) makeTruck(w, i); }); return w; }
+function warehouseAt(pos) { for (const w of warehouses) { if (!w.alive || wdist2(w.x, w.z, pos.x, pos.z) > 3) continue; const { lx, lz } = whLocal(w, pos.x, pos.z); if (Math.abs(lx) < WH_W / 2 && Math.abs(lz) < WH_D / 2 && pos.y < w.y + WH_H + 0.4) return w; } return null; }
+function warehouseHit(w, amount) { if (!w.alive) return; w.hp -= amount; if (w.hp <= 0) { w.alive = false; const v = new THREE.Vector3(w.x, w.y + 0.4, w.z); FX.explosion(v, 1.4); addShake(0.3, v); fires.push({ x: w.x, z: w.z, t: 30 }); scorchMarks.add(w.x, w.z, 0, 2, 2);
+    w.obj.traverse(m => { if (m.isMesh) { m.material = m.material.clone(); m.material.color && m.material.color.multiplyScalar(0.25); } }); w.obj.children[0].scale.y *= 0.4; log(w.team, `<b>${TEAM_NAME[w.team]}</b> warehouse destroyed`);
+    for (const t of trucks) if (t.home === w && t.state === 'home') t.dead = true; } return 'hit'; }
+function warehouseImpact(pt, radius, power, kind) { for (const w of warehouses) { if (!w.alive || wdist2(w.x, w.z, pt.x, pt.z) > radius + 2.5) continue; if (!warehouseAt(pt) && !warehouseAt(new THREE.Vector3(pt.x, pt.y - radius, pt.z))) continue; warehouseHit(w, kind === 'bullet' ? 3 : kind === 'step' ? 0 : 55 * power); } }
+// ---- routes: from a point, onto the nearest road, along the road graph, off again to the destination (all demo units)
+function nearestRoad(x, z) { const { chains } = ROAD_NET; let best = null, bd = 1e9; for (let ci = 0; ci < chains.length; ci++) { const c = chains[ci]; if (c.len < 3) continue;
+    for (let k = 0; k <= c.n; k += 2) { if (c.wet[k] && !(c.br && c.br[k])) continue; const d = Math.hypot(wd(c.x[k] / S - x), wd(c.z[k] / S - z)); if (d < bd) { bd = d; best = { c: ci, s: c.len * k / c.n, d }; } } } return best; }
+function chainPts(c, s0, s1, out) { const ch = ROAD_NET.chains[c], dir = Math.sign(s1 - s0) || 1, step = 2.5, n = Math.max(1, Math.ceil(Math.abs(s1 - s0) / step));
+  for (let i = 0; i <= n; i++) { const s = s0 + (s1 - s0) * i / n, q = roadSample(ch, s), o = dir * LANE * 0.8; out.push({ x: wm((q.x - q.tz * o) / S), z: wm((q.z + q.tx * o) / S) }); } }
+function roadRoute(a, b) { const { chains, at } = ROAD_NET, ca = chains[a.c], cb = chains[b.c], out = [];
+  if (a.c === b.c) { chainPts(a.c, a.s, b.s, out); return out; }
+  const dist = new Map([[ca.a, a.s], [ca.b, ca.len - a.s]]), prev = new Map([[ca.a, null], [ca.b, null]]), todo = [ca.a, ca.b], done = new Set();
+  while (todo.length) { todo.sort((x, y) => dist.get(x) - dist.get(y)); const n = todo.shift(); if (done.has(n)) continue; done.add(n);
+    for (const o of at[n] || []) { const c = chains[o.i]; if (c.wet.some((wt, k) => wt && !(c.br && c.br[k]))) continue; const m = o.start ? c.b : c.a, d = dist.get(n) + c.len;
+      if (!dist.has(m) || d < dist.get(m)) { dist.set(m, d); prev.set(m, { n, i: o.i, start: o.start }); todo.push(m); } } }
+  const ends = [[cb.a, b.s], [cb.b, cb.len - b.s]].filter(([n]) => dist.has(n)).sort((x, y) => dist.get(x[0]) + x[1] - dist.get(y[0]) - y[1]); if (!ends.length) return null;
+  const en = ends[0][0], steps = []; let n = en; while (prev.get(n)) { const p = prev.get(n); steps.unshift(p); n = p.n; }
+  chainPts(a.c, a.s, n === ca.a ? 0 : ca.len, out);
+  for (const p of steps) chainPts(p.i, p.start ? 0 : chains[p.i].len, p.start ? chains[p.i].len : 0, out);
+  chainPts(b.c, en === cb.a ? 0 : cb.len, b.s, out); return out; }
+function planRoute(from, to) { const ra = nearestRoad(from.x, from.z), rb = nearestRoad(to.x, to.z), pts = [from];
+  if (ra && rb && ra.d < 8 && rb.d < 8) { const r = roadRoute(ra, rb); if (r) pts.push(...r); } pts.push(to); return pts; }
+// ---- trucks
+function makeTruck(w, i) { const obj = new THREE.Group(), cab = makeCab(); obj.add(cab); battleRoot.add(obj);
+  const tr = makeTrailer('flat'); battleRoot.add(tr); const tb = makeTrailer('box'); tb.visible = false; battleRoot.add(tb);
+  const t = { home: w, team: w.team, obj, flat: tr, box: tb, trailer: tr, state: 'home', path: null, job: null, v: 0, slot: i, dead: false }; parkInside(t); trucks.push(t); return t; }
+// parked inside facing the bay door, trailer behind
+function parkInside(t) { const w = t.home, p = whWorld(w, (t.slot - 0.5) * 0.24, -WH_D / 2 + 0.6); t.x = p.x; t.z = p.z; t.yaw = w.rot; t.tx = wm(t.x - Math.sin(t.yaw) * 0.77 * SEMI_K); t.tz = wm(t.z - Math.cos(t.yaw) * 0.77 * SEMI_K); t.v = 0; }
+// pickup and drop-off points: in front of the producer's stock, and in front of / inside the warehouse bay
+const pickupPoint = p => p.kind === 'woodcutter' ? wcWorld(p, (WC_BOX.x1 + 0.35), 0) : p.kind === 'farm' ? fmWorld(p, FM_HALF * FM_K + 0.45, 0) : mnWorld(p, 6 * MN_K, 9 * MN_K);
+function sendTruck(p, kind) { const free = trucks.filter(t => !t.dead && t.team === p.team && t.state === 'home' && t.home.alive); if (!free.length) return false;
+  const t = free.sort((a, b) => wdist2(a.x, a.z, p.x, p.z) - wdist2(b.x, b.z, p.x, p.z))[0], w = t.home;
+  t.job = { p, kind }; t.trailer.visible = false; t.trailer = kind === 'wood' ? t.flat : t.box; t.trailer.visible = true;
+  const bay = whWorld(w, 0, WH_D / 2 + 0.9), out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6);
+  t.path = [bay, out, ...planRoute(out, pickupPoint(p)).slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
+function truckHome(t) { const w = t.home, out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6), bay = whWorld(w, 0, WH_D / 2 + 0.9), inside = whWorld(w, 0, -WH_D / 2 + 0.3);
+  t.path = [...planRoute({ x: t.x, z: t.z }, out), bay, inside]; t.pi = 0; t.state = 'back'; }
+function updateTrucks(dt) { const c = camD();
+  for (const t of trucks) { if (t.dead) { t.obj.visible = t.trailer.visible = false; continue; }
+    if (t.path) { const tgt = t.path[t.pi], dx = wd(tgt.x - t.x), dz = wd(tgt.z - t.z), d = Math.hypot(dx, dz), last = t.pi === t.path.length - 1;
+      if (d < (last ? 0.12 : 0.35)) { t.pi++; if (t.pi >= t.path.length) { t.path = null; t.v = 0; t.wait = 3.5; } }
+      else { const want = Math.atan2(dx, dz); let dy = Math.atan2(Math.sin(want - t.yaw), Math.cos(want - t.yaw)); t.yaw += clamp(dy, -1.4 * dt, 1.4 * dt);
+        const vmax = (last || t.pi < 2 ? 0.3 : 0.65) * (Math.abs(dy) > 0.6 ? 0.45 : 1); t.v += (vmax - t.v) * Math.min(1, dt * 1.5); t.x = wm(t.x + Math.sin(t.yaw) * t.v * dt); t.z = wm(t.z + Math.cos(t.yaw) * t.v * dt); } }
+    else if (t.wait > 0) { t.wait -= dt; if (t.wait <= 0) {
+        if (t.state === 'out') { const p = t.job.p;   // loading done: the stock leaves with the truck
+          if (p.alive) { if (t.job.kind === 'wood') { t.cargo = p.boards * WOOD_PER_BOARD; p.boards = 0; showStock(p); } else if (t.job.kind === 'food') { t.cargo = FM_HARVEST; p.grow = 0; p.ripeT = 0; setGrowth(p);   /* harvested onto the truck */
+            FX.dust(new THREE.Vector3(p.x, p.y + 0.05, p.z), 20, { size: [0.1, 0.5], life: [0.8, 1.6], vel: 0.5, up: 0.1, a: 0.4, col: [0.5, 0.4, 0.3] }); } else { t.cargo = MN_ORE_PER_LOAD; p.bins = [0, 0, 0]; showMineStock(p); } }
+          if (t.trailer.userData.load) t.trailer.userData.load.visible = true; p.truck = null; truckHome(t); }
+        else if (t.state === 'back') { (t.job.kind === 'wood' ? WOOD : t.job.kind === 'food' ? FOOD : ORE)[t.team] += t.cargo || 0; t.cargo = 0; if (t.trailer.userData.load) t.trailer.userData.load.visible = false; t.state = 'home'; t.job = null; parkInside(t); } } }
+    // the trailer follows its kingpin on the fifth wheel; its axle trails behind
+    const L = 0.77 * SEMI_K, hx = t.x, hz = t.z, ax = wd(t.tx - hx), az = wd(t.tz - hz), al = Math.hypot(ax, az) || 1; t.tx = wm(hx + ax / al * L); t.tz = wm(hz + az / al * L);
+    // follow the ground: the cab pitches between its rear axle (the fifth wheel) and front axle, the trailer between kingpin and rear axle
+    const ty = Math.atan2(-ax, -az), F = 0.42 * SEMI_K, hB = Hd(t.x, t.z), hF = Hd(wm(t.x + Math.sin(t.yaw) * F), wm(t.z + Math.cos(t.yaw) * F)), hT = Hd(t.tx, t.tz);
+    t.obj.rotation.order = t.trailer.rotation.order = 'YZX';
+    t.obj.position.set(disp(t.x, c.x), hB, disp(t.z, c.z)); t.obj.rotation.set(0, t.yaw + Math.PI / 2, -Math.atan2(hF - hB, F));
+    t.trailer.position.set(disp(t.x, c.x), hB, disp(t.z, c.z)); t.trailer.rotation.set(0, ty + Math.PI / 2, Math.atan2(hT - hB, L)); } }
+// warehouses: keep display copies near the camera
+function updateWarehouses() { const c = camD(); for (const w of warehouses) w.obj.position.set(disp(w.x, c.x), w.y, disp(w.z, c.z)); }
+const hasWarehouse = team => warehouses.some(w => w.alive && w.done && w.team === team) && trucks.some(t => !t.dead && t.team === team);
 // ---- smashing cars: robots crush them underfoot, weapons blow them up; wrecks burn, then explode
 function carStomp(x, z, rad) {   // a foot or a landing robot comes down here (demo units)
   for (const car of cars) { if (car.dead || car.wx === undefined) continue; const dx = wd(car.wx / S - x), dz = wd(car.wz / S - z);
@@ -1649,13 +1869,15 @@ const ATTACKS = {
   Melee_Punch_Combo: { hits: [[0.06, 0.16, 40, 'a jab', 'fistL'], [0.36, 0.48, 62, 'a cross', 'fistR']] },
   Melee_Boost_Kick: { hits: [[0.22, 0.36, 75, 'a boost kick', 'footR', 1]] },
 };
-function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
+function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
 function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'heli') return heliHit(def, amount, att, at);
   if (def.kind === 'airbase') return airbaseHit(def, amount);
   if (def.kind === 'pumpjack') return pumpHit(def, amount);
   if (def.kind === 'woodcutter') return campHit(def, amount);
   if (def.kind === 'mine') return mineHit(def, amount);
+  if (def.kind === 'farm') return farmHit(def, amount);
+  if (def.kind === 'warehouse') return warehouseHit(def, amount);
   if (def.state === 'ko') return;
   if (def.state === 'clash' && def.hp - amount > 0) { def.hp -= amount; if (at) FX.sparks(at, 6, [1, 0.7, 0.4], 1.2); return 'hit'; }   // locked blades: stray hits chip armour but don't break the bind
   const facing = dir && new THREE.Vector3(Math.sin(def.yaw), 0, Math.cos(def.yaw)).dot(dir) < -0.3;
@@ -2644,7 +2866,7 @@ function teamUpdate(dt) {
 
 // ------------------------------------------------------------------ public API used by the page
 const Battle = {
-  ready: Promise.all([battleAssets, pumpAssets, woodAssets, mineAssets]),
+  ready: Promise.all([battleAssets, pumpAssets, woodAssets, mineAssets, farmAssets, semiAssets]),
   start() {
     const res = () => { for (const p of PARTS) p.setScale(renderer.getDrawingBufferSize(new THREE.Vector2()).y); };
     addEventListener('resize', res); res();
@@ -2691,7 +2913,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt);
     const c = camD();
     for (const f of robots) { defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -2740,7 +2962,7 @@ const Battle = {
   },
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },
-  airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
+  airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, farms, warehouses, trucks, _semi: { cab: () => makeCab(), trailer: k => makeTrailer(k) }, WH_COST, canPlaceWarehouse, buildWarehouse: (xw, zw, rot) => buildWarehouse(0, xw, zw, rot), warehouseGhost: () => semiParts ? makeWarehouse(true) : null, get warehouseError() { return SEMI_ERR; }, FOOD, FM_COST, foodRate, canPlaceFarm, buildFarm: (xw, zw, rot, crop) => buildFarm(0, xw, zw, rot, crop), farmGhost: () => farmProto ? makeFarmModel(true, 'Lettuce') : null, get farmError() { return FARM_ERR; }, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
    oilSnap: (xw, zw) => { const f = fieldAt(wm(xw / S), wm(zw / S)) || oilFields.find(f => wdist2(f.x, f.z, wm(xw / S), wm(zw / S)) < OIL_R * 1.2); return f ? { x: f.x * S, z: f.z * S, rot: f.rot } : null; }, OIL, PJ_COST, PJ_RATE, oilRate, canPlacePump, buildPump: (xw, zw, rot) => buildPump(0, xw, zw, rot), pumpGhost: () => PJ_BOX ? makePumpModel(true) : null, get pumpError() { return PUMP_ERR; },
   canPlaceOutpost, inTerritory, terrDiscs, territoryTex: terrTex,
   buildOutpost: (xw, zw, rot) => buildOutpost(0, xw, zw, rot),
