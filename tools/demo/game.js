@@ -542,14 +542,20 @@ const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
 function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live'); }
 canEl.addEventListener('pointerdown', e => {
   if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
-  Object.assign(human, { down: true, t0: performance.now(), x: e.clientX - r.left, y: e.clientY - r.top, meter: false });
+  const dd0 = myDefender();
+  if (dd0 && human.meter && human.auto) {
+    human.meter = human.auto = false; meterEl.className = ''; const m = Math.sin(human.mt * Math.PI * 1.7);
+    dd0.stealQ = Math.max(0, 1 - Math.abs(m)); dd0.moveTarget = null; startSteal(dd0); human.down = false; return;
+  }
+  try { canEl.setPointerCapture(e.pointerId); } catch (_) {}
+  Object.assign(human, { down: true, t0: performance.now(), x: e.clientX - r.left, y: e.clientY - r.top, meter: false, auto: false });
 });
 function onRelease(e) {
   if (!human.down) return; human.down = false; meterEl.className = '';
   const dd = myDefender();
   if (dd) {                   // defense: release = steal attempt, tap = move
     if (human.meter) {
-      human.meter = false; if (d2(dd.pos, bodyPos(ball.holder)) > 1.6) { toast('Too far to reach'); return; }
+      human.meter = human.auto = false; if (d2(dd.pos, bodyPos(ball.holder)) > 1.6) { toast('Too far to reach'); return; }
       const m = Math.sin(human.mt * Math.PI * 1.7); dd.stealQ = Math.max(0, 1 - Math.abs(m)); dd.moveTarget = null; startSteal(dd); return; }
     const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } return;
   }
@@ -564,7 +570,7 @@ function onRelease(e) {
   if (best) { best.lastPasser = h; h.moveTarget = null; startPass(h, best); return; }
   const g = groundAt(human.x, human.y); if (g) { h.moveTarget = clamp(g); ring(g); }
 }
-canEl.addEventListener('pointerup', onRelease); canEl.addEventListener('pointercancel', onRelease);
+window.addEventListener('pointerup', onRelease); canEl.addEventListener('contextmenu', e => e.preventDefault());
 function myDefender() {
   const h = ball.holder; if (!human.on || !h || h.team === HUMAN || game.phase !== 'live') return null;
   const d = man(h); return d && !d.action ? d : null;
@@ -579,6 +585,11 @@ function humanDefAI(p, dt) {
     p.moveTarget = null; steer(p, hp.clone().add(toR.mulScalar(0.9)), 4.0, dt, 16); animMove(p, dt, 'stance'); faceTo(p, hp.x, hp.z, 9, dt);
     p.label.classList.toggle('near', near); return;
   }
+  // in range: the steal meter runs on its own; any tap reaches for the ball
+  if (near && !p.action) {
+    if (!human.meter) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; $('mlabel').textContent = 'TAP TO STEAL'; }
+    human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%';
+  } else if (human.meter && human.auto) { human.meter = human.auto = false; meterEl.className = ''; }
   if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.6, dt, 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);

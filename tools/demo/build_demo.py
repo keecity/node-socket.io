@@ -12,7 +12,7 @@ assets['height'] = base64.b64encode(open('height.jpg', 'rb').read()).decode()
 assets['teal'] = base64.b64encode(open('tex_teal.jpg', 'rb').read()).decode()
 head = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Court Clash 3v3</title><style>
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:#080e17;font-family:system-ui,sans-serif;color:#eaf1f7;overflow:hidden}
-canvas{width:100vw;height:100vh;display:block;touch-action:none}
+canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;width:100vw;height:100vh;display:block;touch-action:none}
 #board{position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;align-items:stretch;gap:0;border-radius:12px;overflow:hidden;box-shadow:0 6px 24px #0007;font-variant-numeric:tabular-nums;user-select:none}
 .team{display:flex;align-items:center;gap:10px;padding:8px 14px;min-width:120px}
 .t0{background:#4b2a8f}.t1{background:#127e75;flex-direction:row-reverse}
