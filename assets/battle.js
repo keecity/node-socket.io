@@ -1237,7 +1237,7 @@ const oilRate = team => pumpjacks.filter(p => p.team === team && p.alive && p.do
 // A camp fells the trees around it: each tree puts 2 logs on the rack, the saw turns logs into boards on the drying stacks,
 // and when the stacks are full a pickup (the truck, later) clears them and the wood is banked. No trees left in reach = no more wood.
 let woodProto = null, WOOD_ERR = null, WC_BOX = null; const camps = [], WOOD = [0, 0];
-const WC_K = 0.1, WC_COST = 500, WC_HP = 700, WC_REACH = 3.2, WC_MIN_TREES = 6, WC_FELL = 7, WC_SAW = 5, WC_PICKUP = 6, BOARDS_PER_LOG = 10, WOOD_PER_BOARD = 1.5;   // a tree = 2 logs = 20 boards = 30 wood
+const WC_K = 0.07, WC_COST = 500, WC_HP = 700, WC_REACH = 3.2, WC_MIN_TREES = 6, WC_FELL = 7, WC_SAW = 5, WC_PICKUP = 6, BOARDS_PER_LOG = 10, WOOD_PER_BOARD = 1.5;   // a tree = 2 logs = 20 boards = 30 wood
 function prepareWood(g) { woodProto = g.scene; woodProto.updateMatrixWorld(true); const bx = new THREE.Box3().setFromObject(woodProto);
   WC_BOX = { x0: bx.min.x * WC_K, x1: bx.max.x * WC_K, z0: bx.min.z * WC_K, z1: bx.max.z * WC_K, h: bx.max.y * WC_K, y0: 0 };   /* the slab sits at model y = 0; a few parts dip below it in the bounds */ }
 const wcLocal = (p, x, z) => { const dx = wd(x - p.x), dz = wd(z - p.z), c = Math.cos(p.rot), s = Math.sin(p.rot); return { lx: dx * c - dz * s, lz: dx * s + dz * c }; };
