@@ -289,10 +289,10 @@ def run_body(t, c, r, arms=True):
     c['hips'] = np.array([0.008 * lat, r.hip_h - r.bob * (0.5 + 0.5 * down), 0.0])
     # pelvis yaws so the swinging leg's hip goes forward; drops on the swing side; leans into the run
     yaw = 9 * np.sin(w - np.pi * r.s)                        # + = left hip back (left leg in stance, pushing)
-    c['hipsR'] = np.array([r.lean + 6 + 2.5 * down, -yaw, -3.0 * lat])
-    c['spineR'] = np.array([5.0, yaw * 0.6, 1.5 * lat]); c['chestR'] = np.array([2.0 + 2.0 * down, yaw * 1.2, 1.0 * lat])
+    c['hipsR'] = np.array([r.lean + 6 + 1.2 * down, -yaw, -1.8 * lat])
+    c['spineR'] = np.array([5.0, yaw * 0.35, 0.7 * lat]); c['chestR'] = np.array([2.0 + 1.0 * down, yaw * 0.6, 0.5 * lat])
     lag = np.cos(2 * w - 2 * np.pi * r.s - 0.8)
-    c['neckR'] = np.array([-8.0, -yaw * 0.6, -0.5 * lat]); c['headR'] = np.array([-16.0 - 2.0 * down + 0.6 * lag, -yaw * 0.5, -0.6 * lat])  # cancels the body lean + bounce: eyes level
+    c['neckR'] = np.array([-8.0, -yaw * 0.6, -0.5 * lat]); c['headR'] = np.array([-16.0 - 1.0 * down + 0.6 * lag, -yaw * 0.5, -0.6 * lat])  # cancels the body lean + bounce: eyes level
     if arms:
         for S, sg in (('L', 1), ('R', -1)):
             a = -sg * np.sin(w - np.pi * r.s - 0.45)        # arms trail the legs slightly (loose, not robotic)        # arm forward when the opposite leg is forward; slight lag
