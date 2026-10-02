@@ -19595,15 +19595,15 @@ function laneClear(a, b, pad, t) {   // no player of team t near segment a->b
 function animMove(p, dt, mode) {
   const sp = p.vel.length();
   if (mode === 'handler') {
-    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / DRUN_NATIVE, 0.3, 1.3)); }
+    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / DRUN_NATIVE, 0.3, 1.6)); }
     else { setAnim(p, 'Dribble', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else if (mode === 'stance') {
-    if (sp > 1.9) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.3)); return; }
+    if (sp > 2.4) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.6)); return; }
     const lat = p.vel.dot(left(p)), lv = left(p), fw = p.vel.clone().sub(lv.clone().mulScalar(lat));
     if (fw.length() > 0.25) p.vel.sub(fw.mulScalar(1 - 0.25 / fw.length()));   // stance moves sideways only (no gliding)
     if (lat > 0.45) setAnim(p, 'SlideL', 0.15, pc.math.clamp(lat / SLIDE_NATIVE, 0.3, 1.4)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, pc.math.clamp(-lat / SLIDE_NATIVE, 0.3, 1.4)); else { setAnim(p, 'Defend', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else {
-    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.3)); }
+    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.6)); }
     else { setAnim(p, 'Ready', 0.25); p.vel.mulScalar(Math.pow(0.002, dt)); }
   }
 }
@@ -19652,11 +19652,11 @@ function handlerAI(p, dt) {
   if (!frontcourt || (ahead >= 2 && dr > 9)) {
     const fastBreak = ahead <= 1;
     goal = fastBreak ? flat(A.rim.x - dir * (DUNK_DIST - 0.2), A.rim.z * 0.5) : flat(A.rim.x - dir * 8.0, p.pos.z * 0.5 + p.juke);
-    speed = fastBreak ? 2.9 : 2.5;
+    speed = fastBreak ? 3.8 : 3.2;
   } else {
     const lane = Math.sin((game.time + p.id) * 1.1) * 1.0 + p.juke;
     goal = flat(A.rim.x, A.rim.z).sub(toRim.clone().mulScalar(DUNK_DIST - 0.15)).add(side.clone().mulScalar(lane * Math.min(1, (dr - DUNK_DIST) / 3)));
-    speed = 2.4;
+    speed = 3.1;
   }
   steer(p, clamp(goal), speed, dt);
   p.stall = p.vel.length() < 0.9 && frontcourt ? p.stall + dt : 0;
@@ -19680,7 +19680,7 @@ function offballAI(p, dt) {
     goal = sp.find(s => !taken.some(t => d2(t, s) < 1.5)) || sp[0];
     if (p.timer <= 0) { p.timer = 1.5 + Math.random() * 2; if (d2(man(p).pos, p.pos) > 2.3 || Math.random() < 0.18) p.cut = 1.8; }
   }
-  p.goal = goal; steer(p, clamp(goal.clone()), p.cut > 0 ? 3.0 : 2.7, dt);
+  p.goal = goal; steer(p, clamp(goal.clone()), p.cut > 0 ? 3.9 : 3.5, dt);
   animMove(p, dt, 'offball'); if (p.vel.length() < 1.0) faceTo(p, hb.x, hb.z, 6, dt);
 }
 
@@ -19713,7 +19713,7 @@ function defenseAI(p, dt) {
     goal = flat(mp.x * (1 - help) + (bp.x * 0.55 + D.rim.x * 0.45) * help, mp.z * (1 - help) + (bp.z * 0.55 + D.rim.z * 0.45) * help);
     goal.add(flat(D.rim.x - goal.x, D.rim.z - goal.z).normalize().mulScalar(0.9));
   }
-  steer(p, clamp(goal), behindPlay ? 3.1 : 2.8, dt, 12);
+  steer(p, clamp(goal), behindPlay ? 4.0 : 3.6, dt, 13);
   animMove(p, dt, 'stance');
   if (p.state !== 'Run') faceTo(p, mp.x, mp.z, 7, dt);
   if (ball.pass && ball.pass.to === m && !ball.pass.tried.has(p.id)) {
@@ -19729,7 +19729,7 @@ function defenseAI(p, dt) {
 // ====================================================================== loose ball / rebounds
 function chase(p, dt) {
   const t = ball.pos.y > 2.2 ? 0.45 : 0.15, tgt = clamp(flat(ball.pos.x + ball.vel.x * t, ball.pos.z + ball.vel.z * t));
-  steer(p, tgt, 3.1, dt, 12); animMove(p, dt, 'offball');
+  steer(p, tgt, 4.0, dt, 13); animMove(p, dt, 'offball');
   if (p.vel.length() < 1.0) faceTo(p, ball.pos.x, ball.pos.z, 8, dt);
   if (d2(p.pos, ball.pos) < 0.85 && ball.pos.y < 1.8) {
     const was = game.offense; give(p); game.phase = 'live';
