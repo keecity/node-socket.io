@@ -1695,7 +1695,7 @@ function poseSoldier(s, dt) { const B = s.bones, b = n => B[BI[n]], run = s.spee
     setRot(b('thigh' + sd), -hip, 0, 0); setRot(b('shin' + sd), knee, 0, 0); }
   const aim = s.state === 'fire' ? 1 : 0, rec = s.recoil;
   // torso: lean into a run, bob with the steps, breathe at rest, kick back on each shot
-  b('hips').position.y = 0 + Math.cos(12.566 * (tR - 0.3)) * 0.012 * A - 0.02 * A * run;
+  b('hips').position.y = SB[BI.hips][3] + Math.cos(12.566 * (tR - 0.3)) * 0.012 * A - 0.02 * A * run;
   setRot(b('spine'), 0.06 * A + 0.14 * run + 0.015 * Math.sin(performance.now() / 700 + s.st * 9) * (1 - A), Math.sin(6.283 * tR) * 0.12 * A, 0);
   setRot(b('chest'), -rec * 0.12, 0.25 * aim, 0); setRot(b('head'), -0.04 * aim, -0.2 * aim, 0);
   // arms on the rifle: right hand on the grip, left under the handguard; raised to the shoulder to aim
