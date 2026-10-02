@@ -174,6 +174,11 @@ function shotRelease(p) {
   let make = dr < 3 ? 0.7 : dr < 4.5 ? 0.62 : dr < ARC ? 0.58 - 0.03 * (dr - 4.5) : 0.45 - 0.06 * (dr - ARC);
   make = Math.max(0.18, make) * (cd < 1.0 ? 0.55 : cd < 1.6 ? 0.75 : cd < 2.4 ? 0.9 : 1);
   if (game.shotClock < 1) make *= 0.8;
+  if (p.shotQ !== undefined) {   // player's timed release: 1 = dead centre, 0 = edge of the meter
+    const q = p.shotQ; delete p.shotQ;
+    make = q > 0.92 ? Math.min(0.97, make * 1.7 + 0.25) : make * (0.15 + 1.25 * q * q);
+    toast(q > 0.92 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
+  }
   const tgt = A.rim.clone();
   if (Math.random() < make) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
   else { const a = Math.random() * 6.283, r = RIM_R * (0.85 + Math.random() * 0.45); tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; tgt.y += 0.02; }
@@ -474,7 +479,7 @@ app.on('update', dt => {
     const crashers = ball.free && !ball.pass ? P.slice().sort((a, b) => d2(a.pos, ball.pos) - d2(b.pos, ball.pos)).slice(0, 3) : [];
     for (const p of P) {
       if (p.action) continue;
-      if (ball.holder === p) handlerAI(p, dt);
+      if (ball.holder === p) (human.on && p.team === HUMAN ? humanAI : handlerAI)(p, dt);
       else if (ball.free && !ball.pass && (game.phase === 'loose' || (ball.pos.y < 2.6 && ball.vel.y < 0)) && crashers.includes(p)) chase(p, dt);
       else if (p.team === game.offense) offballAI(p, dt);
       else defenseAI(p, dt);
@@ -519,7 +524,53 @@ const CAMS = ['arena', 'broadcast', 'follow'], CAMNAME = { arena: 'Arena cam', b
 $('cam').onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % 3]; $('cam').textContent = CAMNAME[CAMS[(CAMS.indexOf(camMode) + 1) % 3]]; };
 $('restart').onclick = () => restart();
 $('mute').onclick = () => $('mute').classList.toggle('on');
-window.game = { game, P, ball, HOOPS, S, inbound, give };
+// ====================================================================== player controls (Purple)
+// tap court = move ball handler there, tap teammate = pass, hold 1 s = timing meter, release = shoot
+const HUMAN = 0;
+const human = { on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
+function groundAt(sx, sy) {
+  const a = camera.camera.screenToWorld(sx, sy, camera.camera.nearClip), b = camera.camera.screenToWorld(sx, sy, camera.camera.farClip);
+  if (Math.abs(b.y - a.y) < 1e-6) return null; const t = a.y / (a.y - b.y); return flat(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
+}
+function screenOf(p) { const s = new pc.Vec3(); const bp = bodyPos(p); camera.camera.worldToScreen(new pc.Vec3(bp.x, 1.0, bp.z), s); return s; }
+const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
+function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live'); }
+canEl.addEventListener('pointerdown', e => {
+  if (!myBall()) return; const r = canEl.getBoundingClientRect();
+  Object.assign(human, { down: true, t0: performance.now(), x: e.clientX - r.left, y: e.clientY - r.top, meter: false });
+});
+function onRelease(e) {
+  if (!human.down) return; human.down = false; meterEl.className = '';
+  const h = ball.holder; if (!myBall()) { human.meter = false; return; }
+  if (human.meter) {          // shoot with the meter reading
+    human.meter = false; const m = Math.sin(human.mt * Math.PI * 1.7);
+    h.shotQ = Math.max(0, 1 - Math.abs(m)); h.moveTarget = null; startShot(h); return;
+  }
+  // tap: teammate under the finger = pass, else move there
+  let best = null, bd = 48;
+  for (const q of team(HUMAN)) { if (q === h) continue; const s = screenOf(q), d = Math.hypot(s.x - human.x, s.y - human.y); if (d < bd) { bd = d; best = q; } }
+  if (best) { best.lastPasser = h; h.moveTarget = null; startPass(h, best); return; }
+  const g = groundAt(human.x, human.y); if (g) { h.moveTarget = clamp(g); ring(g); }
+}
+canEl.addEventListener('pointerup', onRelease); canEl.addEventListener('pointercancel', onRelease);
+function humanAI(p, dt) {
+  p.holdT += dt;
+  if (human.down) {
+    if (!human.meter && performance.now() - human.t0 > 1000) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
+    if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; }
+    p.vel.mulScalar(Math.pow(0.01, dt)); const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 6, dt); animMove(p, dt, 'handler'); return;
+  }
+  if (p.moveTarget) {
+    steer(p, p.moveTarget, 3.4, dt);
+    if (d2(p.pos, p.moveTarget) < 0.35) p.moveTarget = null;
+  } else p.vel.mulScalar(Math.pow(0.02, dt));
+  animMove(p, dt, 'handler');
+  if (!p.moveTarget && p.vel.length() < 0.5) { const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 5, dt); }
+}
+const ringEl = $('ring');
+function ring(g) { const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
+$('mode').onclick = () => { human.on = !human.on; $('mode').textContent = human.on ? 'Watch AI' : 'Play'; $('hint').hidden = !human.on; };
+window.game = { game, P, ball, HOOPS, S, inbound, give, human };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
 app.start(); $('loading').hidden = true;
 } catch (e) { $('loading').textContent = 'Unable to start: ' + (e && e.message || e); console.error(e); }
