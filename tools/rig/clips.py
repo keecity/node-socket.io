@@ -302,6 +302,8 @@ def run_body(t, c, r, arms=True):
             c[f'hn{S}'] = np.array([-sg * 0.9, -0.15, 0.25 * a]); c[f'hf{S}'] = np.array([sg * 0.15, 0.35 + 0.45 * fwd, 1.0])
             c[f'he{S}'] = np.array([sg * 0.12, -0.35, -1.0]); c[f'hw{S}'] = np.array([0.0]); c[f'hsp{S}'] = np.array([0.0])
             c[f'sh{S}'] = np.array([0, -8 * a, 0]); c[f'wm{S}'] = np.array([10.0])
+            # shoulder swings the arm through ~95 deg, elbow stays bent ~85-100 deg (more bend in front)
+            c[f'afk{S}'] = np.array([74.0, 8 + 40 * a, 88 + 6 * fwd - 6 * back, -6.0, 1.0])
     c['ball'] = np.array([0, -0.6, -0.4])
     return phL
 

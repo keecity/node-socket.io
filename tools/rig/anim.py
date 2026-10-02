@@ -218,6 +218,11 @@ def solve(c, ball_path=None, t=0.0):
             q[f'shoulder.{S}'] = qmul(rot(('z', sgn * shrug)), q[f'shoulder.{S}'])
             M = fk(q)
         solve_arm(M, S, p, n, fing, pole, q, min(c[f'wm{S}'][0], WRIST_SWING) + 15 * hw)
+        fkc = c.get(f'afk{S}')
+        if fkc is not None and fkc[4] > 0:      # direct joint angles: [down, swing fwd, elbow, twist, weight]
+            down, swing, elbow, twist, wgt = fkc
+            qu = rot(('x', sgn * twist), ('z', -sgn * down), ('x', -swing)); qf = rot(('y', -sgn * elbow)); qh = rot(('y', -sgn * 8))
+            q[f'upperarm.{S}'] = slerp(q[f'upperarm.{S}'], qu, wgt); q[f'forearm.{S}'] = slerp(q[f'forearm.{S}'], qf, wgt); q[f'hand.{S}'] = slerp(q[f'hand.{S}'], qh, wgt)
     for S in 'LR':
         fx, lift, fz = c[f'f{S}']; pitch, yaw = c[f'fr{S}']
         ank, Rf = ankle_from_foot(fx, lift, fz, pitch, yaw)
