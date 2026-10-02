@@ -22,6 +22,8 @@ for c, (m, lo, hi) in comp.items():
         P[m, 0] += -cx + np.sign(cx) * 0.112; P[m, 2] -= 0.02
         c0 = np.array([np.sign(cx) * 0.112, 0.0, (lo[2] + hi[2]) / 2 - 0.025])
         P[m] = c0 + (P[m] - c0) * np.array([1.08, 1.06, 1.06])
+        th = np.radians(-np.sign(cx) * 22); cs, sn = np.cos(th), np.sin(th)   # toes were modelled 28 deg out
+        d = P[m] - c0; P[m, 0] = c0[0] + cs * d[:, 0] + sn * d[:, 2]; P[m, 2] = c0[2] - sn * d[:, 0] + cs * d[:, 2]
     elif 300 < m.sum() < 500 and hi[1] < 0.31:  # sock/leg: tuck the foot part inside the shoe
         k = m & (P[:, 1] < 0.17)
         t = np.clip((0.17 - P[k, 1]) / 0.06, 0, 1)[:, None]       # 0 at the ankle top, 1 below 0.11

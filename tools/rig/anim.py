@@ -43,7 +43,7 @@ def default_controls():
             f'hw{S}': [0],                       # ball contact weight
             f'sh{S}': [0, 0, 0],                 # shoulder (clavicle) euler
             f'f{S}': [s * 0.11, 0, 0],           # foot: world x, lift, world z
-            f'fr{S}': [0, s * 8],                # foot pitch (+ heel up on toe), yaw
+            f'fr{S}': [0, s * 4],                # foot pitch (+ heel up on toe), yaw
             f'frel{S}': [0],                     # 0 world space, 1 follows hips
             f'fh{S}': [s * 0.075, -0.25, 0.02],   # ankle offset from hips joint when frel = 1
             f'fk{S}': [s * 0.15, 0, 1],          # knee pole
