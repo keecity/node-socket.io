@@ -29,11 +29,11 @@ canvas{width:100vw;height:100vh;display:block;touch-action:none}
 #controls button:hover{background:#2b4055}#mute.on{background:#5a2b2b}
 #tags{position:absolute;inset:0;pointer-events:none;overflow:hidden}.tag{position:absolute;left:0;top:0;font-size:11px;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap;opacity:.85}.tag.t0{background:#4b2a8fcc}.tag.t1{background:#127e75cc}.tag.ball{opacity:1;box-shadow:0 0 0 2px #ffb23e;font-size:12px}
 #loading{position:absolute;top:45%;width:100%;text-align:center;color:#61d1c4;font-size:18px}#status{display:none}
-@media(max-width:520px){.team{min-width:92px;padding:7px 10px}.team b{font-size:22px}#toast.big{font-size:24px}#banner{font-size:21px}}
+@media(max-width:520px){#controls{gap:5px;flex-wrap:nowrap}#controls button{padding:6px 8px;font-size:11px;min-height:30px}.team{min-width:92px;padding:7px 10px}.team b{font-size:22px}#toast.big{font-size:24px}#banner{font-size:21px}}
 </style></head><body><canvas id="scene"></canvas>
 <div id="board"><div class="team t0"><span>PURPLE</span><b id="s0">0</b><i class="dot" id="poss0"></i></div><div id="mid"><small>SHOT</small><div id="clock"></div><small>TO 21</small></div><div class="team t1"><span>TEAL</span><b id="s1">0</b><i class="dot" id="poss1"></i></div></div>
 <div id="tags"></div><div id="toast"></div><div id="banner"></div><div id="loading">Warming up… <small style="display:block;font-size:12px;color:#7f9cab;margin-top:8px">If this text never changes, this viewer is not running the page\'s scripts. Open the file in a browser.</small></div><div id="status"></div>
-<div id="controls"><button id="pause">Pause</button><button id="speed">1×</button><button id="cam">Follow cam</button><button id="restart">Restart</button><button id="mute">Mute</button></div>
+<div id="controls"><button id="pause">Pause</button><button id="speed">1×</button><button id="cam">Broadcast cam</button><button id="restart">Restart</button><button id="mute">Mute</button></div>
 '''
 game = open('game.js').read()
 stage = lambda t: '<script>document.getElementById("loading").textContent=' + json.dumps(t) + ';</script>'

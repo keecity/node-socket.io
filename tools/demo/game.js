@@ -426,13 +426,17 @@ function bodies1() {
 }
 
 // ====================================================================== camera + name tags
-let camMode = 'broadcast'; const camPos = new pc.Vec3(0, 9, 18), camLook = new pc.Vec3(0, 1, 0);
+let camMode = 'arena'; const camPos = new pc.Vec3(-24, 30, 0), camLook = new pc.Vec3(0, 1, 0);
 function updateCamera(dt) {
   const aspect = app.graphicsDevice.width / app.graphicsDevice.height, portrait = aspect < 0.9;
   const f = ball.holder ? bodyPos(ball.holder) : ball.pos, att = attackHoop(game.offense).rim.x > 0 ? 1 : -1;
   const fx = pc.math.clamp(f.x + att * 2, -10.5, 10.5), fz = pc.math.clamp(f.z, -4, 4);
   let pos, look, fov;
-  if (camMode === 'broadcast') {
+  if (camMode === 'arena') {
+    // Clash Royale style: high above Purple's baseline, looking down the length of the court (court runs bottom to top on a phone)
+    const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
+    pos = new pc.Vec3(-22 * fit + drift, 31 * fit, 0); look = new pc.Vec3(0.6 + drift, 0, 0); fov = portrait ? 55 : 40;
+  } else if (camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
   } else {
@@ -510,7 +514,8 @@ document.addEventListener('pointerdown', () => { if (!actx) try { actx = new Aud
 let speed = 1;
 $('pause').onclick = () => { game.paused = !game.paused; $('pause').textContent = game.paused ? 'Play' : 'Pause'; app.timeScale = game.paused ? 0 : speed; };
 $('speed').onclick = () => { speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1; app.timeScale = game.paused ? 0 : speed; $('speed').textContent = speed + '×'; };
-$('cam').onclick = () => { camMode = camMode === 'broadcast' ? 'follow' : 'broadcast'; $('cam').textContent = camMode === 'broadcast' ? 'Follow cam' : 'Broadcast cam'; };
+const CAMS = ['arena', 'broadcast', 'follow'], CAMNAME = { arena: 'Arena cam', broadcast: 'Broadcast cam', follow: 'Follow cam' };
+$('cam').onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % 3]; $('cam').textContent = CAMNAME[CAMS[(CAMS.indexOf(camMode) + 1) % 3]]; };
 $('restart').onclick = () => restart();
 $('mute').onclick = () => $('mute').classList.toggle('on');
 window.game = { game, P, ball, HOOPS, S, inbound, give };
