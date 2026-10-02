@@ -503,15 +503,18 @@ app.on('update', dt => {
     }
     if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); inbound(1 - game.offense, flat(0, 0)); }
   }
-  if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; }
+  if (human.freeze > 0) {      // hold the marker where the player stopped it
+    human.freeze -= dt;
+    if (human.freeze <= 0) { human.mt = 0; if (human.after === 'hide') { human.meter = false; meterEl.className = ''; } human.after = null; }
+  } else if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; }
   // defense: the steal meter stays on screen the whole time Teal has the ball
   if (defMode()) {
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
     if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; meterEl.className = 'show steal'; } $('mlabel').textContent = 'TAP TO STEAL'; }
-    else if (human.auto) { human.meter = human.auto = false; meterEl.className = ''; }
+    else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
-  } else if (human.auto) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
-  if (human.meter && !human.auto && !myBall() && !human.down) { human.meter = false; meterEl.className = ''; }
+  } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
+  if (human.meter && !human.auto && !myBall() && !human.down && !(human.freeze > 0)) { human.meter = false; meterEl.className = ''; }
   updateActions(dt);
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
   bodies();
@@ -555,7 +558,7 @@ canEl.addEventListener('pointerdown', e => {
   if (defMode()) {
     const d = closestDef();
     if (d && !d.action && d2(d.pos, bodyPos(ball.holder)) < 1.6) {     // in range: tap = steal now
-      const m = Math.sin(human.mt * Math.PI * 1.7); d.stealQ = Math.max(0, 1 - Math.abs(m)); d.moveTarget = null; startSteal(d); human.mt = 0; return;
+      const m = Math.sin(human.mt * Math.PI * 1.7); d.stealQ = Math.max(0, 1 - Math.abs(m)); d.moveTarget = null; startSteal(d); human.freeze = 0.3; human.after = null; return;
     }
   }
   try { canEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -567,10 +570,10 @@ function onRelease(e) {
   if (defMode()) {           // defense: a short tap moves the closest defender (holding just chases)
     const dd = myDefender(); if (dd && performance.now() - human.t0 < 300) { const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } } return;
   }
-  if (!human.auto) meterEl.className = '';
+  if (!human.auto && !human.meter) meterEl.className = '';
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
   if (human.meter) {          // shoot with the meter reading
-    human.meter = false; const m = Math.sin(human.mt * Math.PI * 1.7);
+    const m = Math.sin(human.mt * Math.PI * 1.7); human.freeze = 0.7; human.after = 'hide';
     h.shotQ = Math.max(0, 1 - Math.abs(m)); h.moveTarget = null; startShot(h); return;
   }
   // tap: teammate under the finger = pass, else move there
