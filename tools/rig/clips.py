@@ -313,31 +313,19 @@ def run():
     return bake(build_track([(0, READY), (r.T, {})], loop=True), r.T, override=lambda t, c: run_body(t, c, r))
 
 def dribble_run():
-    period = RUN_T * 2   # one bounce per stride pair
-    BXr, BZr = -0.21, 0.20
-    path = knots([(0.00, [BXr, 0.31, BZr], [0, 0, 0.1]),
-                  (0.08, [BXr, 0.27, BZr + 0.03], [0, -1.5, 0.35]),
-                  (0.40, [BXr - 0.02, BALL_R, BZr + 0.16], [0, -1.1, 0.15]),
-                  (0.40001, [BXr - 0.02, BALL_R, BZr + 0.16], [0, 1.0, -0.15]),
-                  (0.86, [BXr, 0.27, BZr + 0.01], [0, 0.4, -0.2]),
-                  (1.00, [BXr, 0.31, BZr], [0, 0, 0.1])], period)
+    """same legs/torso as Run (feet match ground speed), one bounce per stride, right hand rides the ball"""
+    from gait import Run
+    r = Run(); period = r.T
+    from drib import Dribble
+    d = Dribble(base=(-0.27, 0.17)); sc = d.T / period          # same physics as the standing dribble, retimed to the stride
+    path = lambda t: d.ball(t * sc)[0]
     def ovr(t, c):
-        ph, bob, sway = legs_cycle(t, c)
-        c['hips'] = np.array([0.006 * sway, -0.045 - 0.012 * bob, 0.0]); c['hipsR'] = np.array([16, -6 * sway, 2 * sway])
-        c['spineR'] = np.array([5, 0, 0]); c['chestR'] = np.array([3, 8 * sway - 5, -1.5 * sway])
-        c['neckR'] = np.array([-8, 0, 0]); c['headR'] = np.array([-16, 3, 0])
-        # left arm pumps
-        a = -sway
-        c['hpL'] = np.array([0.17, -0.06 + 0.06 * max(a, 0), 0.04 + 0.12 * a]); c['hnL'] = np.array([-1.0, 0, 0.1])
-        c['hfL'] = np.array([0, 0.3, 1]); c['heL'] = np.array([0.3, -0.3, -1]); c['hwL'] = np.array([0.]); c['hspL'] = np.array([0.])
-        # right hand rides the ball near the top of the bounce
-        tb = t % period; u = tb / period
-        b = path(tb)
-        contact = 1.0 if (u < 0.08 or u > 0.86) else 0.0
-        c['bw'] = np.array([1.0]); c['hspR'] = np.array([1.0]); c['hwR'] = np.array([contact])
-        c['hgR'] = np.array([0.1, 1, -0.35]); c['heR'] = np.array([-1, -0.2, -0.5])
-        follow = np.array([BXr, 0.31 + BALL_R, BZr]) + np.array([0, -0.05, 0.05]) * np.sin(np.pi * min(u / 0.3, 1))
-        c['hpR'] = follow; c['hnR'] = np.array([0, -1, 0.15 + 0.4 * (u < 0.3)]); c['hfR'] = np.array([0, 0.1 - 0.4 * (u < 0.3), 1])
+        run_body(t, c, r, arms=True)
+        c['afkR'] = np.array([0, 0, 0, 0, 0.0])
+        c['hipsR'][1] *= 0.5; c['chestR'][1] = c['chestR'][1] * 0.5 - 6; c['chestR'][2] += 6; c['spineR'][2] += 4; c['shR'] = np.array([0, 0, -6.0])
+        p, n, f, _ = d.hand(t * sc)
+        c['bw'] = np.array([1.0]); c['hspR'] = np.array([1.0]); c['hwR'] = np.array([0.0]); c['wmR'] = np.array([60.0])
+        c['hpR'] = p; c['hnR'] = n; c['hfR'] = f; c['heR'] = np.array([-0.55, -0.35, -1.0])
     return bake(build_track([(0, READY), (period, {})], loop=True), period, ball_path=path, override=ovr)
 
 DEF = {'fL': [0.17, 0, 0.03], 'frL': [6, 12], 'fR': [-0.17, 0, -0.02], 'frR': [6, -12], 'fkL': [0.35, 0, 1], 'fkR': [-0.35, 0, 1],
