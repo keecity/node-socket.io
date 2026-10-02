@@ -1,4 +1,5 @@
 from anim import *
+from anim import sstep_
 
 def hold_ball(spread=1.0):
     """both palms on the sides of the ball, fingers forward-up"""
@@ -249,7 +250,106 @@ def dunk():
         return drop_and_bounce(p0, np.array([0, -1.4, 0.35]), 1.055 + 0.09)(t)
     return bake(tr, dur, ball_path=path, override=ovr)
 
-CLIPS = {'Idle': idle, 'Dribble': dribble, 'Shoot': shoot, 'Dunk': dunk}
+# ---------------------------------------------------------------- locomotion cycles (in place; the game moves the root)
+RUN_T = 0.5          # one full stride cycle (two steps)
+STRIDE = 0.30        # foot travel during stance; native ground speed = STRIDE / (RUN_T * STANCE)
+STANCE = 0.42
+def legs_cycle(t, c, period=RUN_T, stride=STRIDE, lift=0.075, width=0.085):
+    for S, sg, off in (('L', 1, 0.0), ('R', -1, 0.5)):
+        ph = ((t / period) + off) % 1.0
+        if ph < STANCE:
+            u = ph / STANCE
+            z = stride / 2 - stride * u; y = 0.0
+            pitch = -8 * (1 - u) ** 3 + 28 * sstep_(0.7, 1.0, u)        # heel strike -> toe off
+        else:
+            u = (ph - STANCE) / (1 - STANCE); e = u * u * (3 - 2 * u)
+            z = -stride / 2 + stride * e; y = lift * np.sin(np.pi * u) ** 0.8
+            pitch = 28 * (1 - sstep_(0.0, 0.5, u)) - 8 * sstep_(0.7, 1.0, u)
+        c[f'f{S}'] = np.array([sg * width, y, z]); c[f'fr{S}'] = np.array([pitch, sg * 3.0])
+        c[f'fk{S}'] = np.array([sg * 0.1, 0, 1.0])
+    ph = (t / period) % 1.0
+    bob = np.cos(4 * np.pi * (ph - STANCE / 2)); sway = np.sin(2 * np.pi * ph)
+    return ph, bob, sway
+
+def run():
+    def ovr(t, c):
+        ph, bob, sway = legs_cycle(t, c)
+        c['hips'] = np.array([0.006 * sway, -0.03 - 0.014 * bob, 0.0]); c['hipsR'] = np.array([12, -8 * sway, 2 * sway])
+        c['spineR'] = np.array([4, 0, 0]); c['chestR'] = np.array([2, 13 * sway, -1.5 * sway])
+        c['neckR'] = np.array([-6, 0, 0]); c['headR'] = np.array([-12, -4 * sway, 0])
+        for S, sg in (('L', 1), ('R', -1)):
+            a = -sg * sway                                   # arm swings opposite to the same-side leg
+            c[f'hp{S}'] = np.array([sg * 0.17, -0.06 + 0.06 * max(a, 0), 0.04 + 0.13 * a])
+            c[f'hn{S}'] = np.array([-sg * 1.0, 0, 0.1]); c[f'hf{S}'] = np.array([0, 0.25 + 0.4 * max(a, 0), 1])
+            c[f'he{S}'] = np.array([sg * 0.3, -0.3, -1]); c[f'hw{S}'] = np.array([0.]); c[f'hsp{S}'] = np.array([0.])
+        c['ball'] = np.array([0, -0.6, -0.4])           # hidden in game; parked behind the body
+    return bake(build_track([(0, READY), (RUN_T, {})], loop=True), RUN_T, override=ovr)
+
+def dribble_run():
+    period = RUN_T * 2   # one bounce per stride pair
+    BXr, BZr = -0.21, 0.20
+    path = knots([(0.00, [BXr, 0.31, BZr], [0, 0, 0.1]),
+                  (0.08, [BXr, 0.27, BZr + 0.03], [0, -1.5, 0.35]),
+                  (0.40, [BXr - 0.02, BALL_R, BZr + 0.16], [0, -1.1, 0.15]),
+                  (0.40001, [BXr - 0.02, BALL_R, BZr + 0.16], [0, 1.0, -0.15]),
+                  (0.86, [BXr, 0.27, BZr + 0.01], [0, 0.4, -0.2]),
+                  (1.00, [BXr, 0.31, BZr], [0, 0, 0.1])], period)
+    def ovr(t, c):
+        ph, bob, sway = legs_cycle(t, c)
+        c['hips'] = np.array([0.006 * sway, -0.045 - 0.012 * bob, 0.0]); c['hipsR'] = np.array([16, -6 * sway, 2 * sway])
+        c['spineR'] = np.array([5, 0, 0]); c['chestR'] = np.array([3, 8 * sway - 5, -1.5 * sway])
+        c['neckR'] = np.array([-8, 0, 0]); c['headR'] = np.array([-16, 3, 0])
+        # left arm pumps
+        a = -sway
+        c['hpL'] = np.array([0.17, -0.06 + 0.06 * max(a, 0), 0.04 + 0.12 * a]); c['hnL'] = np.array([-1.0, 0, 0.1])
+        c['hfL'] = np.array([0, 0.3, 1]); c['heL'] = np.array([0.3, -0.3, -1]); c['hwL'] = np.array([0.]); c['hspL'] = np.array([0.])
+        # right hand rides the ball near the top of the bounce
+        tb = t % period; u = tb / period
+        b = path(tb)
+        contact = 1.0 if (u < 0.08 or u > 0.86) else 0.0
+        c['bw'] = np.array([1.0]); c['hspR'] = np.array([1.0]); c['hwR'] = np.array([contact])
+        c['hgR'] = np.array([0.1, 1, -0.35]); c['heR'] = np.array([-1, -0.2, -0.5])
+        follow = np.array([BXr, 0.31 + BALL_R, BZr]) + np.array([0, -0.05, 0.05]) * np.sin(np.pi * min(u / 0.3, 1))
+        c['hpR'] = follow; c['hnR'] = np.array([0, -1, 0.15 + 0.4 * (u < 0.3)]); c['hfR'] = np.array([0, 0.1 - 0.4 * (u < 0.3), 1])
+    return bake(build_track([(0, READY), (period, {})], loop=True), period, ball_path=path, override=ovr)
+
+DEF = {'fL': [0.17, 0, 0.03], 'frL': [6, 12], 'fR': [-0.17, 0, -0.02], 'frR': [6, -12], 'fkL': [0.35, 0, 1], 'fkR': [-0.35, 0, 1],
+       'hips': [0, -0.10, 0], 'hipsR': [16, 0, 0], 'spineR': [6, 0, 0], 'chestR': [-2, 0, 0], 'neckR': [-8, 0, 0], 'headR': [-20, 0, 0],
+       'ball': [0, -0.6, -0.4], 'hwL': [0], 'hwR': [0],
+       'hpL': [0.27, 0.02, 0.10], 'hnL': [-0.2, -0.3, 1], 'hfL': [0.6, 0.8, 0.2], 'heL': [0.6, -0.8, -0.2],
+       'hpR': [-0.27, 0.02, 0.10], 'hnR': [0.2, -0.3, 1], 'hfR': [-0.6, 0.8, 0.2], 'heR': [-0.6, -0.8, -0.2]}
+
+def defend():
+    k = [(0.0, DEF),
+         (0.3, {'hips': [0.012, -0.105, 0], 'hipsR': [16, 0, -2], 'hpL': [0.28, 0.05, 0.11], 'hpR': [-0.26, 0.0, 0.09], 'headR': [-20, 4, 0]}),
+         (0.6, {'hips': [0, -0.095, 0], 'hipsR': [16, 0, 0], 'hpL': [0.27, 0.02, 0.10], 'hpR': [-0.27, 0.02, 0.10], 'headR': [-20, 0, 0]}),
+         (0.9, {'hips': [-0.012, -0.105, 0], 'hipsR': [16, 0, 2], 'hpL': [0.26, 0.0, 0.09], 'hpR': [-0.28, 0.05, 0.11], 'headR': [-20, -4, 0]}),
+         (1.2, DEF)]
+    return bake(build_track(k, loop=True), 1.2)
+
+def block():
+    T_OFF, T_APEX, T_LAND = 0.30, 0.56, 0.84; APEX = 0.36
+    up = {'hpL': [0.15, 0.34, 0.07], 'hnL': [-0.1, 0, 1], 'hfL': [0, 1, 0.05], 'heL': [1, 0, -0.3],
+          'hpR': [-0.15, 0.34, 0.07], 'hnR': [0.1, 0, 1], 'hfR': [0, 1, 0.05], 'heR': [-1, 0, -0.3]}
+    k = [(0.0, DEF),
+         (0.16, {'hips': [0, -0.15, 0], 'hipsR': [22, 0, 0], 'spineR': [10, 0, 0], 'headR': [-26, 0, 0],
+                 'hpL': [0.22, -0.10, 0.12], 'hpR': [-0.22, -0.10, 0.12]}),
+         (T_OFF, {'hips': [0, 0.02, 0], 'hipsR': [2, 0, 0], 'spineR': [-2, 0, 0], 'chestR': [-6, 0, 0], 'headR': [-18, 0, 0],
+                  'frL': [40, 8], 'frR': [40, -8], 'fkL': [0.15, 0, 1], 'fkR': [-0.15, 0, 1], **up}),
+         (T_APEX, {'chestR': [-8, 0, 0], 'headR': [-20, 0, 0]}),
+         (T_LAND, {'hips': [0, 0.02, 0], 'frL': [10, 8], 'frR': [10, -8]}),
+         (0.96, {'hips': [0, -0.13, 0], 'hipsR': [18, 0, 0], 'spineR': [8, 0, 0], 'headR': [-22, 0, 0], 'frL': [6, 12], 'frR': [6, -12],
+                 'fkL': [0.35, 0, 1], 'fkR': [-0.35, 0, 1], 'hpL': [0.26, 0.06, 0.12], 'hpR': [-0.26, 0.06, 0.12]}, 'stop'),
+         (1.2, DEF)]
+    def air(t, c):
+        if T_OFF < t < T_LAND:
+            u = (t - T_OFF) / (T_LAND - T_OFF); h = 4 * APEX * u * (1 - u)
+            c['hips'][1] = 0.02 + h
+            for S in 'LR': c[f'f{S}'][1] = max(0.0, h - 0.03 * np.sin(np.pi * u))
+    return bake(build_track(k), 1.2, override=air)
+
+CLIPS = {'Idle': idle, 'Dribble': dribble, 'Shoot': shoot, 'Dunk': dunk,
+         'Run': run, 'DribbleRun': dribble_run, 'Defend': defend, 'Block': block}
 if __name__ == '__main__':
     import sys; from pv import sheet
     name = sys.argv[1]; times = [float(x) for x in sys.argv[2].split(',')]
