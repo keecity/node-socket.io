@@ -4,7 +4,7 @@ import numpy as np
 from drib import periodic
 
 class Run:
-    def __init__(self, T=0.60, stance=0.38, L=0.27, track=0.07, hip_h=-0.006, bob=0.022, lean=9):
+    def __init__(self, T=0.60, stance=0.38, L=0.27, track=0.07, hip_h=0.004, bob=0.016, lean=9):
         self.T, self.s, self.L, self.track, self.hip_h, self.bob, self.lean = T, stance, L, track, hip_h, bob, lean
         self.z0 = -0.03
         self.V = L / (stance * T)                         # ground speed the cycle is authored for (rig units / s)
@@ -13,8 +13,8 @@ class Run:
         # toe-off -> heel kick (foot trails, mildly pointed) -> passing (foot level) -> reach (toes up) -> heel strike
         # back: kick up high and hold; passing; front: reach out raised and hold, then drop to the heel
         # lower, quicker swing: foot stays close to the floor; front leg still reaches out near-straight
-        self.swing = [(0.00, -L2, 0.000, 40), (0.16, -L2 - 0.012, 0.065, 28), (0.34, -L2 + 0.02, 0.080, 16),
-                      (0.52, 0.015, 0.085, 0), (0.70, L2 + 0.060, 0.060, -10), (0.86, L2 + 0.050, 0.035, -14),
+        self.swing = [(0.00, -L2, 0.000, 40), (0.16, -L2 + 0.010, 0.045, 24), (0.34, -L2 + 0.05, 0.060, 12),
+                      (0.52, 0.03, 0.065, 0), (0.70, L2 + 0.060, 0.060, -10), (0.86, L2 + 0.050, 0.035, -14),
                       (1.00, L2, 0.000, -14)]
     def foot(self, ph):
         """ph in [0,1): 0 = heel strike. returns z, lift, pitch"""
