@@ -435,8 +435,9 @@ function updateCamera(dt) {
   if (camMode === 'arena') {
     // Clash Royale style: high above Purple's baseline, looking down the length of the court (court runs bottom to top on a phone)
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
-    pos = new pc.Vec3(-13 * fit + drift, 38 * fit, 0); look = new pc.Vec3(0.3 + drift, 0, 0); fov = portrait ? 52 : 38;
-  } else if (camMode === 'broadcast') {
+    pos = new pc.Vec3(-30 + drift, 30, 0); look = new pc.Vec3(0.8 + drift, 0, 0); fov = 40;
+    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.7 / aspect, 12.6);
+  } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
   } else {
@@ -450,7 +451,7 @@ function updateCamera(dt) {
     camera.camera.worldToScreen(top, sp);
     p.label.style.transform = `translate(${sp.x.toFixed(0)}px, ${sp.y.toFixed(0)}px) translate(-50%,-100%)`;
     p.label.classList.toggle('ball', ball.holder === p);
-    p.label.style.display = sp.z > 0 && sp.x > -50 && sp.x < w + 50 ? '' : 'none';
+    p.label.style.display = (camera.camera.projection === pc.PROJECTION_ORTHOGRAPHIC || sp.z > 0) && sp.x > -50 && sp.x < w + 50 ? '' : 'none';
   }
 }
 
