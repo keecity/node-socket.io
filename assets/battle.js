@@ -615,7 +615,7 @@ function checkIntegrity(p) {
 }
 // damage everything within radius of a point (pt in demo units, any wrapped copy)
 function impact(pt, radius, dir, power, kind = 'hit') {
-  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
+  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); soldierImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
   const seen = new Set(); let any = false;
   for (let gx = pt.x - radius - GRID; gx <= pt.x + radius + GRID; gx += GRID) for (let gz = pt.z - radius - GRID; gz <= pt.z + radius + GRID; gz += GRID) for (const p of propsNear(gx, gz)) {
     if (seen.has(p) || !p.alive) continue; seen.add(p);
@@ -701,6 +701,7 @@ const woodAssets = loadGLB('assets/woodcutter.b64.txt').then(prepareWood, e => {
 const mineAssets = loadGLB('assets/mine.b64.txt').then(prepareMine, e => { console.error('mine model', e); MINE_ERR = String(e && e.message || e); });
 const farmAssets = loadGLB('assets/farm.b64.txt').then(prepareFarm, e => { console.error('farm model', e); FARM_ERR = String(e && e.message || e); });
 const semiAssets = loadGLB('assets/semi.b64.txt').then(prepareSemi, e => { console.error('semi model', e); SEMI_ERR = String(e && e.message || e); });
+const soldierAssets = battleAssets.then(() => loadGLB('assets/soldiers.b64.txt')).then(g => prepareSoldiers(g, gltf && gltf.scene), e => console.error('soldier model', e));
 const scaffoldAssets = Promise.all([loadGLB('assets/scaffold_wall.b64.txt'), loadGLB('assets/scaffold_top.b64.txt')]).then(([w, t]) => { scWallProto = w.scene; scTopProto = t.scene; }, e => console.error('scaffold models', e));
 
 // ------------------------------------------------------------------ road meshes (built from the merged chains)
@@ -1631,6 +1632,113 @@ function updateTrucks(dt) { const c = camD();
 // warehouses: keep display copies near the camera
 function updateWarehouses() { const c = camD(); for (const w of warehouses) w.obj.position.set(disp(w.x, c.x), w.y, disp(w.z, c.z)); }
 const hasWarehouse = team => warehouses.some(w => w.alive && w.done && w.team === team) && trucks.some(t => !t.dead && t.team === team);
+// ------------------------------------------------------------------ infantry
+// Four T-posed soldiers on one sheet (top row: navy uniform, bottom row: grey). Each side fields one uniform. They are
+// rigged here: a 13-bone skeleton with blended skin weights, posed procedurally every frame (idle gun hold, walk/run gait,
+// aim and fire with recoil, death fall). The rifle is a scaled copy of the mech's gun, carried at the chest.
+let soldierKinds = null, soldierGun = null; const soldiers = [], SOLD_H = 1.75 / S, SOLD_HP = 60, SOLD_RANGE = 3.2, SOLD_SPEED = [0.11, 0.32];
+const sm = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+// bone layout in units of body height, character facing +z (its right hand is at -x)
+const SB = [['root', -1, 0, 0], ['hips', 0, 0, 0.52], ['spine', 1, 0, 0.64], ['chest', 2, 0, 0.74], ['head', 3, 0, 0.86],
+  ['armR', 3, -0.105, 0.8], ['foreR', 5, -0.255, 0.8], ['armL', 3, 0.105, 0.8], ['foreL', 7, 0.255, 0.8],
+  ['thighR', 1, -0.05, 0.5], ['shinR', 9, -0.05, 0.27], ['thighL', 1, 0.05, 0.5], ['shinL', 11, 0.05, 0.27]];
+const BI = Object.fromEntries(SB.map((b, i) => [b[0], i]));
+function skinWeights(x, y) { const w = new Map(), add = (b, v) => { if (v > 1e-3) w.set(b, (w.get(b) || 0) + v); }, s = x < 0 ? 'R' : 'L', ax = Math.abs(x);
+  const arm = sm(0.09, 0.125, ax) * (y > 0.64 ? 1 : 0), leg = (1 - sm(0.46, 0.53, y)) * (1 - arm);
+  if (arm > 0) { const fo = sm(0.235, 0.275, ax); add('fore' + s, arm * fo); add('arm' + s, arm * (1 - fo)); }
+  if (leg > 0) { const sh = 1 - sm(0.25, 0.29, y); add('shin' + s, leg * sh); add('thigh' + s, leg * (1 - sh)); }
+  const body = 1 - arm - leg; if (body > 1e-3) { const hd = sm(0.84, 0.88, y), ch = sm(0.66, 0.74, y) * (1 - hd), sp = sm(0.56, 0.64, y) * (1 - ch - hd);
+    add('head', body * hd); add('chest', body * ch); add('spine', body * Math.max(0, sp)); add('hips', body * Math.max(0, 1 - hd - ch - sp)); }
+  const top = [...w.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((s2, e) => s2 + e[1], 0) || 1; return top.map(([b, v]) => [BI[b], v / sum]); }
+function prepareSoldiers(g, mechScene) { let mesh = null; g.scene.updateMatrixWorld(true); g.scene.traverse(o => { if (o.isMesh && !mesh) mesh = o; });
+  const src0 = new THREE.BufferGeometry(); for (const n of ['position', 'normal', 'uv']) if (mesh.geometry.attributes[n]) src0.setAttribute(n, floatAttr(mesh.geometry.attributes[n])); if (mesh.geometry.index) src0.setIndex(mesh.geometry.index.clone());
+  const src = src0.index ? src0.toNonIndexed() : src0; src.applyMatrix4(mesh.matrixWorld); const P = src.attributes.position, mat = mesh.material.clone(); mat.side = THREE.DoubleSide; mat.skinning = true;
+  const kinds = [];
+  for (let q = 0; q < 4; q++) { const right = q % 2, top = q < 2, tris = [];   // q: 0,1 navy (top row), 2,3 grey
+    for (let t = 0; t < P.count; t += 3) { const cx = (P.getX(t) + P.getX(t + 1) + P.getX(t + 2)) / 3, cy = (P.getY(t) + P.getY(t + 1) + P.getY(t + 2)) / 3; if ((cx > 0) === !!right && (cy > 0.5) === top) tris.push(t); }
+    const out = new THREE.BufferGeometry(); for (const n in src.attributes) { const a = src.attributes[n], arr = new Float32Array(tris.length * 3 * a.itemSize); tris.forEach((t, i) => arr.set(a.array.subarray(t * a.itemSize, (t + 3) * a.itemSize), i * 3 * a.itemSize)); out.setAttribute(n, new THREE.BufferAttribute(arr, a.itemSize)); }
+    out.computeBoundingBox(); const b = out.boundingBox, h = b.max.y - b.min.y; out.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); out.scale(1 / h, 1 / h, 1 / h);
+    const pp = out.attributes.position, si = new Uint16Array(pp.count * 4), sw = new Float32Array(pp.count * 4);
+    for (let i = 0; i < pp.count; i++) skinWeights(pp.getX(i), pp.getY(i)).forEach(([bi, v], k) => { si[i * 4 + k] = bi; sw[i * 4 + k] = v; });
+    out.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4)); out.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4)); out.computeVertexNormals(); kinds.push(out); }
+  soldierKinds = { geos: kinds, mat };
+  // the rifle: the mech's gun, shrunk (a simple rifle if the gun can't be detached)
+  let gun = mechScene && mechScene.getObjectByName('Gun'), skinned = true; if (gun) { let meshes = 0; gun.traverse(o => { if (o.isMesh && !o.isSkinnedMesh) meshes++; }); skinned = !meshes; }   /* the mech's gun is part of its skinned body: build the rifle instead */
+  if (gun && !skinned) { const c = gun.clone(true); c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); c.scale.set(1, 1, 1); c.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(c), sz = bb.getSize(new THREE.Vector3()), L = Math.max(sz.x, sz.y, sz.z);
+    const hold = new THREE.Group(); c.position.sub(bb.getCenter(new THREE.Vector3())); hold.add(c); if (sz.x === L) hold.rotation.y = Math.PI / 2; else if (sz.y === L) hold.rotation.x = Math.PI / 2; hold.scale.setScalar(0.55 / L); soldierGun = hold; }
+  else { // a scaled-down beam rifle in the mech gun's colours: body, barrel, grip, magazine, stock, sight, emitter tip
+    const g2 = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.45, metalness: 0.6 }), m2 = new THREE.MeshStandardMaterial({ color: 0x15161a, roughness: 0.7 }),
+      glow = new THREE.MeshBasicMaterial({ color: 0xff7ac8 }), bx = (w, h, d, z, y, mat = m) => { const k = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); k.position.set(0, y, z); k.castShadow = true; g2.add(k); };
+    bx(0.04, 0.06, 0.26, 0.03, 0); bx(0.022, 0.022, 0.16, 0.24, 0.012, m2); bx(0.03, 0.03, 0.03, 0.33, 0.012); bx(0.026, 0.07, 0.035, -0.02, -0.06, m2); bx(0.03, 0.08, 0.04, 0.07, -0.06, m2);
+    bx(0.036, 0.05, 0.11, -0.16, -0.008); bx(0.018, 0.02, 0.06, 0.04, 0.042, m2); bx(0.012, 0.012, 0.01, 0.35, 0.012, glow); g2.scale.setScalar(0.62); soldierGun = g2; } }
+function makeSoldier(team, x, z, variant) { const geo = soldierKinds.geos[(team ? 2 : 0) + variant], bones = SB.map(([name, , bx, by]) => { const b = new THREE.Bone(); b.name = name; return b; });
+  SB.forEach(([, p, bx, by], i) => { if (p < 0) bones[i].position.set(bx, by, 0); else { bones[i].position.set(bx - SB[p][2], by - SB[p][3], 0); bones[p].add(bones[i]); } });
+  const skel = new THREE.Skeleton(bones), mesh = new THREE.SkinnedMesh(geo, soldierKinds.mat); mesh.add(bones[0]); mesh.bind(skel); mesh.castShadow = true; mesh.frustumCulled = false;
+  const gun = soldierGun.clone(true); gun.position.set(-0.06, 0.02, 0.1); bones[BI.chest].add(gun); const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0, 0.3); gun.add(muzzle);
+  const root = new THREE.Group(); root.scale.setScalar(SOLD_H); root.add(mesh); battleRoot.add(root);
+  const s = { kind: 'soldier', team, col: TEAM_COL[team], root, mesh, bones, gun, muzzle, pos: new THREE.Vector3(wm(x), 0, wm(z)), vel: new THREE.Vector3(), yaw: rand(0, 6.28), hp: SOLD_HP, maxHp: SOLD_HP, alive: true,
+    state: 'idle', speed: 0, ph: rand(0, 1), order: null, target: null, fireT: rand(0, 1), shots: 0, recoil: 0, deadT: 0, sel: false, st: Math.random() };
+  s.pos.y = Hd(s.pos.x, s.pos.z); makeBars(s, 0.24, 0.18); soldiers.push(s); return s; }
+// ---- pose: every bone set from the current state each frame
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler(), AX = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+const setRot = (b, x, y, z, order = 'XYZ') => b.quaternion.setFromEuler(_e.set(x, y, z, order));
+const gw = (t, c, w) => { let d = t - c; d -= Math.floor(d + 0.5); return Math.exp(-d * d / (w * w)); };
+function poseSoldier(s, dt) { const B = s.bones, b = n => B[BI[n]], run = s.speed > 0.2 ? 1 : 0, A = clamp(s.speed / 0.11, 0, 1);
+  if (!s.alive) {   // death: knees go, the body falls back and settles
+    const k = sm(0, 0.9, s.deadT); setRot(b('root'), -k * 1.42, 0, 0); setRot(b('thighR'), -k * 0.5, 0, 0); setRot(b('thighL'), -k * 0.2, 0, 0); setRot(b('shinR'), k * 0.9, 0, 0); setRot(b('shinL'), k * 0.4, 0, 0);
+    s.gun.visible = s.deadT < 0.35;   // dropped as they fall
+    setRot(b('armR'), 0, k * 0.4, 0.4 + k * 0.6, 'YZX'); setRot(b('armL'), 0, -k * 0.2, -0.3 - k * 0.9, 'YZX'); setRot(b('head'), -k * 0.3, 0, k * 0.2); return; }
+  const tR = s.ph, legs = { R: tR, L: (tR + 0.5) % 1 };
+  for (const sd of ['R', 'L']) { const t = legs[sd];
+    const hip = (run ? 0.15 + 0.55 * Math.cos(6.283 * (t - 0.08)) : 0.07 + 0.3 * Math.cos(6.283 * (t - 0.03)) + 0.04 * Math.cos(12.566 * (t - 0.1))) * A;
+    const knee = (run ? 0.15 + 0.65 * gw(t, 0.18, 0.09) + 1.75 * gw(t, 0.66, 0.14) : 0.06 + 0.3 * gw(t, 0.13, 0.07) + 1.05 * gw(t, 0.72, 0.1)) * A;
+    setRot(b('thigh' + sd), -hip, 0, 0); setRot(b('shin' + sd), knee, 0, 0); }
+  const aim = s.state === 'fire' ? 1 : 0, rec = s.recoil;
+  // torso: lean into a run, bob with the steps, breathe at rest, kick back on each shot
+  b('hips').position.y = 0 + Math.cos(12.566 * (tR - 0.3)) * 0.012 * A - 0.02 * A * run;
+  setRot(b('spine'), 0.06 * A + 0.14 * run + 0.015 * Math.sin(performance.now() / 700 + s.st * 9) * (1 - A), Math.sin(6.283 * tR) * 0.12 * A, 0);
+  setRot(b('chest'), -rec * 0.12, 0.25 * aim, 0); setRot(b('head'), -0.04 * aim, -0.2 * aim, 0);
+  // arms on the rifle: right hand on the grip, left under the handguard; raised to the shoulder to aim
+  setRot(b('armR'), 0, 0.55 + 0.25 * aim, 1.2 - 0.35 * aim, 'YZX'); setRot(b('foreR'), 0, 1.35 - 0.2 * aim, 0);
+  setRot(b('armL'), 0, -1.0 - 0.15 * aim, -1.0 + 0.3 * aim, 'YZX'); setRot(b('foreL'), 0, -0.9 + 0.2 * aim, 0);
+  s.gun.position.set(-0.03 + 0.02 * aim, -0.07 + 0.06 * aim, 0.14 - rec * 0.03); s.gun.rotation.set(-0.12 * (1 - aim), 0, 0);
+  setRot(b('root'), 0, 0, 0); }
+// ---- behaviour
+const soldierTargets = s => [...soldiers.filter(o => o.alive && o.team !== s.team), ...robots.filter(r => r.team !== s.team && r.state !== 'ko')];
+function soldierHit(s, amount, by) { if (!s.alive) return; s.hp -= amount; if (s.hp <= 0) { s.alive = false; s.sel = false; s.deadT = 0; s.state = 'dead'; if (by) log(s.team, `<b>${unitName(by)}</b> kills <b>${unitName(s)}</b>`); }
+  else if (by && !s.target && (!s.order || s.order.type !== 'move')) s.target = by; return 'hit'; }
+function soldierImpact(pt, radius, power, kind) { for (const s of soldiers) { if (!s.alive) continue; const d = wdist2(s.pos.x, s.pos.z, pt.x, pt.z); if (d > radius + 0.06 || pt.y > s.pos.y + SOLD_H * 1.2) continue;
+  soldierHit(s, kind === 'step' || kind === 'land' ? 999 : kind === 'bullet' ? 6 : 90 * power, null); } }
+function soldierFire(s, T) { const m = new THREE.Vector3(); s.muzzle.getWorldPosition(m); m.divideScalar(S); m.x = s.pos.x + (m.x - s.root.position.x); m.z = s.pos.z + (m.z - s.root.position.z);
+  const tp = tgtPos(T, new THREE.Vector3()); near(tp, s.pos, tp); FX.flash(m, 0.035, [1, 0.85, 0.5]); s.recoil = 1; s.shots++;
+  const miss = Math.random() < 0.25; if (!miss) { if (T.kind === 'soldier') soldierHit(T, 9, s); else damage(s, T, 2, null, false, tp.clone().sub(s.pos).setY(0).normalize(), tp.clone()); }
+  else tp.add(new THREE.Vector3(rand(-0.15, 0.15), rand(-0.05, 0.1), rand(-0.15, 0.15)));
+  // tracer
+  const tr = hRounds.find(r => !r.alive); if (tr) { tr.alive = true; tr.owner = s; tr.life = 0.25; tr.m.material = hRoundMats[s.team]; tr.m.visible = true; tr.p.copy(m); tr.v.subVectors(tp, m).normalize().multiplyScalar(14); tr.m.scale.set(1.2, 1.2, 1); tr.tracerOnly = true; } }
+function updateSoldiers(dt) { const c = camD();
+  for (let i = soldiers.length - 1; i >= 0; i--) { const s = soldiers[i];
+    if (!s.alive) { s.deadT += dt; if (s.deadT > 30) { battleRoot.remove(s.root); scene.remove(s.bar.g); soldiers.splice(i, 1); continue; } }
+    else {
+      s.recoil = Math.max(0, s.recoil - dt * 8);
+      if (s.target && (!alive(s.target) || wdist2(s.pos.x, s.pos.z, s.target.pos.x, s.target.pos.z) > SOLD_RANGE * 1.6)) s.target = null;
+      if (!s.target && (!s.order || s.order.type !== 'move')) { let best = null, bd = SOLD_RANGE; for (const e of soldierTargets(s)) { const d = wdist2(s.pos.x, s.pos.z, e.pos.x, e.pos.z); if (d < bd) { bd = d; best = e; } } s.target = best; }
+      let goal = null, want = 0;
+      if (s.order && s.order.type === 'move') { goal = s.order; want = SOLD_SPEED[1]; if (wdist2(s.pos.x, s.pos.z, goal.x, goal.z) < 0.08) s.order = null; }
+      else if (s.target) { const d = wdist2(s.pos.x, s.pos.z, s.target.pos.x, s.target.pos.z); if (d > SOLD_RANGE * 0.9) { goal = s.target.pos; want = SOLD_SPEED[1]; } }
+      if (goal) { const dx = wd(goal.x - s.pos.x), dz = wd(goal.z - s.pos.z), yaw = Math.atan2(dx, dz); let dy = Math.atan2(Math.sin(yaw - s.yaw), Math.cos(yaw - s.yaw)); s.yaw += clamp(dy, -6 * dt, 6 * dt);
+        s.speed += (want - s.speed) * Math.min(1, dt * 5); const nx = wm(s.pos.x + Math.sin(s.yaw) * s.speed * dt), nz = wm(s.pos.z + Math.cos(s.yaw) * s.speed * dt);
+        if (Hd(nx, nz) > 2 / S * 1.1 && !lotBlocked(nx, nz, [])) { s.pos.x = nx; s.pos.z = nz; } else s.order = null; s.state = 'move'; }
+      else { s.speed += (0 - s.speed) * Math.min(1, dt * 6); s.state = s.speed > 0.03 ? 'move' : 'idle'; }
+      // shooting: face the target, fire short bursts while standing
+      if (s.target && !goal) { const T = s.target, dx = wd(T.pos.x - s.pos.x), dz = wd(T.pos.z - s.pos.z), yaw = Math.atan2(dx, dz); let dy = Math.atan2(Math.sin(yaw - s.yaw), Math.cos(yaw - s.yaw)); s.yaw += clamp(dy, -5 * dt, 5 * dt);
+        s.state = 'fire'; s.fireT -= dt; if (s.fireT <= 0 && Math.abs(dy) < 0.3) { soldierFire(s, T); s.fireT = s.shots % 4 === 3 ? rand(0.9, 1.6) : 0.12; } }
+      // gait phase follows the distance walked, so feet don't slide
+      const stride = s.speed > 0.2 ? 0.17 : 0.12; s.ph = (s.ph + s.speed * dt / stride) % 1;
+      s.pos.y = Hd(s.pos.x, s.pos.z); }
+    poseSoldier(s, dt); s.root.position.set(disp(s.pos.x, c.x), s.pos.y, disp(s.pos.z, c.z)); s.root.rotation.y = s.yaw;
+    placeBar(s, s.root.position.x * S, (s.pos.y + SOLD_H) * S, s.root.position.z * S, s.alive); } }
+function spawnSquad(team, n) { const t = towns[team]; for (let i = 0; i < n; i++) { const a = rand(0, 6.28), r = rand(1.2, 2.4); let x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r;
+  for (let k = 0; k < 30 && (lotBlocked(wm(x), wm(z), []) || roadAt(x * S, z * S) > 0.5); k++) { x += rand(-0.4, 0.4); z += rand(-0.4, 0.4); } makeSoldier(team, x, z, i % 2); } }
 // ---- smashing cars: robots crush them underfoot, weapons blow them up; wrecks burn, then explode
 function carStomp(x, z, rad) {   // a foot or a landing robot comes down here (demo units)
   for (const car of cars) { if (car.dead || car.wx === undefined) continue; const dx = wd(car.wx / S - x), dz = wd(car.wz / S - z);
@@ -1873,7 +1981,7 @@ const idleClip = f => f.saberOut ? 'Saber_Idle' : f.idleName;   // each pilot ha
 function toIdle(f, fade = 0.14, think = 0.05) { setState(f, 'idle', idleClip(f), fade); f.thinkT = think; }
 const groundY = f => Math.max(Hd(f.pos.x, f.pos.z), -3 / S);
 const chestPos = (f, out) => out.set(f.pos.x, groundY(f) + (f.y + 0.56) * RS, f.pos.z);
-const tgtPos = (t, out) => t.kind === 'robot' ? chestPos(t, out) : out.copy(t.pos);
+const tgtPos = (t, out) => t.kind === 'robot' ? chestPos(t, out) : t.kind === 'soldier' ? out.copy(t.pos).setY(t.pos.y + SOLD_H * 0.7) : out.copy(t.pos);
 const alive = t => t && (t.kind === 'robot' ? t.state !== 'ko' : t.alive);
 const enemiesOf = team => robots.filter(r => r.team !== team && r.state !== 'ko');
 const enemyHelisOf = team => helis.filter(h => h.team !== team && h.alive);
@@ -1893,7 +2001,7 @@ const ATTACKS = {
   Melee_Punch_Combo: { hits: [[0.06, 0.16, 40, 'a jab', 'fistL'], [0.36, 0.48, 62, 'a cross', 'fistR']] },
   Melee_Boost_Kick: { hits: [[0.22, 0.36, 75, 'a boost kick', 'footR', 1]] },
 };
-function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
+function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'soldier' ? 'soldier' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
 function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'heli') return heliHit(def, amount, att, at);
   if (def.kind === 'airbase') return airbaseHit(def, amount);
@@ -1902,6 +2010,7 @@ function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'mine') return mineHit(def, amount);
   if (def.kind === 'farm') return farmHit(def, amount);
   if (def.kind === 'warehouse') return warehouseHit(def, amount);
+  if (def.kind === 'soldier') return soldierHit(def, amount, att);
   if (def.state === 'ko') return;
   if (def.state === 'clash' && def.hp - amount > 0) { def.hp -= amount; if (at) FX.sparks(at, 6, [1, 0.7, 0.4], 1.2); return 'hit'; }   // locked blades: stray hits chip armour but don't break the bind
   const facing = dir && new THREE.Vector3(Math.sin(def.yaw), 0, Math.cos(def.yaw)).dot(dir) < -0.3;
@@ -1924,7 +2033,7 @@ function damage(att, def, amount, label, heavy, dir, at) {
   else FX.sparks(tmpA, 3, acol, 1);
   if (def.team === 0 && !def.underAttackT) { def.underAttackT = 6; }
   if (def.hp <= 0) { knockOut(def, att, dir); return 'hit'; }
-  if (!def.target && att && def.order?.type !== 'move') def.target = att;          // fight back
+  if (!def.target && att && att.kind !== 'soldier' && def.order?.type !== 'move') def.target = att;   // robots shrug off rifle fire          // fight back
   if (heavy) { setState(def, 'hit', 'Hit_React_Heavy', 0.05); if (dir) def.vel.copy(dir).multiplyScalar(0.7); }
   else if (!['attack', 'draw', 'sheathe', 'hit', 'dive', 'turn', 'gunBurst', 'gunCharge', 'gunBeam'].includes(def.state) && !(def.cool.flinch > 0) && (def.bulletHits >= 9 || amount >= 40)) {
     def.bulletHits = 0; def.cool.flinch = 1.6; if (def.y > 0.05) return 'hit'; setState(def, 'hitL', 'Hit_React_Light', 0.05); if (dir) def.vel.copy(dir).multiplyScalar(0.25); }
@@ -2748,7 +2857,8 @@ function heliFireMissile(h) {
 }
 function updateHeliProjectiles(dt) {
   const c = camD();
-  for (const b of hRounds) { if (!b.alive) continue; b.life -= dt; b.v.y -= 1.0 * dt; b.p.addScaledVector(b.v, dt); const pos = b.p;
+  for (const b of hRounds) { if (!b.alive) continue; b.life -= dt;
+    if (b.tracerOnly) { b.p.addScaledVector(b.v, dt); b.m.position.set(disp(b.p.x, c.x), b.p.y, disp(b.p.z, c.z)); orient(b.m, b.v); if (b.life <= 0) { b.alive = false; b.m.visible = false; b.tracerOnly = false; b.m.scale.set(3.5, 3.5, 2); } continue; } b.v.y -= 1.0 * dt; b.p.addScaledVector(b.v, dt); const pos = b.p;
     b.m.position.set(disp(pos.x, c.x), pos.y, disp(pos.z, c.z)); orient(b.m, b.v);
     const t = projHits(pos, b.owner.team, 0);
     if (t) { b.alive = false; b.m.visible = false; if (t.kind === 'robot') t.bulletHits++; damage(b.owner, t, (t.kind === 'robot' ? 3 : 6) * heliDmg(b.owner), null, false, b.v.clone().setY(0).normalize(), pos.clone()); continue; }
@@ -2890,7 +3000,7 @@ function teamUpdate(dt) {
 
 // ------------------------------------------------------------------ public API used by the page
 const Battle = {
-  ready: Promise.all([battleAssets, pumpAssets, woodAssets, mineAssets, farmAssets, semiAssets]),
+  ready: Promise.all([battleAssets, pumpAssets, woodAssets, mineAssets, farmAssets, semiAssets, soldierAssets]),
   start() {
     const res = () => { for (const p of PARTS) p.setScale(renderer.getDrawingBufferSize(new THREE.Vector2()).y); };
     addEventListener('resize', res); res();
@@ -2904,6 +3014,7 @@ const Battle = {
         if (roadAt(wx * S, wz * S) > 0.01 || roadAt((wx + 0.25) * S, wz * S) > 0.01 || roadAt((wx - 0.25) * S, wz * S) > 0.01 || roadAt(wx * S, (wz + 0.25) * S) > 0.01 || roadAt(wx * S, (wz - 0.25) * S) > 0.01) continue;
         let blocked = false; for (const p of propsNear(wx, wz)) if (p.kind !== 'lamp' && wdist2(p.x, p.z, wx, wz) < p.r + 0.12) { blocked = true; break; }
         if (!blocked) TOWN_TREES.push([wm(wx) * S, wm(wz) * S, r()]); } });
+    if (soldierKinds) for (const team of [0, 1]) spawnSquad(team, 6);
     placeBridges(); buildRoadMeshes(); placeOilFields(); spawnCars(40); spawnPeds(140); rebuildTerritory();
     const roles = ['striker', 'striker', 'gunner', 'striker', 'gunner', 'striker'];
     for (const team of [0, 1]) roles.forEach((r, k) => spawnRobot(team, r, k));
@@ -2911,20 +3022,21 @@ const Battle = {
     log(null, 'Destroy the <b>Cobalt</b> forces and their HQ tower. Your HQ tower brings reinforcements.');
     return { x: towns[0].x * S, z: (towns[0].z + 2) * S };
   },
-  selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive)]; },
-  enemiesVisible() { return [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
+  selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive)]; },
+  enemiesVisible() { return [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
-  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
+  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   // commands from the interface
   command(kind, sel) { sel = sel || Battle.selectables().filter(u => u.sel);
-    for (const u of sel) { if (u.kind !== 'robot') { if (kind === 'stop') { u.anchor = { x: u.pos.x, z: u.pos.z }; u.target = null; } continue; }
+    for (const u of sel) { if (u.kind === 'soldier') { if (kind === 'stop' || kind === 'hold') { u.order = null; u.target = null; } continue; }
+      if (u.kind !== 'robot') { if (kind === 'stop') { u.anchor = { x: u.pos.x, z: u.pos.z }; u.target = null; } continue; }
       if (kind === 'stop') { u.order = null; u.target = null; u.path = null; if (!['ko', 'fly', 'jump', 'air', 'dive'].includes(u.state)) toIdle(u, 0.12, 0.3); }
       if (kind === 'hold') { u.order = { type: 'hold', x: u.pos.x, z: u.pos.z }; u.path = null; if (u.state === 'walk') toIdle(u, 0.12, 0.2); } } },
   amove(sel, ground) { for (const u of sel) if (u.kind === 'robot') { u.order = { type: 'amove', x: wm(ground.x / S), z: wm(ground.z / S) }; u.target = null; u.thinkT = 0; } },
   select(list) { for (const u of Battle.selectables()) u.sel = false; for (const u of list) u.sel = true; },
   order(sel, ground, enemy) {
     if (!sel.length) return;
-    if (enemy) { for (const u of sel) { u.order = { type: 'attack', target: enemy }; u.target = enemy; if (u.kind === 'robot' && u.state === 'idle') { u.thinkT = u.pilot.react * 0.5; u.st = 0; } if (u.kind === 'heli') { u.retarget = 0; u.anchor = { x: enemy.pos.x, z: enemy.pos.z }; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; } }
+    if (enemy) { for (const u of sel) { u.order = { type: 'attack', target: enemy }; u.target = enemy; if (u.kind === 'robot' && u.state === 'idle') { u.thinkT = u.pilot.react * 0.5; u.st = 0; } if (u.kind === 'soldier') { u.order = null; u.target = enemy; continue; } if (u.kind === 'heli') { u.retarget = 0; u.anchor = { x: enemy.pos.x, z: enemy.pos.z }; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; } }
       log(0, `Attack order: ${sel.length} unit${sel.length > 1 ? 's' : ''} → <b>${unitName(enemy)}</b>`); return; }
     const gx = ground.x / S, gz = ground.z / S;
     sel.forEach((u, i) => { const a = i * 2.4, r = 1.25 * Math.sqrt(i);   // spread formation
@@ -2932,12 +3044,13 @@ const Battle = {
       if (u.kind === 'robot' && !passableD(x, z)) {           // goal in deep water: stop at the last dry ground on the way
         const dx = wd(u.pos.x - x), dz = wd(u.pos.z - z), L = Math.hypot(dx, dz) || 1;
         for (let t = 0; t <= L; t += 0.1) { const px = x + dx * t / L, pz = z + dz * t / L; if (passableD(px, pz)) { x = wm(px); z = wm(pz); break; } } }
-      if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; }
+      if (u.kind === 'soldier') { u.order = { type: 'move', x, z }; u.target = null; }
+      else if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; }
       else { u.order = { type: 'move', x, z }; u.target = null; if (u.state === 'fly') { u.flyGoal = { x, z }; if (u.flyPhase === 'down' && u.y > 0.3 && u.boost > 10) { u.flyPhase = 'cruise'; play(u, 'Boost_Forward', 0.2); } } else if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; const rt = u.pilot.react * 0.5; u.thinkT = rt; if (u.state !== 'idle') toIdle(u, 0.12, rt); else u.st = 0; } } });
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt);
     const c = camD();
     for (const f of robots) { defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -2986,7 +3099,7 @@ const Battle = {
   },
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },
-  airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, farms, warehouses, trucks, _offroad: offroad, _lotBlocked: lotBlocked, _semi: { cab: () => makeCab(), trailer: k => makeTrailer(k) }, WH_COST, canPlaceWarehouse, buildWarehouse: (xw, zw, rot) => buildWarehouse(0, xw, zw, rot), warehouseGhost: () => semiParts ? makeWarehouse(true) : null, get warehouseError() { return SEMI_ERR; }, FOOD, FM_COST, foodRate, canPlaceFarm, buildFarm: (xw, zw, rot, crop) => buildFarm(0, xw, zw, rot, crop), farmGhost: () => farmProto ? makeFarmModel(true, 'Lettuce') : null, get farmError() { return FARM_ERR; }, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
+  airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, farms, warehouses, trucks, soldiers, _poseSoldier: poseSoldier, get _sgun() { return soldierGun; }, _offroad: offroad, _lotBlocked: lotBlocked, _semi: { cab: () => makeCab(), trailer: k => makeTrailer(k) }, WH_COST, canPlaceWarehouse, buildWarehouse: (xw, zw, rot) => buildWarehouse(0, xw, zw, rot), warehouseGhost: () => semiParts ? makeWarehouse(true) : null, get warehouseError() { return SEMI_ERR; }, FOOD, FM_COST, foodRate, canPlaceFarm, buildFarm: (xw, zw, rot, crop) => buildFarm(0, xw, zw, rot, crop), farmGhost: () => farmProto ? makeFarmModel(true, 'Lettuce') : null, get farmError() { return FARM_ERR; }, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
    oilSnap: (xw, zw) => { const f = fieldAt(wm(xw / S), wm(zw / S)) || oilFields.find(f => wdist2(f.x, f.z, wm(xw / S), wm(zw / S)) < OIL_R * 1.2); return f ? { x: f.x * S, z: f.z * S, rot: f.rot } : null; }, OIL, PJ_COST, PJ_RATE, oilRate, canPlacePump, buildPump: (xw, zw, rot) => buildPump(0, xw, zw, rot), pumpGhost: () => PJ_BOX ? makePumpModel(true) : null, get pumpError() { return PUMP_ERR; },
   canPlaceOutpost, inTerritory, terrDiscs, territoryTex: terrTex,
   buildOutpost: (xw, zw, rot) => buildOutpost(0, xw, zw, rot),
