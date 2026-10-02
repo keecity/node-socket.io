@@ -4,20 +4,22 @@ import numpy as np
 from drib import periodic
 
 class Run:
-    def __init__(self, T=0.60, stance=0.36, L=0.23, track=0.07, hip_h=-0.036, bob=0.026, lean=9):
+    def __init__(self, T=0.60, stance=0.38, L=0.23, track=0.07, hip_h=-0.050, bob=0.022, lean=9):
         self.T, self.s, self.L, self.track, self.hip_h, self.bob, self.lean = T, stance, L, track, hip_h, bob, lean
         self.V = L / (stance * T)                         # ground speed the cycle is authored for (rig units / s)
         L2 = L / 2
         # swing path keys: (u, z, lift, pitch); pitch > 0 = heel up rolling over the toe, < 0 = toes up on the heel
-        self.swing = [(0.00, -L2, 0.000, 42), (0.22, -L2 - 0.020, 0.085, 40), (0.48, 0.0, 0.115, 16),
-                      (0.74, L2 + 0.040, 0.055, -4), (1.00, L2, 0.000, -12)]
+        # toe-off -> heel kick (foot trails, mildly pointed) -> passing (foot level) -> reach (toes up) -> heel strike
+        self.swing = [(0.00, -L2, 0.000, 28), (0.25, -L2 - 0.015, 0.075, 18), (0.50, 0.0, 0.100, 0),
+                      (0.76, L2 + 0.035, 0.050, -14), (1.00, L2, 0.000, -14)]
     def foot(self, ph):
         """ph in [0,1): 0 = heel strike. returns z, lift, pitch"""
         s, L2 = self.s, self.L / 2
         if ph < s:
             u = ph / s
             z = L2 - self.L * u
-            pitch = -12 * (1 - u / 0.3) if u < 0.3 else 42 * ((u - 0.55) / 0.45) ** 1.6 if u > 0.55 else 0.0
+            # heel strike, roll flat by 20%, stay flat (heel down) until 75%, then peel onto the toe
+            pitch = -14 * (1 - u / 0.2) ** 2 if u < 0.2 else 28 * ((u - 0.75) / 0.25) ** 2 if u > 0.75 else 0.0
             return z, 0.0, pitch
         u = (ph - s) / (1 - s); k = self.swing
         # monotone-ish catmull through keys (non periodic)
