@@ -6,7 +6,7 @@ from drib import periodic
 class Run:
     def __init__(self, T=0.46, stance=0.38, L=0.21, track=0.07, hip_h=0.004, bob=0.016, lean=9):
         self.T, self.s, self.L, self.track, self.hip_h, self.bob, self.lean = T, stance, L, track, hip_h, bob, lean
-        self.z0 = -0.03
+        self.z0 = -0.065
         self.V = L / (stance * T)                         # ground speed the cycle is authored for (rig units / s)
         L2 = L / 2
         # swing path keys: (u, z, lift, pitch); pitch > 0 = heel up rolling over the toe, < 0 = toes up on the heel
