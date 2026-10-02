@@ -11,8 +11,10 @@ class Run:
         L2 = L / 2
         # swing path keys: (u, z, lift, pitch); pitch > 0 = heel up rolling over the toe, < 0 = toes up on the heel
         # toe-off -> heel kick (foot trails, mildly pointed) -> passing (foot level) -> reach (toes up) -> heel strike
-        self.swing = [(0.00, -L2, 0.000, 45), (0.25, -L2 - 0.010, 0.100, 20), (0.50, 0.005, 0.125, 0),
-                      (0.76, L2 + 0.035, 0.050, -14), (1.00, L2, 0.000, -14)]
+        # back: kick up high and hold; passing; front: reach out raised and hold, then drop to the heel
+        self.swing = [(0.00, -L2, 0.000, 45), (0.14, -L2 - 0.020, 0.105, 32), (0.32, -L2 + 0.010, 0.135, 20),
+                      (0.50, 0.010, 0.140, 2), (0.68, L2 + 0.040, 0.105, -12), (0.86, L2 + 0.035, 0.070, -16),
+                      (1.00, L2, 0.000, -14)]
     def foot(self, ph):
         """ph in [0,1): 0 = heel strike. returns z, lift, pitch"""
         s, L2 = self.s, self.L / 2
