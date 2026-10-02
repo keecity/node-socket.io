@@ -81,39 +81,69 @@ for S, s in (('L', 1), ('R', -1)):
     TAIL[f'foot.{S}'] = np.array([s * 0.115, 0.03, 0.14])
 
 # ---------------------------------------------------------------- skin weights
-def segdist(p, a, b):
-    ab = b - a; t = np.clip(((p - a) @ ab) / (ab @ ab), 0, 1)
-    return np.linalg.norm(p - (a + t[:, None] * ab), axis=1)
-x, y = P[:, 0], P[:, 1]; ax = np.abs(x); side = np.where(x >= 0, 'L', 'R')
-D = np.full((len(P), len(NAMES)), np.inf)
-for k in NAMES:
-    if k != 'root': D[:, IDX[k]] = segdist(P, HEAD[k], TAIL[k])
-allow = np.zeros_like(D, bool)
-def ok(mask, bones):
-    for b in bones: allow[mask, IDX[b]] = True
-for S in 'LR':
-    sm = side == S
-    arm = sm & (ax > 0.135) & (y > 0.52)
-    leg = sm & (y < 0.31) & (ax < 0.25)
-    ok(arm, [f'shoulder.{S}', f'upperarm.{S}', f'forearm.{S}', f'hand.{S}'])
-    ok(arm & (ax < 0.19), ['chest'])
-    ok(leg, [f'thigh.{S}', f'shin.{S}', f'foot.{S}'])
-    ok(leg & (y > 0.25), ['hips'])
-    torso = sm & ~arm & ~leg
-    ok(torso, ['hips', 'spine', 'chest', 'neck', 'head', f'shoulder.{S}'])
-    ok(torso & (y < 0.38), [f'thigh.{S}'])
-head = (y > 0.69) & (ax < 0.2); allow[head] = False; ok(head, ['head'])
-W = np.where(allow, 1 / (D + 0.01) ** 4, 0)
-W /= W.sum(1, keepdims=True)
+# Structured weights (like hand-painted ones): spine blends by height, arms and legs by position along
+# the limb with soft joints, shorts blending from hips to thighs, shoulders only near the shoulder.
+def sstep(a, b, v): u = np.clip((v - a) / (b - a), 0, 1); return u * u * (3 - 2 * u)
+x, y, z = P[:, 0], P[:, 1], P[:, 2]; ax = np.abs(x); side = np.where(x >= 0, 'L', 'R')
+W = np.zeros((len(P), len(NAMES)))
+def add(mask, bone, w): W[mask, IDX[bone]] += np.broadcast_to(w, mask.shape)[mask]
+
+head_m = (y > 0.665) & (ax < 0.2)
+arm_m = (ax > 0.115) & (y > 0.50) & ~head_m
+leg_m = (y < 0.255) & ~arm_m
+torso_m = ~(head_m | arm_m | leg_m)
+
+# spine chain by height (bone centres)
+cent = [('hips', 0.375), ('spine', 0.47), ('chest', 0.58), ('neck', 0.665), ('head', 0.75)]
+def spine_w(yy):
+    out = {k: np.zeros_like(yy) for k, _ in cent}
+    for (k0, y0), (k1, y1) in zip(cent[:-1], cent[1:]):
+        u = sstep(y0, y1, yy); m = (yy >= y0) & (yy < y1)
+        out[k0] += np.where(m, 1 - u, 0); out[k1] += np.where(m, u, 0)
+    out['hips'] += (yy < cent[0][1]); out['head'] += (yy >= cent[-1][1])
+    return out
+sw = spine_w(y)
+# shorts: hips -> thighs toward the hem, split left/right smoothly at the crotch
+thigh_share = (1 - sstep(0.27, 0.38, y)) * torso_m
+left = sstep(-0.03, 0.03, x)
+for k, w in sw.items():
+    add(torso_m, k, w * (1 - thigh_share))
+add(torso_m, 'thigh.L', thigh_share * left)
+add(torso_m, 'thigh.R', thigh_share * (1 - left))
+# shoulders: a soft share near the top of the shoulder only
+for S, sg in (('L', 1), ('R', -1)):
+    sm = (side == S)
+    shw = 0.45 * sstep(0.06, 0.12, ax) * sstep(0.55, 0.61, y) * sm * torso_m
+    for k in ('chest', 'neck'): W[:, IDX[k]] -= shw * W[:, IDX[k]]
+    W[:, IDX[f'shoulder.{S}']] += shw * 1.0
+head_n = head_m.copy()
+add(head_n, 'neck', 1 - sstep(0.665, 0.70, y)); add(head_n, 'head', sstep(0.665, 0.70, y))
+# arms along |x|: chest/shoulder -> upper arm (0.15) -> forearm (0.275) -> hand (0.345)
+for S, sg in (('L', 1), ('R', -1)):
+    m = arm_m & (side == S); t = ax
+    body = 1 - sstep(0.115, 0.17, t)
+    ua = sstep(0.115, 0.17, t) * (1 - sstep(0.255, 0.295, t))
+    fa = sstep(0.255, 0.295, t) * (1 - sstep(0.33, 0.36, t))
+    hd = sstep(0.33, 0.36, t)
+    add(m, 'chest', body * 0.55); add(m, f'shoulder.{S}', body * 0.45)
+    add(m, f'upperarm.{S}', ua); add(m, f'forearm.{S}', fa); add(m, f'hand.{S}', hd)
+# legs along y: thigh -> shin (knee 0.205) -> foot (ankle 0.075)
+for S, sg in (('L', 1), ('R', -1)):
+    m = leg_m & (side == S)
+    th = sstep(0.18, 0.235, y)
+    ft = 1 - sstep(0.07, 0.11, y)
+    sh = (1 - th) * (1 - ft)
+    add(m, f'thigh.{S}', th); add(m, f'shin.{S}', sh); add(m, f'foot.{S}', ft)
+W = np.clip(W, 0, None); W /= W.sum(1, keepdims=True)
+# light smoothing on the welded surface
 _, inv2 = np.unique(np.round(P, 5), axis=0, return_inverse=True); inv2 = inv2.ravel()
 Fw = inv2[F]; nw = inv2.max() + 1
 Aw = sp.coo_matrix((np.ones(len(F) * 6), (np.r_[Fw[:, 0], Fw[:, 1], Fw[:, 2], Fw[:, 1], Fw[:, 2], Fw[:, 0]],
                                           np.r_[Fw[:, 1], Fw[:, 2], Fw[:, 0], Fw[:, 0], Fw[:, 1], Fw[:, 2]])), (nw, nw)).tocsr()
 Aw.data[:] = 1; deg = np.asarray(Aw.sum(1)).ravel() + 1
 Ww = np.zeros((nw, len(NAMES))); np.add.at(Ww, inv2, W); Ww /= np.bincount(inv2, minlength=nw)[:, None]
-alw = np.zeros((nw, len(NAMES)), bool); np.logical_or.at(alw, inv2, allow)
-for _ in range(4):
-    Ww = ((Aw @ Ww) + Ww) / deg[:, None]; Ww *= alw; Ww /= Ww.sum(1, keepdims=True)
+for _ in range(2):
+    Ww = ((Aw @ Ww) + Ww) / deg[:, None]
 W = Ww[inv2]
 # shoes are rigid on the foot; sock inside the shoe follows the foot too
 for S in 'LR':

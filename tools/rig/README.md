@@ -8,7 +8,7 @@ Rebuilds `public/models/player_rigged.glb` from the raw Tripo mesh.
 
 | file | what it does |
 | --- | --- |
-| `rig.py` | Mesh cleanup (sneakers moved onto the feet and scaled up a touch, sock tucked inside the shoe, stray armband/patch removed), the 20-joint skeleton measured from the mesh, skin weights (shoes rigid on the foot bone). |
+| `rig.py` | Mesh cleanup (sneakers moved onto the feet and scaled up a touch, sock tucked inside the shoe, stray armband/patch removed), the 20-joint skeleton measured from the mesh, structured skin weights: spine blended by height, limbs by position along the bone with soft joints, shorts blending hips→thighs, shoes rigid on the foot. |
 | `anim.py` | Control rig: per-control keyframe curves, two-bone IK for arms and legs, hand contact on the ball, wrist limits with forearm twist sharing. |
 | `clips.py` | The four clips — `Idle`, `Dribble`, `Shoot`, `Dunk` — authored as keyframed controls. |
 | `export.py` | Bakes the clips at 30 fps and writes the GLB (skinned mesh + `basketball` node). |

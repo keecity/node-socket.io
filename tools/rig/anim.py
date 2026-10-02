@@ -17,6 +17,7 @@ def arc(a, b):
         return 2 * np.outer(ax_, ax_) - np.eye(3)
     K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
     return np.eye(3) + K + K @ K / (1 + c)
+def sstep_(a, b, v): u = min(max((v - a) / (b - a), 0), 1); return u * u * (3 - 2 * u)
 def nrm(v): v = np.asarray(v, float); return v / (np.linalg.norm(v) + 1e-12)
 def perp(v, axis): return nrm(v - (v @ axis) * axis)
 def R3(*ops): return qmat(rot(*ops))
@@ -207,6 +208,14 @@ def solve(c, ball_path=None, t=0.0):
         Rc = arc(n_free, -g) @ Rfree
         Rb = qmat(slerp(matq(Rfree), matq(Rc), hw))
         n = Rb @ np.array([0, -1, 0.]); fing = Rb @ np.array([sgn, 0, 0.])
+        # automatic shrug: the clavicle lifts as the arm goes overhead
+        A = (M[f'shoulder.{S}'] @ np.r_[LOCAL_T[f'upperarm.{S}'], 1])[:3]
+        up = Cr @ np.array([0, 1, 0.])
+        elev = np.degrees(np.arccos(np.clip(nrm(p - A) @ -up, -1, 1)))   # 0 = arm down, 180 = straight up
+        shrug = 20 * sstep_(70, 165, elev)
+        if shrug > 0.1:
+            q[f'shoulder.{S}'] = qmul(rot(('z', sgn * shrug)), q[f'shoulder.{S}'])
+            M = fk(q)
         solve_arm(M, S, p, n, fing, pole, q, WRIST_SWING + 15 * hw)
     for S in 'LR':
         fx, lift, fz = c[f'f{S}']; pitch, yaw = c[f'fr{S}']
