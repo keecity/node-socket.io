@@ -276,7 +276,8 @@ def legs_cycle(t, c, period=RUN_T, stride=STRIDE, lift=0.075, width=0.085):
     bob = np.cos(4 * np.pi * (ph - STANCE / 2)); sway = np.sin(2 * np.pi * ph)
     return ph, bob, sway
 
-def run_body(t, c, r, arms=True):
+def run_body(t, c, r, arms=True, st=None):
+    st = st or {}; L_ = st.get('lean', 0.0); SW = st.get('swing', 40.0); EL = st.get('elbow', 88.0); DN = st.get('down', 74.0); YW = st.get('yaw', 1.0)
     """legs + pelvis + torso + head for the run gait r (gait.Run). ph_L = 0 at left heel strike."""
     T = r.T; phL = (t / T) % 1.0; phR = (phL + 0.5) % 1.0
     for S, sg, ph in (('L', 1, phL), ('R', -1, phR)):
@@ -288,11 +289,11 @@ def run_body(t, c, r, arms=True):
     lat = np.cos(w - np.pi * r.s)                            # +1 when the left foot is mid-stance
     c['hips'] = np.array([0.008 * lat, r.hip_h - r.bob * (0.5 + 0.5 * down), 0.02])   # hips carried ahead of the feet
     # pelvis yaws so the swinging leg's hip goes forward; drops on the swing side; leans into the run
-    yaw = 9 * np.sin(w - np.pi * r.s)                        # + = left hip back (left leg in stance, pushing)
-    c['hipsR'] = np.array([r.lean + 14 + 1.2 * down, -yaw, -1.8 * lat])
+    yaw = 9 * YW * np.sin(w - np.pi * r.s)                        # + = left hip back (left leg in stance, pushing)
+    c['hipsR'] = np.array([r.lean + 14 + L_ + 1.2 * down, -yaw, -1.8 * lat])
     c['spineR'] = np.array([5.0, yaw * 0.35, 0.7 * lat]); c['chestR'] = np.array([2.0 + 1.0 * down, yaw * 0.6, 0.5 * lat])
     lag = np.cos(2 * w - 2 * np.pi * r.s - 0.8)
-    c['neckR'] = np.array([-8.0, -yaw * 0.6, -0.5 * lat]); c['headR'] = np.array([-24.0 - 1.0 * down + 0.6 * lag, -yaw * 0.5, -0.6 * lat])  # cancels the body lean + bounce: eyes level
+    c['neckR'] = np.array([-8.0, -yaw * 0.6, -0.5 * lat]); c['headR'] = np.array([-24.0 - L_ - 1.0 * down + 0.6 * lag, -yaw * 0.5, -0.6 * lat])  # cancels the body lean + bounce: eyes level
     if arms:
         for S, sg in (('L', 1), ('R', -1)):
             a = -sg * np.sin(w - np.pi * r.s - 0.45)        # arms trail the legs slightly (loose, not robotic)        # arm forward when the opposite leg is forward; slight lag
@@ -303,14 +304,17 @@ def run_body(t, c, r, arms=True):
             c[f'he{S}'] = np.array([sg * 0.12, -0.35, -1.0]); c[f'hw{S}'] = np.array([0.0]); c[f'hsp{S}'] = np.array([0.0])
             c[f'sh{S}'] = np.array([0, -8 * a, 0]); c[f'wm{S}'] = np.array([10.0])
             # shoulder swings the arm through ~95 deg, elbow stays bent ~85-100 deg (more bend in front)
-            c[f'afk{S}'] = np.array([74.0, 8 + 40 * a, 88 + 6 * fwd - 6 * back, -6.0, 1.0])
+            c[f'afk{S}'] = np.array([DN, 8 + SW * a, EL + 6 * fwd - 6 * back, -6.0, 1.0])
     c['ball'] = np.array([0, -0.6, -0.4])
     return phL
 
-def run():
+RUN_STYLES = {'Run': ({}, {}),
+              'RunB': ({'bob': 0.012, 'track': 0.064}, {'lean': -7, 'swing': 30, 'elbow': 100, 'down': 66, 'yaw': 0.7}),   # upright glider, arms out
+              'RunC': ({'bob': 0.026, 'track': 0.08}, {'lean': 6, 'swing': 52, 'elbow': 80, 'down': 78, 'yaw': 1.4})}      # hard charger, big pump
+def run(name='Run'):
     from gait import Run
-    r = Run()
-    return bake(build_track([(0, READY), (r.T, {})], loop=True), r.T, override=lambda t, c: run_body(t, c, r))
+    g, st = RUN_STYLES[name]; r = Run(**g)
+    return bake(build_track([(0, READY), (r.T, {})], loop=True), r.T, override=lambda t, c: run_body(t, c, r, st=st))
 
 def dribble_run():
     """same legs/torso as Run (feet match ground speed), one bounce per stride, right hand rides the ball"""
@@ -416,7 +420,7 @@ def slide(direction):
     return bake(build_track([(0, DEF), (period, {})], loop=True), period, override=ovr)
 
 CLIPS = {'Idle': idle, 'Dribble': dribble, 'Shoot': shoot, 'Dunk': dunk,
-         'Run': run, 'DribbleRun': dribble_run, 'Defend': defend, 'Block': block,
+         'Run': run, 'RunB': lambda: run('RunB'), 'RunC': lambda: run('RunC'), 'DribbleRun': dribble_run, 'Defend': defend, 'Block': block,
          'Ready': ready, 'Pass': pass_, 'Steal': steal, 'SlideL': lambda: slide(1), 'SlideR': lambda: slide(-1)}
 if __name__ == '__main__':
     import sys; from pv import sheet

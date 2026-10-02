@@ -46,14 +46,14 @@ const DUNK_DIST = 1.8 * S, ARC = 6.75, BODY_R = 0.44, TARGET = 21, SHOT_CLOCK = 
 const XMAX = 14.2, ZMAX = 7.2;
 
 // ====================================================================== players
-const CLIPS = { Idle: 1, Dribble: 1, Shoot: 0, Dunk: 0, Run: 1, DribbleRun: 1, Defend: 1, Block: 0, Ready: 1, Pass: 0, Steal: 0, SlideL: 1, SlideR: 1 };
+const CLIPS = { Idle: 1, Dribble: 1, Shoot: 0, Dunk: 0, Run: 1, RunB: 1, RunC: 1, DribbleRun: 1, Defend: 1, Block: 0, Ready: 1, Pass: 0, Steal: 0, SlideL: 1, SlideR: 1 };
 const RUN_NATIVE = 0.21 / (0.46 * 0.38) * S,      // ground speed the Run cycle covers at 1x (feet don't skate when matched)
      DRUN_NATIVE = RUN_NATIVE, SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
 const NAMES = [['Jax', 'Rook', 'Blaze'], ['Kai', 'Nova', 'Ziggy']];
 const P = [];
 function makePlayer(team, idx) {
   const ent = new pc.Entity(NAMES[team][idx]); app.root.addChild(ent);
-  const model = playerAsset.resource.instantiateRenderEntity(); ent.addChild(model); model.setLocalScale(S, S, S);
+  const model = playerAsset.resource.instantiateRenderEntity(); ent.addChild(model); const k = [1.0, 0.95, 1.05, 0.97, 1.04, 1.0][P.length]; model.setLocalScale(S * k, S * k, S * k);
   if (team === 1) for (const r of model.findComponents('render')) for (const mi of r.meshInstances)
     if (mi.material && mi.material.name === 'player') { const m = mi.material.clone(); m.diffuseMap = tealAsset.resource; m.update(); mi.material = m; }
   model.addComponent('anim', { activate: true });
@@ -61,6 +61,7 @@ function makePlayer(team, idx) {
   for (const a of playerAsset.resource.animations) model.anim.assignAnimation(a.resource.name, a.resource, undefined, 1, !!CLIPS[a.resource.name]);
   const label = document.createElement('div'); label.className = 'tag t' + team; label.textContent = NAMES[team][idx]; $('tags').appendChild(label);
   return { id: P.length, team, idx, name: NAMES[team][idx], ent, model, label, ballNode: model.findByName('basketball'), rootBone: model.findByName('root'), head: model.findByName('head'),
+    k, runClip: ['Run', 'RunB', 'RunC', 'RunC', 'Run', 'RunB'][P.length], spd: [1.0, 0.94, 1.07, 1.04, 0.97, 1.0][P.length],
     pos: new pc.Vec3(), vel: new pc.Vec3(), yaw: 0, state: 'Ready', action: null, think: Math.random() * .3, timer: 0, cut: 0, juke: 0, stall: 0, react: 0, holdT: 0 };
 }
 for (let t = 0; t < 2; t++) for (let i = 0; i < 3; i++) P.push(makePlayer(t, i));
@@ -239,6 +240,7 @@ function updateActions(dt) {
 // ====================================================================== AI helpers
 function clamp(v) { v.x = Math.max(-XMAX, Math.min(XMAX, v.x)); v.z = Math.max(-ZMAX, Math.min(ZMAX, v.z)); return v; }
 function steer(p, target, maxSpeed, dt, accel = 13) {
+  maxSpeed *= p.spd;
   const want = flat(target.x - p.pos.x, target.z - p.pos.z), l = want.length(), sp = Math.min(maxSpeed, l * 3);
   if (l > 1e-3) want.mulScalar(sp / l);
   // avoid bodies ahead (go around, don't plough through)
@@ -265,15 +267,15 @@ function laneClear(a, b, pad, t) {   // no player of team t near segment a->b
 function animMove(p, dt, mode) {
   const sp = p.vel.length();
   if (mode === 'handler') {
-    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / DRUN_NATIVE, 0.3, 1.6)); }
+    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / (DRUN_NATIVE * p.k), 0.3, 1.6)); }
     else { setAnim(p, 'Dribble', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else if (mode === 'stance') {
-    if (sp > 2.4) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.6)); return; }
+    if (sp > 2.4) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); return; }
     const lat = p.vel.dot(left(p)), lv = left(p), fw = p.vel.clone().sub(lv.clone().mulScalar(lat));
     if (fw.length() > 0.25) p.vel.sub(fw.mulScalar(1 - 0.25 / fw.length()));   // stance moves sideways only (no gliding)
     if (lat > 0.45) setAnim(p, 'SlideL', 0.15, pc.math.clamp(lat / SLIDE_NATIVE, 0.3, 1.4)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, pc.math.clamp(-lat / SLIDE_NATIVE, 0.3, 1.4)); else { setAnim(p, 'Defend', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else {
-    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.6)); }
+    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); }
     else { setAnim(p, 'Ready', 0.25); p.vel.mulScalar(Math.pow(0.002, dt)); }
   }
 }
@@ -385,7 +387,7 @@ function defenseAI(p, dt) {
   }
   steer(p, clamp(goal), behindPlay ? 4.0 : 3.6, dt, 13);
   animMove(p, dt, 'stance');
-  if (p.state !== 'Run') faceTo(p, mp.x, mp.z, 7, dt);
+  if (!p.state.startsWith('Run')) faceTo(p, mp.x, mp.z, 7, dt);
   if (ball.pass && ball.pass.to === m && !ball.pass.tried.has(p.id)) {
     const dB = ball.pos.distance(new pc.Vec3(p.pos.x, 1.2, p.pos.z));
     if (dB < 0.9 && ball.pos.y < 2.3) {
@@ -414,7 +416,7 @@ function bodies1() {
     const a = P[i], b = P[j], pa = bodyPos(a), pb = bodyPos(b);
     const dx = pb.x - pa.x, dz = pb.z - pa.z, l = Math.hypot(dx, dz), min = BODY_R * 2;
     if (l >= min || l < 1e-4) continue;
-    const mass = q => (q.action && q.action.type === 'dunk') ? 1e6 : q.action ? 6 : (q.team !== game.offense && q.state !== 'Run') ? 5 : ball.holder === q ? 1.2 : 2;
+    const mass = q => (q.action && q.action.type === 'dunk') ? 1e6 : q.action ? 6 : (q.team !== game.offense && !q.state.startsWith('Run')) ? 5 : ball.holder === q ? 1.2 : 2;
     const ma = mass(a), mb = mass(b), over = min - l, nx = dx / l, nz = dz / l, wa = mb / (ma + mb), wb = ma / (ma + mb);
     if (!(a.action && a.action.type === 'dunk')) { a.pos.x -= nx * over * wa; a.pos.z -= nz * over * wa; }
     if (!(b.action && b.action.type === 'dunk')) { b.pos.x += nx * over * wb; b.pos.z += nz * over * wb; }
