@@ -291,10 +291,11 @@ def run_body(t, c, r, arms=True):
     yaw = 9 * np.sin(w - np.pi * r.s)                        # + = left hip back (left leg in stance, pushing)
     c['hipsR'] = np.array([r.lean + 2.5 * down, -yaw, -3.0 * lat])
     c['spineR'] = np.array([6.0, yaw * 0.6, 1.5 * lat]); c['chestR'] = np.array([3.0 + 2.0 * down, yaw * 1.2, 1.0 * lat])
-    c['neckR'] = np.array([-5.0, -yaw * 0.6, -lat]); c['headR'] = np.array([-10.0 - 2.0 * down, -yaw * 0.5, -1.0 * lat])
+    lag = np.cos(2 * w - 2 * np.pi * r.s - 0.8)
+    c['neckR'] = np.array([-5.0 + 1.5 * lag, -yaw * 0.6, -lat]); c['headR'] = np.array([-10.0 + 2.5 * lag, -yaw * 0.5, -1.5 * lat])
     if arms:
         for S, sg in (('L', 1), ('R', -1)):
-            a = -sg * np.sin(w - np.pi * r.s + 0.35)        # arm forward when the opposite leg is forward; slight lag
+            a = -sg * np.sin(w - np.pi * r.s - 0.45)        # arms trail the legs slightly (loose, not robotic)        # arm forward when the opposite leg is forward; slight lag
             fwd = max(a, 0.0)
             back = max(-a, 0.0)
             c[f'hp{S}'] = np.array([sg * (0.18 - 0.05 * fwd), -0.07 + 0.14 * fwd + 0.02 * back, 0.05 + 0.17 * fwd - 0.17 * back])
