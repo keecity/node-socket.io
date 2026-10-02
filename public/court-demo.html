@@ -19844,8 +19844,8 @@ app.on('update', dt => {
   // defense: the steal meter stays on screen the whole time Teal has the ball
   if (defMode()) {
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
-    if (!human.meter || !human.auto) { human.meter = true; human.auto = true; meterEl.className = 'show steal'; }
-    $('mlabel').textContent = near ? 'TAP TO STEAL' : 'GET CLOSER';
+    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; meterEl.className = 'show steal'; } $('mlabel').textContent = 'TAP TO STEAL'; }
+    else if (human.auto) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
   if (human.meter && !human.auto && !myBall() && !human.down) { human.meter = false; meterEl.className = ''; }
