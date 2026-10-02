@@ -289,18 +289,18 @@ def run_body(t, c, r, arms=True):
     c['hips'] = np.array([0.008 * lat, r.hip_h - r.bob * (0.5 + 0.5 * down), 0.0])
     # pelvis yaws so the swinging leg's hip goes forward; drops on the swing side; leans into the run
     yaw = 9 * np.sin(w - np.pi * r.s)                        # + = left hip back (left leg in stance, pushing)
-    c['hipsR'] = np.array([r.lean + 2.5 * down, -yaw, -3.0 * lat])
-    c['spineR'] = np.array([6.0, yaw * 0.6, 1.5 * lat]); c['chestR'] = np.array([3.0 + 2.0 * down, yaw * 1.2, 1.0 * lat])
+    c['hipsR'] = np.array([r.lean + 6 + 2.5 * down, -yaw, -3.0 * lat])
+    c['spineR'] = np.array([5.0, yaw * 0.6, 1.5 * lat]); c['chestR'] = np.array([2.0 + 2.0 * down, yaw * 1.2, 1.0 * lat])
     lag = np.cos(2 * w - 2 * np.pi * r.s - 0.8)
-    c['neckR'] = np.array([-5.0 + 1.5 * lag, -yaw * 0.6, -lat]); c['headR'] = np.array([-10.0 + 2.5 * lag, -yaw * 0.5, -1.5 * lat])
+    c['neckR'] = np.array([-4.0 + 1.5 * lag, -yaw * 0.6, -lat]); c['headR'] = np.array([-6.0 + 2.5 * lag, -yaw * 0.5, -1.5 * lat])
     if arms:
         for S, sg in (('L', 1), ('R', -1)):
             a = -sg * np.sin(w - np.pi * r.s - 0.45)        # arms trail the legs slightly (loose, not robotic)        # arm forward when the opposite leg is forward; slight lag
             fwd = max(a, 0.0)
             back = max(-a, 0.0)
-            c[f'hp{S}'] = np.array([sg * (0.18 - 0.05 * fwd), -0.07 + 0.14 * fwd + 0.02 * back, 0.05 + 0.17 * fwd - 0.17 * back])
+            c[f'hp{S}'] = np.array([sg * (0.15 - 0.03 * fwd - 0.02 * back), -0.09 + 0.13 * fwd + 0.03 * back, 0.04 + 0.16 * fwd - 0.17 * back])
             c[f'hn{S}'] = np.array([-sg * 0.9, -0.15, 0.25 * a]); c[f'hf{S}'] = np.array([sg * 0.15, 0.35 + 0.45 * fwd, 1.0])
-            c[f'he{S}'] = np.array([sg * 0.6, -0.1, -1.0]); c[f'hw{S}'] = np.array([0.0]); c[f'hsp{S}'] = np.array([0.0])
+            c[f'he{S}'] = np.array([sg * 0.12, -0.35, -1.0]); c[f'hw{S}'] = np.array([0.0]); c[f'hsp{S}'] = np.array([0.0])
             c[f'sh{S}'] = np.array([0, -8 * a, 0]); c[f'wm{S}'] = np.array([10.0])
     c['ball'] = np.array([0, -0.6, -0.4])
     return phL
