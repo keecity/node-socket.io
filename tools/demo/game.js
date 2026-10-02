@@ -435,7 +435,7 @@ function updateCamera(dt) {
   if (camMode === 'arena') {
     // Clash Royale style: high above Purple's baseline, looking down the length of the court (court runs bottom to top on a phone)
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
-    pos = new pc.Vec3(-30 + drift, 30, 0); look = new pc.Vec3(0.8 + drift, 0, 0); fov = 40;
+    pos = new pc.Vec3(-34 + drift, 19, 0); look = new pc.Vec3(0.8 + drift, -1.5, 0); fov = 40;
     camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.7 / aspect, 12.6);
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
