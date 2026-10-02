@@ -47,7 +47,7 @@ const XMAX = 14.2, ZMAX = 7.2;
 
 // ====================================================================== players
 const CLIPS = { Idle: 1, Dribble: 1, Shoot: 0, Dunk: 0, Run: 1, DribbleRun: 1, Defend: 1, Block: 0, Ready: 1, Pass: 0, Steal: 0, SlideL: 1, SlideR: 1 };
-const RUN_NATIVE = 0.27 / (0.60 * 0.38) * S,      // ground speed the Run cycle covers at 1x (feet don't skate when matched)
+const RUN_NATIVE = 0.21 / (0.46 * 0.38) * S,      // ground speed the Run cycle covers at 1x (feet don't skate when matched)
      DRUN_NATIVE = 0.30 / (0.5 * 0.42) * S, SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
 const NAMES = [['Jax', 'Rook', 'Blaze'], ['Kai', 'Nova', 'Ziggy']];
 const P = [];
