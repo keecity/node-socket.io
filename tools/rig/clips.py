@@ -292,7 +292,7 @@ def run_body(t, c, r, arms=True):
     c['hipsR'] = np.array([r.lean + 6 + 2.5 * down, -yaw, -3.0 * lat])
     c['spineR'] = np.array([5.0, yaw * 0.6, 1.5 * lat]); c['chestR'] = np.array([2.0 + 2.0 * down, yaw * 1.2, 1.0 * lat])
     lag = np.cos(2 * w - 2 * np.pi * r.s - 0.8)
-    c['neckR'] = np.array([-4.0 + 1.5 * lag, -yaw * 0.6, -lat]); c['headR'] = np.array([-6.0 + 2.5 * lag, -yaw * 0.5, -1.5 * lat])
+    c['neckR'] = np.array([-8.0, -yaw * 0.6, -0.5 * lat]); c['headR'] = np.array([-16.0 - 2.0 * down + 0.6 * lag, -yaw * 0.5, -0.6 * lat])  # cancels the body lean + bounce: eyes level
     if arms:
         for S, sg in (('L', 1), ('R', -1)):
             a = -sg * np.sin(w - np.pi * r.s - 0.45)        # arms trail the legs slightly (loose, not robotic)        # arm forward when the opposite leg is forward; slight lag

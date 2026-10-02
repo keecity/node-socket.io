@@ -4,7 +4,7 @@ import numpy as np
 from drib import periodic
 
 class Run:
-    def __init__(self, T=0.60, stance=0.38, L=0.27, track=0.07, hip_h=-0.006, bob=0.030, lean=9):
+    def __init__(self, T=0.60, stance=0.38, L=0.27, track=0.07, hip_h=-0.006, bob=0.022, lean=9):
         self.T, self.s, self.L, self.track, self.hip_h, self.bob, self.lean = T, stance, L, track, hip_h, bob, lean
         self.z0 = -0.03
         self.V = L / (stance * T)                         # ground speed the cycle is authored for (rig units / s)
