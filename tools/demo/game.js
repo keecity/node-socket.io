@@ -548,7 +548,9 @@ function onRelease(e) {
   if (!human.down) return; human.down = false; meterEl.className = '';
   const dd = myDefender();
   if (dd) {                   // defense: release = steal attempt, tap = move
-    if (human.meter) { human.meter = false; const m = Math.sin(human.mt * Math.PI * 1.7); dd.stealQ = Math.max(0, 1 - Math.abs(m)); dd.moveTarget = null; startSteal(dd); return; }
+    if (human.meter) {
+      human.meter = false; if (d2(dd.pos, bodyPos(ball.holder)) > 1.6) { toast('Too far to reach'); return; }
+      const m = Math.sin(human.mt * Math.PI * 1.7); dd.stealQ = Math.max(0, 1 - Math.abs(m)); dd.moveTarget = null; startSteal(dd); return; }
     const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } return;
   }
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
@@ -570,9 +572,12 @@ function myDefender() {
 function humanDefAI(p, dt) {
   const h = ball.holder, near = d2(p.pos, bodyPos(h)) < 1.6;
   if (human.down) {
-    const held = performance.now() - human.t0 > 300;
-    if (held && near && !human.meter) { human.meter = true; human.mt = 0; meterEl.className = 'show steal'; $('mlabel').textContent = 'TIME THE REACH'; }
-    if (human.meter) { if (!near) { human.meter = false; meterEl.className = ''; } else { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; } }
+    // holding: the meter always shows, and the defender closes in to pressure the ball handler
+    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show steal'; $('mlabel').textContent = near ? 'TIME THE REACH' : 'CLOSING IN…'; }
+    if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; $('mlabel').textContent = near ? 'TIME THE REACH' : 'CLOSING IN…'; }
+    const hp = bodyPos(h), D = defendHoop(p.team), toR = flat(D.rim.x - hp.x, D.rim.z - hp.z).normalize();
+    p.moveTarget = null; steer(p, hp.clone().add(toR.mulScalar(0.9)), 4.0, dt, 16); animMove(p, dt, 'stance'); faceTo(p, hp.x, hp.z, 9, dt);
+    p.label.classList.toggle('near', near); return;
   }
   if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
   if (p.moveTarget) {
