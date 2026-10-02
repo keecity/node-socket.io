@@ -1568,8 +1568,32 @@ function roadRoute(a, b) { const { chains, at } = ROAD_NET, ca = chains[a.c], cb
   chainPts(a.c, a.s, n === ca.a ? 0 : ca.len, out);
   for (const p of steps) chainPts(p.i, p.start ? 0 : chains[p.i].len, p.start ? chains[p.i].len : 0, out);
   chainPts(b.c, en === cb.a ? 0 : cb.len, b.s, out); return out; }
-function planRoute(from, to) { const ra = nearestRoad(from.x, from.z), rb = nearestRoad(to.x, to.z), pts = [from];
-  if (ra && rb && ra.d < 8 && rb.d < 8) { const r = roadRoute(ra, rb); if (r) pts.push(...r); } pts.push(to); return pts; }
+// is this ground taken by a building (other than the exempt ones)? trucks drive around these
+function lotBlocked(x, z, ex) { const m = 0.12;
+  for (const o of outposts) if (o.alive && !ex.includes(o) && wdist2(o.x, o.z, x, z) < OUTPOST_W * 0.6 + m) return true;
+  for (const a of airbases) if (a.alive && !ex.includes(a) && wdist2(a.x, a.z, x, z) < 4.5) { const { lx, lz } = abLocal(a, x, z); if (lx > AB_EXT[0] * 1 - 1 && lx < AB_EXT[1] + 1 && lz > AB_EXT[2] - 1 && lz < AB_EXT[3] + 1) return true; }
+  for (const q of pumpjacks) if (q.alive && !ex.includes(q) && wdist2(q.x, q.z, x, z) < 2 && inPumpLot(q, x, z, m)) return true;
+  for (const q of camps) if (q.alive && !ex.includes(q) && wdist2(q.x, q.z, x, z) < 2.2 && inCampLot(q, x, z, m)) return true;
+  for (const q of mines) if (q.alive && !ex.includes(q) && wdist2(q.x, q.z, x, z) < 3) { const { lx, lz } = mnLocal(q, x, z); if (inRect(MN_YARD, lx, lz, m) || inRect(MN_TUN, lx, lz, m)) return true; }
+  for (const q of farms) if (q.alive && !ex.includes(q) && wdist2(q.x, q.z, x, z) < 2 && inFarmLot(q, x, z, m)) return true;
+  for (const w of warehouses) if (w.alive && !ex.includes(w) && wdist2(w.x, w.z, x, z) < 3 && inWhLot(w, x, z, m)) return true;
+  for (const pr of propsNear(x, z)) if (pr.alive && pr.kind !== 'lamp' && pr.kind !== 'car' && wdist2(pr.x, pr.z, x, z) < pr.r + m) return true;
+  return false; }
+// off-road leg: straight if clear, otherwise A* on a fine grid around the obstacles
+function offroad(a, b, ex) { const dx = wd(b.x - a.x), dz = wd(b.z - a.z), L = Math.hypot(dx, dz); let clear = true;
+  for (let s = 0.1; s < L - 0.1; s += 0.08) if (lotBlocked(wm(a.x + dx * s / L), wm(a.z + dz * s / L), ex)) { clear = false; break; } if (clear) return [b];
+  const G = 0.12, pad = 2.5, nx = Math.ceil((Math.abs(dx) + pad * 2) / G), nz = Math.ceil((Math.abs(dz) + pad * 2) / G), ox = Math.min(0, dx) - pad, oz = Math.min(0, dz) - pad, N = nx * nz;
+  const cell = (x, z) => Math.round((x - ox) / G) + Math.round((z - oz) / G) * nx, blocked = new Uint8Array(N).fill(255);
+  const isB = i => { if (blocked[i] === 255) { const x = (i % nx) * G + ox, z = Math.floor(i / nx) * G + oz; blocked[i] = lotBlocked(wm(a.x + x), wm(a.z + z), ex) ? 1 : 0; } return blocked[i]; };
+  const s0 = cell(0, 0), g0 = cell(dx, dz), gs = new Float32Array(N).fill(1e9), par = new Int32Array(N).fill(-1), open = [s0]; gs[s0] = 0;
+  const h = i => Math.hypot((i % nx) - (g0 % nx), Math.floor(i / nx) - Math.floor(g0 / nx)); let it = 0;
+  while (open.length && it++ < 40000) { let bi = 0; for (let k = 1; k < open.length; k++) if (gs[open[k]] + h(open[k]) < gs[open[bi]] + h(open[bi])) bi = k; const c = open.splice(bi, 1)[0]; if (c === g0) break;
+    const cx = c % nx, cz = Math.floor(c / nx); for (let ddz = -1; ddz <= 1; ddz++) for (let ddx = -1; ddx <= 1; ddx++) { if (!ddx && !ddz) continue; const x2 = cx + ddx, z2 = cz + ddz; if (x2 < 0 || z2 < 0 || x2 >= nx || z2 >= nz) continue;
+      const n = x2 + z2 * nx; if (n !== g0 && isB(n)) continue; const g = gs[c] + (ddx && ddz ? 1.414 : 1); if (g < gs[n]) { if (gs[n] === 1e9) open.push(n); gs[n] = g; par[n] = c; } } }
+  if (par[g0] < 0) return [b]; const out = []; for (let c = g0, k = 0; c !== s0 && c >= 0; c = par[c], k++) if (k % 2 === 0) out.unshift({ x: wm(a.x + (c % nx) * G + ox), z: wm(a.z + Math.floor(c / nx) * G + oz) }); out.push(b); return out; }
+function planRoute(from, to, ex = []) { const ra = nearestRoad(from.x, from.z), rb = nearestRoad(to.x, to.z), pts = [from];
+  if (ra && rb && ra.d < 8 && rb.d < 8) { const r = roadRoute(ra, rb); if (r && r.length) { pts.push(...offroad(from, r[0], ex), ...r.slice(1)); pts.push(...offroad(r[r.length - 1], to, ex)); return pts; } }
+  pts.push(...offroad(from, to, ex)); return pts; }
 // ---- trucks
 function makeTruck(w, i) { const obj = new THREE.Group(), cab = makeCab(); obj.add(cab); battleRoot.add(obj);
   const tr = makeTrailer('flat'); battleRoot.add(tr); const tb = makeTrailer('box'); tb.visible = false; battleRoot.add(tb);
@@ -1582,9 +1606,9 @@ function sendTruck(p, kind) { const free = trucks.filter(t => !t.dead && t.team 
   const t = free.sort((a, b) => wdist2(a.x, a.z, p.x, p.z) - wdist2(b.x, b.z, p.x, p.z))[0], w = t.home;
   t.job = { p, kind }; t.trailer.visible = false; t.trailer = kind === 'wood' ? t.flat : t.box; t.trailer.visible = true;
   const bay = whWorld(w, 0, WH_D / 2 + 0.9), out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6);
-  t.path = [bay, out, ...planRoute(out, pickupPoint(p)).slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
+  t.path = [bay, out, ...planRoute(out, pickupPoint(p), [w, p]).slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
 function truckHome(t) { const w = t.home, out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6), bay = whWorld(w, 0, WH_D / 2 + 0.9), inside = whWorld(w, 0, -WH_D / 2 + 0.3);
-  t.path = [...planRoute({ x: t.x, z: t.z }, out), bay, inside]; t.pi = 0; t.state = 'back'; }
+  t.path = [...planRoute({ x: t.x, z: t.z }, out, [w, t.job && t.job.p]), bay, inside]; t.pi = 0; t.state = 'back'; }
 function updateTrucks(dt) { const c = camD();
   for (const t of trucks) { if (t.dead) { t.obj.visible = t.trailer.visible = false; continue; }
     if (t.path) { const tgt = t.path[t.pi], dx = wd(tgt.x - t.x), dz = wd(tgt.z - t.z), d = Math.hypot(dx, dz), last = t.pi === t.path.length - 1;
@@ -2962,7 +2986,7 @@ const Battle = {
   },
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },
-  airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, farms, warehouses, trucks, _semi: { cab: () => makeCab(), trailer: k => makeTrailer(k) }, WH_COST, canPlaceWarehouse, buildWarehouse: (xw, zw, rot) => buildWarehouse(0, xw, zw, rot), warehouseGhost: () => semiParts ? makeWarehouse(true) : null, get warehouseError() { return SEMI_ERR; }, FOOD, FM_COST, foodRate, canPlaceFarm, buildFarm: (xw, zw, rot, crop) => buildFarm(0, xw, zw, rot, crop), farmGhost: () => farmProto ? makeFarmModel(true, 'Lettuce') : null, get farmError() { return FARM_ERR; }, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
+  airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, farms, warehouses, trucks, _offroad: offroad, _lotBlocked: lotBlocked, _semi: { cab: () => makeCab(), trailer: k => makeTrailer(k) }, WH_COST, canPlaceWarehouse, buildWarehouse: (xw, zw, rot) => buildWarehouse(0, xw, zw, rot), warehouseGhost: () => semiParts ? makeWarehouse(true) : null, get warehouseError() { return SEMI_ERR; }, FOOD, FM_COST, foodRate, canPlaceFarm, buildFarm: (xw, zw, rot, crop) => buildFarm(0, xw, zw, rot, crop), farmGhost: () => farmProto ? makeFarmModel(true, 'Lettuce') : null, get farmError() { return FARM_ERR; }, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
    oilSnap: (xw, zw) => { const f = fieldAt(wm(xw / S), wm(zw / S)) || oilFields.find(f => wdist2(f.x, f.z, wm(xw / S), wm(zw / S)) < OIL_R * 1.2); return f ? { x: f.x * S, z: f.z * S, rot: f.rot } : null; }, OIL, PJ_COST, PJ_RATE, oilRate, canPlacePump, buildPump: (xw, zw, rot) => buildPump(0, xw, zw, rot), pumpGhost: () => PJ_BOX ? makePumpModel(true) : null, get pumpError() { return PUMP_ERR; },
   canPlaceOutpost, inTerritory, terrDiscs, territoryTex: terrTex,
   buildOutpost: (xw, zw, rot) => buildOutpost(0, xw, zw, rot),
