@@ -265,14 +265,14 @@ function laneClear(a, b, pad, t) {   // no player of team t near segment a->b
 function animMove(p, dt, mode) {
   const sp = p.vel.length();
   if (mode === 'handler') {
-    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, Math.max(0.6, sp / DRUN_NATIVE)); }
+    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / DRUN_NATIVE, 0.3, 1.3)); }
     else setAnim(p, 'Dribble', 0.2);
   } else if (mode === 'stance') {
-    if (sp > 1.9) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, Math.min(1.15, Math.max(0.7, sp / RUN_NATIVE))); return; }
+    if (sp > 1.9) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.3)); return; }
     const lat = p.vel.dot(left(p));
-    if (lat > 0.45) setAnim(p, 'SlideL', 0.15, Math.max(0.6, lat / SLIDE_NATIVE)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, Math.max(0.6, -lat / SLIDE_NATIVE)); else setAnim(p, 'Defend', 0.2);
+    if (lat > 0.45) setAnim(p, 'SlideL', 0.15, pc.math.clamp(lat / SLIDE_NATIVE, 0.3, 1.4)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, pc.math.clamp(-lat / SLIDE_NATIVE, 0.3, 1.4)); else setAnim(p, 'Defend', 0.2);
   } else {
-    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, Math.min(1.15, Math.max(0.6, sp / RUN_NATIVE))); }
+    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, 'Run', 0.2, pc.math.clamp(sp / RUN_NATIVE, 0.3, 1.3)); }
     else setAnim(p, 'Ready', 0.25);
   }
 }
