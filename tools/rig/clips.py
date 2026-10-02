@@ -348,8 +348,61 @@ def block():
             for S in 'LR': c[f'f{S}'][1] = max(0.0, h - 0.03 * np.sin(np.pi * u))
     return bake(build_track(k), 1.2, override=air)
 
+# ---------------------------------------------------------------- 3v3 additions
+READYP = {**DEF, 'fL': [0.13, 0, 0.03], 'fR': [-0.13, 0, -0.01], 'frL': [0, 6], 'frR': [0, -6], 'fkL': [0.15, 0, 1], 'fkR': [-0.15, 0, 1],
+          'hips': [0, -0.05, 0], 'hipsR': [8, 0, 0], 'spineR': [4, 0, 0], 'headR': [-10, 0, 0],
+          'hpL': [0.18, -0.08, 0.10], 'hnL': [-0.8, 0, 0.6], 'hfL': [0.1, 0.2, 1], 'heL': [0.4, -0.5, -1],
+          'hpR': [-0.18, -0.08, 0.10], 'hnR': [0.8, 0, 0.6], 'hfR': [-0.1, 0.2, 1], 'heR': [-0.4, -0.5, -1]}
+
+def ready():
+    k = [(0.0, READYP), (0.5, {'hips': [0, -0.065, 0], 'hpL': [0.18, -0.09, 0.11], 'hpR': [-0.18, -0.09, 0.11], 'headR': [-10, 5, 0]}),
+         (1.0, {'hips': [0, -0.05, 0], 'headR': [-10, 0, 0]}), (1.5, {'hips': [0, -0.065, 0], 'headR': [-10, -5, 0]}), (2.0, READYP)]
+    return bake(build_track(k, loop=True), 2.0)
+
+def pass_():
+    k = [(0.0, READY),
+         (0.12, {'ball': [0, -0.02, 0.13], 'hips': [0, -0.04, 0], 'chestR': [-6, 0, 0], 'hgL': [0.9, -0.1, -0.4], 'hgR': [-0.9, -0.1, -0.4]}),
+         (0.26, {'ball': [0, 0.01, 0.30], 'hips': [0, -0.03, 0.02], 'hipsR': [8, 0, 0], 'spineR': [8, 0, 0], 'chestR': [6, 0, 0],
+                 'fL': [0.11, 0, 0.13], 'hfL': [0.3, 0.9, 0.1], 'hfR': [-0.3, 0.9, 0.1]}),
+         (0.30, {'hwL': [0], 'hwR': [0], 'bw': [0], 'ball': [0, 0.03, 0.6],
+                 'hpL': [0.07, 0.0, 0.25], 'hnL': [0.2, -0.6, 0.8], 'hfL': [0.9, -0.1, 0.1], 'heL': [1, -0.3, -0.2],
+                 'hpR': [-0.07, 0.0, 0.25], 'hnR': [-0.2, -0.6, 0.8], 'hfR': [-0.9, -0.1, 0.1], 'heR': [-1, -0.3, -0.2]}),
+         (0.42, {'hpL': [0.09, -0.02, 0.24], 'hpR': [-0.09, -0.02, 0.24]}),
+         (0.75, READYP)]
+    return bake(build_track(k), 0.75)
+
+def steal():
+    k = [(0.0, DEF),
+         (0.12, {'hips': [-0.02, -0.12, 0], 'hpR': [-0.22, 0.04, 0.12]}),
+         (0.30, {'hips': [-0.01, -0.15, 0.04], 'hipsR': [24, -12, 0], 'spineR': [12, 0, 0], 'chestR': [6, -14, 0], 'headR': [-26, 0, 0],
+                 'fR': [-0.13, 0, 0.16], 'frR': [-6, -6],
+                 'hpR': [-0.04, -0.28, 0.27], 'hnR': [0.3, -1, 0.1], 'hfR': [0.4, -0.3, 1], 'heR': [-1, 0.2, -0.3],
+                 'hpL': [0.27, 0.06, -0.02]}),
+         (0.42, {'hpR': [0.08, -0.26, 0.22], 'hnR': [0.5, -1, 0], 'hfR': [0.8, -0.3, 0.6]}),
+         (0.8, DEF)]
+    return bake(build_track(k), 0.8)
+
+def slide(direction):
+    """defensive shuffle toward the character's left (+1) or right (-1); feet never cross"""
+    period, stride, stance = 0.5, 0.16, 0.45
+    def ovr(t, c):
+        for S, sg, off in (('L', 1, 0.0), ('R', -1, 0.5)):
+            lead = (sg == direction)
+            ph = ((t / period) + (0.0 if lead else 0.5)) % 1.0
+            if ph < stance:
+                u = ph / stance; dx = stride / 2 - stride * u; y = 0.0
+            else:
+                u = (ph - stance) / (1 - stance); e = u * u * (3 - 2 * u); dx = -stride / 2 + stride * e; y = 0.035 * np.sin(np.pi * u)
+            c[f'f{S}'] = np.array([sg * 0.17 + direction * dx, y, 0.02 if S == 'L' else -0.01]); c[f'fr{S}'] = np.array([6, sg * 12])
+            c[f'fk{S}'] = np.array([sg * 0.35, 0, 1])
+        ph = (t / period) % 1.0; bob = np.cos(4 * np.pi * ph)
+        c['hips'] = np.array([direction * 0.01 * np.sin(2 * np.pi * ph), -0.105 - 0.008 * bob, 0]); c['hipsR'] = np.array([16, 0, direction * 2])
+        c['headR'] = np.array([-20, 0, 0])
+    return bake(build_track([(0, DEF), (period, {})], loop=True), period, override=ovr)
+
 CLIPS = {'Idle': idle, 'Dribble': dribble, 'Shoot': shoot, 'Dunk': dunk,
-         'Run': run, 'DribbleRun': dribble_run, 'Defend': defend, 'Block': block}
+         'Run': run, 'DribbleRun': dribble_run, 'Defend': defend, 'Block': block,
+         'Ready': ready, 'Pass': pass_, 'Steal': steal, 'SlideL': lambda: slide(1), 'SlideR': lambda: slide(-1)}
 if __name__ == '__main__':
     import sys; from pv import sheet
     name = sys.argv[1]; times = [float(x) for x in sys.argv[2].split(',')]
