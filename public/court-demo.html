@@ -19588,6 +19588,7 @@ function clamp(v) { v.x = Math.max(-XMAX, Math.min(XMAX, v.x)); v.z = Math.max(-
 function steer(p, target, maxSpeed, dt, accel = 13) {
   maxSpeed *= p.spd;
   const want = flat(target.x - p.pos.x, target.z - p.pos.z), l = want.length(), sp = Math.min(maxSpeed, l * 3);
+  p.goalDist = l;
   if (l > 1e-3) want.mulScalar(sp / l);
   // avoid bodies ahead (go around, don't plough through)
   const wl0 = want.length() || 1;
@@ -19616,7 +19617,7 @@ function animMove(p, dt, mode) {
     if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / (DRUN_NATIVE * p.k), 0.3, 1.6)); }
     else { setAnim(p, 'Dribble', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else if (mode === 'stance') {
-    if (sp > 2.4) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); return; }
+    if (sp > 2.4 || (p.goalDist || 0) > 1.8) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); return; }
     const lat = p.vel.dot(left(p)), lv = left(p), fw = p.vel.clone().sub(lv.clone().mulScalar(lat));
     if (fw.length() > 0.25) p.vel.sub(fw.mulScalar(1 - 0.25 / fw.length()));   // stance moves sideways only (no gliding)
     if (lat > 0.45) setAnim(p, 'SlideL', 0.15, pc.math.clamp(lat / SLIDE_NATIVE, 0.3, 1.4)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, pc.math.clamp(-lat / SLIDE_NATIVE, 0.3, 1.4)); else { setAnim(p, 'Defend', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
