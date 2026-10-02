@@ -5,7 +5,9 @@
 <title>Player Animations</title>
 <style>
   body { margin: 0; background: #1d1f27; font-family: system-ui, sans-serif; overflow: hidden; }
-  #ui { position: fixed; top: 12px; left: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  #ui, #speed { position: fixed; left: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  #ui { top: 12px; } #speed { top: 56px; }
+  #speed button { padding: 5px 10px; font-size: 12px; }
   button { padding: 8px 14px; border: 0; border-radius: 6px; background: #3b3f52; color: #fff; font-size: 14px; cursor: pointer; }
   button.on { background: #e8701a; }
 </style>
@@ -15,6 +17,7 @@
 </head>
 <body>
 <div id="ui"></div>
+<div id="speed"></div>
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -31,8 +34,8 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1d1f27);
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.01, 50);
-camera.position.set(2.6, 1.3, 0.2);
-const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, 0.7, 0.9); controls.update();
+camera.position.set(-1.55, 1.6, -2.45);
+const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, 0.75, 0.75); controls.update();
 scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 2); sun.position.set(2, 4, 1); sun.castShadow = true; scene.add(sun);
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshStandardMaterial({ color: 0xb07a45 }));
@@ -67,7 +70,18 @@ loader.load('models/player_rigged.glb', (g) => {
   };
   // one-shot clips fall back to idle when done
   mixer.addEventListener('finished', () => setTimeout(() => play('Idle'), 400));
-  play(new URLSearchParams(location.search).get('clip') || 'Idle');
+  const sp = document.getElementById('speed');
+  for (const v of [1, 0.5, 0.25]) {
+    const b = document.createElement('button'); b.textContent = v + 'x';
+    b.onclick = () => { mixer.timeScale = v; for (const x of sp.children) x.classList.toggle('on', x === b); };
+    if (v === 1) b.classList.add('on'); sp.appendChild(b);
+  }
+  const q = new URLSearchParams(location.search);
+  play(q.get('clip') || 'Idle');
+  if (q.has('t')) {   // freeze on a given time, for reviewing a single frame
+    current.fadeIn(0); mixer.update(0); current.time = parseFloat(q.get('t')); current.paused = true; mixer.update(0);
+    window.__frozen = true;
+  }
 });
 
 const clock = new THREE.Clock();
