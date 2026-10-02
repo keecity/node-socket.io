@@ -19948,7 +19948,10 @@ function humanAI(p, dt) {
   if (human.down) {
     if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; $('mlabel').textContent = 'RELEASE IN THE CENTRE'; }
     if (human.meter) { }
-    p.vel.mulScalar(Math.pow(0.01, dt)); const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 6, dt); animMove(p, dt, 'handler'); return;
+    // holding = setting up a shot: plant right away and cancel any move order
+    if (performance.now() - human.t0 > 120) { p.moveTarget = null; p.vel.set(0, 0, 0); }
+    else p.vel.mulScalar(Math.pow(0.001, dt));
+    const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 8, dt); animMove(p, dt, 'handler'); return;
   }
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.4, dt);
