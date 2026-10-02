@@ -23,7 +23,7 @@ function asset(key, type, filename) {
   return new Promise((res, rej) => { a.ready(() => res(a)); a.once('error', e => rej(new Error(filename + ': ' + e))); app.assets.add(a); app.assets.load(a); });
 }
 const [color, height, hoopAsset, playerAsset, tealAsset] = await Promise.all([
-  asset('color', 'texture', 'court.png', 'image/png'), asset('height', 'texture', 'height.png', 'image/png'),
+  asset('color', 'texture', 'court.jpg'), asset('height', 'texture', 'height.jpg'),
   asset('hoop', 'container', 'hoop.glb', 'model/gltf-binary'), asset('player', 'container', 'player.glb', 'model/gltf-binary'),
   asset('teal', 'texture', 'teal.jpg', 'image/jpeg')]);
 const floorMat = mat('Maple', [1, 1, 1]); floorMat.diffuseMap = color.resource; floorMat.bumpMap = height.resource; floorMat.bumpiness = .035; floorMat.gloss = 42; floorMat.update();

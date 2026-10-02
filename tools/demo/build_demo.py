@@ -4,9 +4,11 @@ SRC = sys.argv[1]; OUT = sys.argv[2]
 lines = open(SRC).read().split('\n')
 start = next(i for i, l in enumerate(lines) if l.startswith('<script>'))           # engine script starts
 end = next(i for i, l in enumerate(lines) if l.startswith('</script><script>const ASSETS='))
-engine = '\n'.join(lines[start:end])
+engine = '<script>' + open('node_modules/playcanvas/build/playcanvas.min.js').read()
 assets = json.loads(re.search(r'const ASSETS=(\{.*?\});', lines[end]).group(1))
 assets['player'] = base64.b64encode(open('player_rigged.glb', 'rb').read()).decode()
+assets['color'] = base64.b64encode(open('color.jpg', 'rb').read()).decode()
+assets['height'] = base64.b64encode(open('height.jpg', 'rb').read()).decode()
 assets['teal'] = base64.b64encode(open('tex_teal.jpg', 'rb').read()).decode()
 head = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Court Clash 3v3</title><style>
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:#080e17;font-family:system-ui,sans-serif;color:#eaf1f7;overflow:hidden}
@@ -30,10 +32,12 @@ canvas{width:100vw;height:100vh;display:block;touch-action:none}
 @media(max-width:520px){.team{min-width:92px;padding:7px 10px}.team b{font-size:22px}#toast.big{font-size:24px}#banner{font-size:21px}}
 </style></head><body><canvas id="scene"></canvas>
 <div id="board"><div class="team t0"><span>PURPLE</span><b id="s0">0</b><i class="dot" id="poss0"></i></div><div id="mid"><small>SHOT</small><div id="clock"></div><small>TO 21</small></div><div class="team t1"><span>TEAL</span><b id="s1">0</b><i class="dot" id="poss1"></i></div></div>
-<div id="tags"></div><div id="toast"></div><div id="banner"></div><div id="loading">Warming up…</div><div id="status"></div>
+<div id="tags"></div><div id="toast"></div><div id="banner"></div><div id="loading">Warming up… <small style="display:block;font-size:12px;color:#7f9cab;margin-top:8px">If this text never changes, this viewer is not running the page\'s scripts. Open the file in a browser.</small></div><div id="status"></div>
 <div id="controls"><button id="pause">Pause</button><button id="speed">1×</button><button id="cam">Follow cam</button><button id="restart">Restart</button><button id="mute">Mute</button></div>
 '''
 game = open('game.js').read()
-html = head + engine + '\n</script><script>const ASSETS=' + json.dumps(assets) + ';</script><script>' + game + '</script></body></html>'
+stage = lambda t: '<script>document.getElementById("loading").textContent=' + json.dumps(t) + ';</script>'
+onerr = '<script>window.addEventListener("error",e=>{const l=document.getElementById("loading");if(l&&!l.hidden)l.textContent="Error: "+e.message;});</script>'
+html = head + onerr + stage('Loading engine…') + engine + '\n</script>' + stage('Unpacking court and players…') + '<script>const ASSETS=' + json.dumps(assets) + ';</script>' + stage('Starting…') + '<script>' + game + '</script></body></html>'
 open(OUT, 'w').write(html)
 print(len(html))
