@@ -1581,11 +1581,11 @@ function lotBlocked(x, z, ex) { const m = 0.12;
   for (const pr of propsNear(x, z)) if (pr.alive && pr.kind !== 'lamp' && pr.kind !== 'car' && wdist2(pr.x, pr.z, x, z) < pr.r + m) return true;
   return false; }
 // off-road leg: straight if clear, otherwise A* on a fine grid around the obstacles
-function offroad(a, b, ex) { const dx = wd(b.x - a.x), dz = wd(b.z - a.z), L = Math.hypot(dx, dz); let clear = true;
-  for (let s = 0.1; s < L - 0.1; s += 0.08) if (lotBlocked(wm(a.x + dx * s / L), wm(a.z + dz * s / L), ex)) { clear = false; break; } if (clear) return [b];
+function offroad(a, b, ex, foot) { const dx = wd(b.x - a.x), dz = wd(b.z - a.z), L = Math.hypot(dx, dz); let clear = true;
+  for (let s = 0.1; s < L - 0.1; s += 0.08) { const px = wm(a.x + dx * s / L), pz = wm(a.z + dz * s / L); if ((s > 0.35 && lotBlocked(px, pz, ex)) || (foot && Hd(px, pz) < 2 / S * 1.1)) { clear = false; break; } } if (clear) return [b];
   const G = 0.12, pad = 2.5, nx = Math.ceil((Math.abs(dx) + pad * 2) / G), nz = Math.ceil((Math.abs(dz) + pad * 2) / G), ox = Math.min(0, dx) - pad, oz = Math.min(0, dz) - pad, N = nx * nz;
   const cell = (x, z) => Math.round((x - ox) / G) + Math.round((z - oz) / G) * nx, blocked = new Uint8Array(N).fill(255);
-  const isB = i => { if (blocked[i] === 255) { const x = (i % nx) * G + ox, z = Math.floor(i / nx) * G + oz; blocked[i] = lotBlocked(wm(a.x + x), wm(a.z + z), ex) ? 1 : 0; } return blocked[i]; };
+  const isB = i => { if (blocked[i] === 255) { const x = (i % nx) * G + ox, z = Math.floor(i / nx) * G + oz; blocked[i] = Math.hypot(x, z) > 0.35 && (lotBlocked(wm(a.x + x), wm(a.z + z), ex) || (foot && Hd(wm(a.x + x), wm(a.z + z)) < 2 / S * 1.1)) ? 1 : 0; } return blocked[i]; };
   const s0 = cell(0, 0), g0 = cell(dx, dz), gs = new Float32Array(N).fill(1e9), par = new Int32Array(N).fill(-1), open = [s0]; gs[s0] = 0;
   const h = i => Math.hypot((i % nx) - (g0 % nx), Math.floor(i / nx) - Math.floor(g0 / nx)); let it = 0;
   while (open.length && it++ < 40000) { let bi = 0; for (let k = 1; k < open.length; k++) if (gs[open[k]] + h(open[k]) < gs[open[bi]] + h(open[bi])) bi = k; const c = open.splice(bi, 1)[0]; if (c === g0) break;
@@ -1723,11 +1723,19 @@ function updateSoldiers(dt) { const c = camD();
       if (s.target && (!alive(s.target) || wdist2(s.pos.x, s.pos.z, s.target.pos.x, s.target.pos.z) > SOLD_RANGE * 1.6)) s.target = null;
       if (!s.target && (!s.order || s.order.type !== 'move')) { let best = null, bd = SOLD_RANGE; for (const e of soldierTargets(s)) { const d = wdist2(s.pos.x, s.pos.z, e.pos.x, e.pos.z); if (d < bd) { bd = d; best = e; } } s.target = best; }
       let goal = null, want = 0;
-      if (s.order && s.order.type === 'move') { goal = s.order; want = SOLD_SPEED[1]; if (wdist2(s.pos.x, s.pos.z, goal.x, goal.z) < 0.08) s.order = null; }
+      if (s.order && s.order.type === 'move') { if (!s.order.path) s.order.path = offroad({ x: s.pos.x, z: s.pos.z }, { x: s.order.x, z: s.order.z }, [], true);
+        const P = s.order.path; while (P.length > 1 && wdist2(s.pos.x, s.pos.z, P[0].x, P[0].z) < 0.15) P.shift(); goal = P[0]; want = SOLD_SPEED[1];
+        if (P.length === 1 && wdist2(s.pos.x, s.pos.z, goal.x, goal.z) < 0.08) s.order = null; }
       else if (s.target) { const d = wdist2(s.pos.x, s.pos.z, s.target.pos.x, s.target.pos.z); if (d > SOLD_RANGE * 0.9) { goal = s.target.pos; want = SOLD_SPEED[1]; } }
       if (goal) { const dx = wd(goal.x - s.pos.x), dz = wd(goal.z - s.pos.z), yaw = Math.atan2(dx, dz); let dy = Math.atan2(Math.sin(yaw - s.yaw), Math.cos(yaw - s.yaw)); s.yaw += clamp(dy, -6 * dt, 6 * dt);
-        s.speed += (want - s.speed) * Math.min(1, dt * 5); const nx = wm(s.pos.x + Math.sin(s.yaw) * s.speed * dt), nz = wm(s.pos.z + Math.cos(s.yaw) * s.speed * dt);
-        if (Hd(nx, nz) > 2 / S * 1.1 && !lotBlocked(nx, nz, [])) { s.pos.x = nx; s.pos.z = nz; } else s.order = null; s.state = 'move'; }
+        s.speed += (want - s.speed) * Math.min(1, dt * 5);
+        // step forward; if blocked, try angling off to either side; already inside an obstacle (spawned in a yard): walk out
+        const free = (x, z) => Hd(x, z) > 2 / S * 1.1 && (!lotBlocked(x, z, []) || lotBlocked(s.pos.x, s.pos.z, [])); let moved = false;
+        for (const off of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6]) { const a = s.yaw + off + (s.detour || 0), nx = wm(s.pos.x + Math.sin(a) * s.speed * dt), nz = wm(s.pos.z + Math.cos(a) * s.speed * dt);
+          if (free(nx, nz)) { s.pos.x = nx; s.pos.z = nz; moved = true; if (off) s.detour = off * 0.5; else s.detour = (s.detour || 0) * 0.9; break; } }
+        s.stuck = moved ? Math.max(0, (s.stuck || 0) - dt * 0.5) : (s.stuck || 0) + dt;
+        if (!moved && s.stuck > 0.6) { s.detour = rand(-2.6, 2.6); s.yaw += s.detour * 0.5; }   // wedged in a corner: try a new heading
+        if (s.stuck > 3 && s.order) { s.order.path = null; s.stuck = 0; s.replans = (s.replans || 0) + 1; if (s.replans > 3) { s.order = null; s.replans = 0; } }   /* replan, give up after a few tries */ s.state = 'move'; }
       else { s.speed += (0 - s.speed) * Math.min(1, dt * 6); s.state = s.speed > 0.03 ? 'move' : 'idle'; }
       // shooting: face the target, fire short bursts while standing
       if (s.target && !goal) { const T = s.target, dx = wd(T.pos.x - s.pos.x), dz = wd(T.pos.z - s.pos.z), yaw = Math.atan2(dx, dz); let dy = Math.atan2(Math.sin(yaw - s.yaw), Math.cos(yaw - s.yaw)); s.yaw += clamp(dy, -5 * dt, 5 * dt);
@@ -3044,7 +3052,8 @@ const Battle = {
       if (u.kind === 'robot' && !passableD(x, z)) {           // goal in deep water: stop at the last dry ground on the way
         const dx = wd(u.pos.x - x), dz = wd(u.pos.z - z), L = Math.hypot(dx, dz) || 1;
         for (let t = 0; t <= L; t += 0.1) { const px = x + dx * t / L, pz = z + dz * t / L; if (passableD(px, pz)) { x = wm(px); z = wm(pz); break; } } }
-      if (u.kind === 'soldier') { u.order = { type: 'move', x, z }; u.target = null; }
+      if (u.kind === 'soldier') { const k = sel.filter(v => v.kind === 'soldier').indexOf(u), a2 = k * 2.4, r2 = 0.3 * Math.sqrt(k);   // soldiers form up tighter than mechs
+        u.order = { type: 'move', x: wm(gx + Math.cos(a2) * r2), z: wm(gz + Math.sin(a2) * r2) }; u.target = null; u.stuck = 0; }
       else if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; }
       else { u.order = { type: 'move', x, z }; u.target = null; if (u.state === 'fly') { u.flyGoal = { x, z }; if (u.flyPhase === 'down' && u.y > 0.3 && u.boost > 10) { u.flyPhase = 'cruise'; play(u, 'Boost_Forward', 0.2); } } else if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; const rt = u.pilot.react * 0.5; u.thinkT = rt; if (u.state !== 'idle') toIdle(u, 0.12, rt); else u.st = 0; } } });
   },
