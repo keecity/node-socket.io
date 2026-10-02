@@ -17,7 +17,11 @@ function primitive(name, type, scale, pos, material) { const e = new pc.Entity(n
 primitive('Court foundation', 'box', [30, .24, 16], [0, -.13, 0], mat('Navy court edge', [.025, .065, .10]));
 primitive('Surround', 'box', [43, .12, 29], [0, -.34, 0], mat('Charcoal surround', [.07, .095, .12]));
 function bytes(b64) { const a = atob(b64), b = new Uint8Array(a.length); for (let i = 0; i < a.length; i++) b[i] = a.charCodeAt(i); return b; }
-function asset(key, type, filename, mime) { const url = URL.createObjectURL(new Blob([bytes(ASSETS[key])], { type: mime })); return new Promise((res, rej) => app.assets.loadFromUrlAndFilename(url, filename, type, (err, a) => { URL.revokeObjectURL(url); err ? rej(err) : res(a); })); }
+// assets load straight from the embedded bytes (no blob: URLs, so sandboxed previews with a strict CSP still work)
+function asset(key, type, filename) {
+  const a = new pc.Asset(filename, type, { url: filename, filename, contents: bytes(ASSETS[key]).buffer });
+  return new Promise((res, rej) => { a.ready(() => res(a)); a.once('error', e => rej(new Error(filename + ': ' + e))); app.assets.add(a); app.assets.load(a); });
+}
 const [color, height, hoopAsset, playerAsset, tealAsset] = await Promise.all([
   asset('color', 'texture', 'court.png', 'image/png'), asset('height', 'texture', 'height.png', 'image/png'),
   asset('hoop', 'container', 'hoop.glb', 'model/gltf-binary'), asset('player', 'container', 'player.glb', 'model/gltf-binary'),
@@ -508,5 +512,5 @@ $('mute').onclick = () => $('mute').classList.toggle('on');
 window.game = { game, P, ball, HOOPS, S, inbound, give };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
 app.start(); $('loading').hidden = true;
-} catch (e) { $('loading').textContent = 'Unable to start: ' + e.message; console.error(e); }
+} catch (e) { $('loading').textContent = 'Unable to start: ' + (e && e.message || e); console.error(e); }
 })();
