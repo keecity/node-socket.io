@@ -19841,9 +19841,14 @@ app.on('update', dt => {
     if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); inbound(1 - game.offense, flat(0, 0)); }
   }
   if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; }
-  if (human.cool > 0) human.cool -= dt;
-  if (human.meter && human.auto && !myDefender()) { human.meter = human.auto = false; meterEl.className = ''; }
-  if (human.meter && !myBall() && !myDefender() && !human.down) { human.meter = false; meterEl.className = ''; }
+  // defense: the steal meter stays on screen the whole time Teal has the ball
+  if (defMode()) {
+    const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
+    if (!human.meter || !human.auto) { human.meter = true; human.auto = true; meterEl.className = 'show steal'; }
+    $('mlabel').textContent = near ? 'TAP TO STEAL' : 'GET CLOSER';
+    for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
+  } else if (human.auto) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
+  if (human.meter && !human.auto && !myBall() && !human.down) { human.meter = false; meterEl.className = ''; }
   updateActions(dt);
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
   bodies();
@@ -19884,23 +19889,22 @@ const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
 function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live'); }
 canEl.addEventListener('pointerdown', e => {
   if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
-  const dd0 = myDefender();
-  if (dd0 && human.meter && human.auto) {
-    human.meter = human.auto = false; meterEl.className = ''; const m = Math.sin(human.mt * Math.PI * 1.7);
-    dd0.stealQ = Math.max(0, 1 - Math.abs(m)); dd0.moveTarget = null; startSteal(dd0); human.down = false; human.cool = 1.0; human.mt = 0; return;
+  if (defMode()) {
+    const d = closestDef();
+    if (d && !d.action && d2(d.pos, bodyPos(ball.holder)) < 1.6) {     // in range: tap = steal now
+      const m = Math.sin(human.mt * Math.PI * 1.7); d.stealQ = Math.max(0, 1 - Math.abs(m)); d.moveTarget = null; startSteal(d); human.mt = 0; return;
+    }
   }
   try { canEl.setPointerCapture(e.pointerId); } catch (_) {}
-  Object.assign(human, { down: true, t0: performance.now(), x: e.clientX - r.left, y: e.clientY - r.top, meter: false, auto: false });
+  Object.assign(human, { down: true, t0: performance.now(), x: e.clientX - r.left, y: e.clientY - r.top });
+  if (!human.auto) human.meter = false;
 });
 function onRelease(e) {
-  if (!human.down) return; human.down = false; meterEl.className = '';
-  const dd = myDefender();
-  if (dd) {                   // defense: release = steal attempt, tap = move
-    if (human.meter) {
-      human.meter = human.auto = false; if (d2(dd.pos, bodyPos(ball.holder)) > 1.6) { toast('Too far to reach'); return; }
-      const m = Math.sin(human.mt * Math.PI * 1.7); dd.stealQ = Math.max(0, 1 - Math.abs(m)); dd.moveTarget = null; startSteal(dd); human.cool = 1.0; human.mt = 0; meterEl.className = ''; return; }
-    const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } return;
+  if (!human.down) return; human.down = false;
+  if (defMode()) {           // defense: a short tap moves the closest defender (holding just chases)
+    const dd = myDefender(); if (dd && performance.now() - human.t0 < 300) { const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } } return;
   }
+  if (!human.auto) meterEl.className = '';
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
   if (human.meter) {          // shoot with the meter reading
     human.meter = false; const m = Math.sin(human.mt * Math.PI * 1.7);
@@ -19916,22 +19920,17 @@ window.addEventListener('pointerup', onRelease); canEl.addEventListener('context
 function myDefender() {
   const h = ball.holder; if (!human.on || !h || h.team === HUMAN || game.phase !== 'live') return null;
   let d = null, bd = 1e9; for (const q of team(HUMAN)) { const dist = d2(q.pos, bodyPos(h)); if (dist < bd) { bd = dist; d = q; } }
-  return d && !d.action && !(human.cool > 0) ? d : null;
+  return d && !d.action ? d : null;
 }
+function defMode() { const h = ball.holder; return human.on && h && h.team !== HUMAN && game.phase === 'live'; }
+function closestDef() { const h = ball.holder; let d = null, bd = 1e9; for (const q of team(HUMAN)) { const x = d2(q.pos, bodyPos(h)); if (x < bd) { bd = x; d = q; } } return d; }
 function humanDefAI(p, dt) {
   const h = ball.holder, near = d2(p.pos, bodyPos(h)) < 1.6;
   if (human.down) {
-    // holding: the meter always shows, and the defender closes in to pressure the ball handler
-    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show steal'; $('mlabel').textContent = near ? 'TIME THE REACH' : 'CLOSING IN…'; }
-    if (human.meter) { $('mlabel').textContent = near ? 'TIME THE REACH' : 'CLOSING IN…'; }
     const hp = bodyPos(h), D = defendHoop(p.team), toR = flat(D.rim.x - hp.x, D.rim.z - hp.z).normalize();
     p.moveTarget = null; steer(p, hp.clone().add(toR.mulScalar(0.9)), 4.0, dt, 16); animMove(p, dt, 'stance'); faceTo(p, hp.x, hp.z, 9, dt);
     p.label.classList.toggle('near', near); return;
   }
-  // in range: the steal meter runs on its own; any tap reaches for the ball
-  if (near && !p.action) {
-    if (!human.meter) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; $('mlabel').textContent = 'TAP TO STEAL'; }
-  } else if (human.meter && human.auto) { human.meter = human.auto = false; meterEl.className = ''; }
   if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.6, dt, 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);
