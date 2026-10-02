@@ -2,7 +2,7 @@
 import numpy as np
 from rig import *
 
-FPS = 30
+FPS = 60
 BALL_R = 0.07
 RIM = np.array([0.0, 1.35, 1.8])      # rim centre the shoot/dunk are authored against
 RIM_R = 0.14

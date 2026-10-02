@@ -49,19 +49,24 @@ def drib_ball(period=0.45, x=BX, z=BZ):
                   (0.45, [x, top, z], [0, 0, 0])], period)
 
 def dribble():
-    k = []
-    for n, t0 in enumerate((0.0, 0.45)):
-        sway = 1 if n == 0 else -1
-        k += [(t0 + 0.00, {**(DRIB if n == 0 else {}), 'hwR': [1], 'hips': [0, -0.085, 0], 'chestR': [5, -4, 0],
-                           'hpR': [BX, 0.30 + BALL_R, BZ], 'hnR': [0, -1, 0.1], 'hfR': [0, 0.1, 1]}),
-              (t0 + 0.06, {'hwR': [1], 'hips': [0.004 * sway, -0.097, 0], 'chestR': [7, -4, 4], 'headR': [-20, 8 + 3 * sway, 0],
-                           'hpR': [BX, 0.27 + BALL_R, BZ + 0.005], 'hnR': [0, -1, 0.5], 'hfR': [0, -0.4, 1]}),
-              (t0 + 0.11, {'hwR': [0], 'hpR': [BX + 0.005, 0.30, BZ + 0.03], 'hnR': [0, -0.6, -0.8], 'hfR': [0, -0.8, 0.6]}),
-              (t0 + 0.24, {'hwR': [0], 'hips': [0, -0.08, 0], 'chestR': [5, -4, -1], 'hpR': [BX, 0.385, BZ], 'hnR': [0, -1, 0.1], 'hfR': [0, 0.15, 1]}),
-              (t0 + 0.33, {'hwR': [0], 'hpR': [BX, 0.36, BZ], 'hnR': [0, -1, 0.05], 'hfR': [0, 0.1, 1]}),
-              (t0 + 0.36, {'hwR': [1], 'hpR': [BX, 0.27 + BALL_R, BZ]})]
-    k.append((0.9, {**DRIB, 'hwR': [1], 'hpR': [BX, 0.30 + BALL_R, BZ], 'hnR': [0, -1, 0.1], 'hfR': [0, 0.1, 1]}))
-    return bake(build_track(k, loop=True), 0.9, ball_path=drib_ball())
+    from drib import Dribble
+    d = Dribble(); T = d.T; dur = 2 * T
+    def ovr(t, c):
+        ph = (t % T) / T
+        b, contact = d.ball(t); p, n, f, _ = d.hand(t)
+        c['bw'] = np.array([1.0]); c['hspR'] = np.array([1.0]); c['hwR'] = np.array([0.0])
+        c['hpR'] = p; c['hnR'] = n; c['hfR'] = f; c['heR'] = np.array([-0.55, -0.35, -1.0])
+        # body rides the rhythm: sink + shoulder drop on the push, rise on the catch
+        push = np.sin(2 * np.pi * (ph - 0.30))            # peaks just after the push starts
+        sway = np.sin(2 * np.pi * t / dur)                 # slow weight shift over the two bounces
+        c['hips'] = np.array([0.006 * sway - 0.006, -0.10 - 0.007 * push, 0.0])
+        c['hipsR'] = np.array([12 + 1.5 * push, -10, -1.5 * sway])
+        c['spineR'] = np.array([11 + 1.0 * push, 0, 5]); c['chestR'] = np.array([7 + 2.0 * push, -5, 6 + 2.0 * push])
+        c['shR'] = np.array([0, 0, -5 * push - 4]); c['shL'] = np.array([0, 0, 1.5 * push])
+        c['neckR'] = np.array([-8 - 1.0 * push, 0, 0]); c['headR'] = np.array([-22 - 1.5 * push, 8 + 2 * sway, -9 - 2 * push])  # eyes stay up
+        # guard arm floats a touch with the rhythm
+        c['hpL'] = np.array([0.21, 0.11 + 0.008 * push, 0.13 + 0.006 * sway])
+    return bake(build_track([(0, DRIB), (dur, {})], loop=True), dur, ball_path=lambda t: d.ball(t)[0], override=ovr)
 
 G_BALL = 6.0
 def flight(p0, t0, target, T):
