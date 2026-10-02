@@ -31,6 +31,7 @@ canvas{width:100vw;height:100vh;display:block;touch-action:none}
 #meter{position:absolute;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 60px);transform:translateX(-50%) scale(.9);width:min(260px,70vw);height:22px;border-radius:11px;background:linear-gradient(90deg,#b8383b,#e0a83a 30%,#3fbf6a 45%,#3fbf6a 55%,#e0a83a 70%,#b8383b);box-shadow:0 0 0 2px #0009,0 6px 18px #0008;opacity:0;transition:.15s;pointer-events:none}
 #meter.show{opacity:1;transform:translateX(-50%) scale(1)}#meter .perfect{position:absolute;left:46%;width:8%;top:-4px;bottom:-4px;border-radius:3px;border:2px solid #fff}
 #mark{position:absolute;top:-7px;width:6px;height:36px;margin-left:-3px;border-radius:3px;background:#fff;box-shadow:0 0 8px #000}#meter span{position:absolute;top:28px;width:100%;text-align:center;font-size:10px;letter-spacing:1.5px;font-weight:700;color:#fff;text-shadow:0 1px 4px #000}
+#meter.steal{background:linear-gradient(90deg,#6a2a8f,#3a6fe0 30%,#3fd0e0 45%,#3fd0e0 55%,#3a6fe0 70%,#6a2a8f)}.tag.near{box-shadow:0 0 0 2px #3fd0e0}
 #ring{position:absolute;width:34px;height:14px;margin:-7px 0 0 -17px;border:2px solid #ffd27a;border-radius:50%;opacity:0;pointer-events:none}#ring.go{animation:ring .6s ease-out}@keyframes ring{from{opacity:1;transform:scale(.4)}to{opacity:0;transform:scale(1.6)}}
 #hint{position:absolute;top:calc(max(12px,env(safe-area-inset-top)) + 62px);width:100%;text-align:center;font-size:11px;color:#cfe0ea;text-shadow:0 1px 4px #000;pointer-events:none}
 #loading{position:absolute;top:45%;width:100%;text-align:center;color:#61d1c4;font-size:18px}#status{display:none}
@@ -38,7 +39,7 @@ canvas{width:100vw;height:100vh;display:block;touch-action:none}
 </style></head><body><canvas id="scene"></canvas>
 <div id="board"><div class="team t0"><span>PURPLE</span><b id="s0">0</b><i class="dot" id="poss0"></i></div><div id="mid"><small>SHOT</small><div id="clock"></div><small>TO 21</small></div><div class="team t1"><span>TEAL</span><b id="s1">0</b><i class="dot" id="poss1"></i></div></div>
 <div id="tags"></div><div id="toast"></div><div id="banner"></div><div id="loading">Warming up… <small style="display:block;font-size:12px;color:#7f9cab;margin-top:8px">If this text never changes, this viewer is not running the page\'s scripts. Open the file in a browser.</small></div><div id="status"></div>
-<div id="meter"><div class="zone"></div><div class="perfect"></div><div id="mark"></div><span>RELEASE IN THE CENTRE</span></div><div id="ring"></div><div id="hint">You are <b>Purple</b> · tap court to move · tap a teammate to pass · hold to shoot</div>
+<div id="meter"><div class="zone"></div><div class="perfect"></div><div id="mark"></div><span id="mlabel">RELEASE IN THE CENTRE</span></div><div id="ring"></div><div id="hint">You are <b>Purple</b> · tap court to move · tap a teammate to pass · hold to shoot · on defense, get close and hold to steal</div>
 <div id="controls"><button id="mode">Watch AI</button><button id="pause">Pause</button><button id="speed">1×</button><button id="cam">Broadcast cam</button><button id="restart">Restart</button><button id="mute">Mute</button></div>
 '''
 game = open('game.js').read()

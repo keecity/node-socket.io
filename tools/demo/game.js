@@ -227,7 +227,11 @@ function updateActions(dt) {
     else if (a.type === 'steal') {
       if (!a.done && a.t >= 0.3) {
         a.done = true; const h = ball.holder;
-        if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 1.45 && Math.random() < 0.22) {
+        let chance = 0.22;
+        if (p.stealQ !== undefined) { const q = p.stealQ; delete p.stealQ; chance = q > 0.92 ? 0.85 : 0.55 * q * q;
+          toast(q > 0.92 ? 'PERFECT timing' : q > 0.7 ? 'Good reach' : q > 0.4 ? 'Late reach' : 'Whiffed', false);
+          if (q < 0.4) p.react = 0.6; }
+        if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 1.6 && Math.random() < chance) {
           if (Math.random() < 0.5) { give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, toast(p.name + ' with the steal!', true); sfx('block'); }
           else {
             const to = flat(p.pos.x - h.pos.x, p.pos.z - h.pos.z).normalize();
@@ -381,7 +385,7 @@ function defenseAI(p, dt) {
   if (ball.holder === m) {
     const gap = Math.max(0.95, Math.min(1.5, mr * 0.18));
     goal = mp.clone().add(toRim.mulScalar(gap));
-    if (!p.action && !m.action && d2(p.pos, mp) < 1.35 && Math.random() < dt * 0.35) startSteal(p);
+    if (!(human.on && p.team === HUMAN) && !p.action && !m.action && d2(p.pos, mp) < 1.35 && Math.random() < dt * 0.35) startSteal(p);
   } else if (ball.holder && ball.holder.team !== p.team && isHelper(p)) {
     const hp = bodyPos(ball.holder), hr = flat(hp.x - D.rim.x, hp.z - D.rim.z).normalize();
     goal = flat(D.rim.x + hr.x * 1.7, D.rim.z + hr.z * 1.7);
@@ -482,6 +486,7 @@ app.on('update', dt => {
       if (ball.holder === p) (human.on && p.team === HUMAN ? humanAI : handlerAI)(p, dt);
       else if (ball.free && !ball.pass && (game.phase === 'loose' || (ball.pos.y < 2.6 && ball.vel.y < 0)) && crashers.includes(p)) chase(p, dt);
       else if (p.team === game.offense) offballAI(p, dt);
+      else if (human.on && p === myDefender()) humanDefAI(p, dt);
       else defenseAI(p, dt);
     }
     if (ball.pass) {
@@ -536,11 +541,16 @@ function screenOf(p) { const s = new pc.Vec3(); const bp = bodyPos(p); camera.ca
 const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
 function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live'); }
 canEl.addEventListener('pointerdown', e => {
-  if (!myBall()) return; const r = canEl.getBoundingClientRect();
+  if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
   Object.assign(human, { down: true, t0: performance.now(), x: e.clientX - r.left, y: e.clientY - r.top, meter: false });
 });
 function onRelease(e) {
   if (!human.down) return; human.down = false; meterEl.className = '';
+  const dd = myDefender();
+  if (dd) {                   // defense: release = steal attempt, tap = move
+    if (human.meter) { human.meter = false; const m = Math.sin(human.mt * Math.PI * 1.7); dd.stealQ = Math.max(0, 1 - Math.abs(m)); dd.moveTarget = null; startSteal(dd); return; }
+    const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } return;
+  }
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
   if (human.meter) {          // shoot with the meter reading
     human.meter = false; const m = Math.sin(human.mt * Math.PI * 1.7);
@@ -553,10 +563,28 @@ function onRelease(e) {
   const g = groundAt(human.x, human.y); if (g) { h.moveTarget = clamp(g); ring(g); }
 }
 canEl.addEventListener('pointerup', onRelease); canEl.addEventListener('pointercancel', onRelease);
+function myDefender() {
+  const h = ball.holder; if (!human.on || !h || h.team === HUMAN || game.phase !== 'live') return null;
+  const d = man(h); return d && !d.action ? d : null;
+}
+function humanDefAI(p, dt) {
+  const h = ball.holder, near = d2(p.pos, bodyPos(h)) < 1.6;
+  if (human.down) {
+    const held = performance.now() - human.t0 > 300;
+    if (held && near && !human.meter) { human.meter = true; human.mt = 0; meterEl.className = 'show steal'; $('mlabel').textContent = 'TIME THE REACH'; }
+    if (human.meter) { if (!near) { human.meter = false; meterEl.className = ''; } else { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; } }
+  }
+  if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
+  if (p.moveTarget) {
+    steer(p, p.moveTarget, 3.6, dt, 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);
+    if (d2(p.pos, p.moveTarget) < 0.35) p.moveTarget = null;
+  } else defenseAI(p, dt);            // no order: stay on your man
+  p.label.classList.toggle('near', near);
+}
 function humanAI(p, dt) {
   p.holdT += dt;
   if (human.down) {
-    if (!human.meter && performance.now() - human.t0 > 1000) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
+    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; $('mlabel').textContent = 'RELEASE IN THE CENTRE'; }
     if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * Math.sin(human.mt * Math.PI * 1.7)) + '%'; }
     p.vel.mulScalar(Math.pow(0.01, dt)); const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 6, dt); animMove(p, dt, 'handler'); return;
   }
