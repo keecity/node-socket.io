@@ -45,6 +45,7 @@ def default_controls():
             f'f{S}': [s * 0.11, 0, 0],           # foot: world x, lift, world z
             f'fr{S}': [0, s * 4],                # foot pitch (+ heel up on toe), yaw
             f'frel{S}': [0],                     # 0 world space, 1 follows hips
+            f'wm{S}': [60],                      # wrist bend limit (deg)
             f'fh{S}': [s * 0.075, -0.25, 0.02],   # ankle offset from hips joint when frel = 1
             f'fk{S}': [s * 0.15, 0, 1],          # knee pole
         })
@@ -216,7 +217,7 @@ def solve(c, ball_path=None, t=0.0):
         if shrug > 0.1:
             q[f'shoulder.{S}'] = qmul(rot(('z', sgn * shrug)), q[f'shoulder.{S}'])
             M = fk(q)
-        solve_arm(M, S, p, n, fing, pole, q, WRIST_SWING + 15 * hw)
+        solve_arm(M, S, p, n, fing, pole, q, min(c[f'wm{S}'][0], WRIST_SWING) + 15 * hw)
     for S in 'LR':
         fx, lift, fz = c[f'f{S}']; pitch, yaw = c[f'fr{S}']
         ank, Rf = ankle_from_foot(fx, lift, fz, pitch, yaw)

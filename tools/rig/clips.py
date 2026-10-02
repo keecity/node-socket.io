@@ -300,7 +300,7 @@ def run_body(t, c, r, arms=True):
             c[f'hp{S}'] = np.array([sg * (0.16 - 0.035 * fwd), -0.10 + 0.10 * fwd + 0.01 * back, 0.03 + 0.14 * fwd - 0.13 * back])
             c[f'hn{S}'] = np.array([-sg * 0.9, -0.15, 0.25 * a]); c[f'hf{S}'] = np.array([sg * 0.15, 0.35 + 0.45 * fwd, 1.0])
             c[f'he{S}'] = np.array([sg * 0.35, -0.25, -1.0]); c[f'hw{S}'] = np.array([0.0]); c[f'hsp{S}'] = np.array([0.0])
-            c[f'sh{S}'] = np.array([0, -4 * a, 0])
+            c[f'sh{S}'] = np.array([0, -4 * a, 0]); c[f'wm{S}'] = np.array([10.0])
     c['ball'] = np.array([0, -0.6, -0.4])
     return phL
 
