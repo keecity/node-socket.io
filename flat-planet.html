@@ -185,6 +185,10 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   <h5>WEAPONS</h5>
   <div class="weps"><div class="wep"><img class="ico" src="assets/ui/rifle.png" alt=""><div><span id="w1">Beam Rifle</span><small>(Primary)</small></div></div>
     <div class="wep"><img class="ico" src="assets/ui/missile.png" alt=""><div><span id="w2">Head Vulcans</span><small>(Secondary)</small></div></div></div>
+  <div id="uTroops" class="uihidden" style="margin:8px 12px 10px;padding:7px 9px;background:rgba(255,255,255,.04);border:1px solid var(--line2)">
+    <div style="display:flex;align-items:center;gap:8px"><img class="ico" src="assets/ui/supply.png" alt="" style="width:16px;height:16px"><span style="font-size:12px;letter-spacing:.1em;color:var(--dim);flex:1">TROOPS ON BOARD</span><b id="uTroopN" style="font-size:15px">0 / 6</b></div>
+    <div id="uSeats" style="display:flex;gap:4px;margin:6px 0 7px"></div>
+    <button id="uDeploy" class="abtn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:5px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:700 13px Rajdhani,sans-serif;letter-spacing:.08em;cursor:pointer"><img class="ico" src="assets/ui/deploy.png" alt="" style="width:16px;height:16px">DEPLOY TROOPS</button></div>
 </div>
 <div id="selpanel" class="ui pn uihidden"><div class="hd"><span>Selected units</span><b id="selcount">0</b></div><div id="selcards"></div></div>
 <div id="cmdbar" class="ui">
@@ -198,7 +202,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <button class="cmd off" data-c="follow" title="Coming soon"><img class="ico" src="assets/ui/follow.png" alt="">FOLLOW</button>
     <button class="cmd off" data-c="guard" title="Coming soon"><img class="ico" src="assets/ui/guard.png" alt="">GUARD</button><span class="gap"></span>
     <button class="cmd off" data-c="repair" title="Coming soon"><img class="ico" src="assets/ui/repair.png" alt="">REPAIR</button>
-    <button class="cmd off" data-c="deploy" title="Coming soon"><img class="ico" src="assets/ui/deploy.png" alt="">DEPLOY</button>
+    <button class="cmd" data-c="deploy" title="Unload soldiers from the selected gunship"><img class="ico" src="assets/ui/deploy.png" alt="">DEPLOY</button>
   </div>
   <div class="pn uihidden" id="builds"><button class="cmd" id="bOutpost" title="Radar outpost: extends territory near the border and detects enemies"><img class="ico" src="assets/ui/sight.png" alt="">OUTPOST<small id="opCost" style="font-size:9px;color:var(--gold)">600 CR</small></button><button class="cmd" id="bAirbase" title="Air base: lands, refuels and repairs 3 gunships; builds gunships and researches upgrades"><img class="ico" src="assets/ui/deploy.png" alt="">AIR BASE<small style="font-size:9px;color:var(--gold)">1500 CR</small></button><button class="cmd" id="bPump" title="Oil pump: generates oil while it stands"><img class="ico" src="assets/ui/power.png" alt="">OIL PUMP<small style="font-size:9px;color:var(--gold)">800 CR</small></button><button class="cmd" id="bCamp" title="Woodcutter camp: fells nearby trees for wood until none are left in reach"><img class="ico" src="assets/ui/repair.png" alt="">WOOD<small style="font-size:9px;color:var(--gold)">500 CR</small></button><button class="cmd" id="bMine" title="Mine: dug into a mountain side; ore rides the conveyor into the hopper and storage bins"><img class="ico" src="assets/ui/alloy.png" alt="">MINE<small style="font-size:9px;color:var(--gold)">1200 CR</small></button><button class="cmd" id="bFarm" title="Farm: one crop, grows over time and is harvested for food"><img class="ico" src="assets/ui/supply.png" alt="">FARM<small style="font-size:9px;color:var(--gold)">400 CR</small></button><button class="cmd" id="bWh" title="Warehouse: semi trucks deploy from here to collect lumber and ore"><img class="ico" src="assets/ui/deploy.png" alt="">DEPOT<small style="font-size:9px;color:var(--gold)">1000 CR</small></button><span id="buildHint" style="align-self:center;font-size:12px;color:var(--dim);margin-left:10px;max-width:240px"></span></div>
 </div>
@@ -1714,6 +1718,9 @@ function issueMove(sx, sy) {                           // right-click: attack th
   let enemy = null, best = 30;
   for (const e of Battle.enemiesVisible()) { const p = toScreen(e, v3); if (p) { const d = Math.hypot(p.x - sx, p.y - sy); if (d < best) { best = d; enemy = e; } } }
   if (enemy) return Battle.order(sel, null, enemy);
+  // soldiers right-clicked onto one of our gunships: board it
+  if (sel.some(u => u.kind === 'soldier')) { let heli = null, hb = 30; for (const h of Battle.helis) if (h.team === 0 && h.alive) { const p = toScreen(h, v3); if (p) { const d = Math.hypot(p.x - sx, p.y - sy); if (d < hb) { hb = d; heli = h; } } }
+    if (heli) return Battle.board(sel, heli); }
   const t = pickGround(sx, sy); if (t) Battle.order(sel, t, null);
 }
 function showBox() {
@@ -1773,7 +1780,7 @@ const ROLE = {
 function setCmd(c) { cmdMode = c; document.querySelectorAll('.cmd').forEach(b => b.classList.toggle('on', b.dataset.c === c)); }
 document.querySelectorAll('.cmd').forEach(b => b.addEventListener('click', () => {
   const c = b.dataset.c; if (b.classList.contains('off')) return;
-  if (c === 'stop' || c === 'hold') { Battle.command(c); setCmd(c); setTimeout(() => setCmd('move'), 350); return; }
+  if (c === 'stop' || c === 'hold' || c === 'deploy') { Battle.command(c); setCmd(c); setTimeout(() => setCmd('move'), 350); return; }
   setCmd(c); }));
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
   $('cmds').classList.toggle('uihidden', t.dataset.tab === 'build'); $('builds').classList.toggle('uihidden', t.dataset.tab !== 'build'); $('cmds').style.opacity = t.dataset.tab === 'special' ? 0.35 : 1; }));
@@ -1866,6 +1873,7 @@ function abRender(full) { const b = abSel; if (!b) return; if (!b.alive) { abSel
     btn.querySelector('span').innerHTML = `${U.name}<i class="lv">${U.cost.map((_, i) => `<b class="${i < lv ? 'f' : ''}"></b>`).join('')}</i>`; btn.title = U.desc;
     btn.querySelector(':scope > small').textContent = maxed ? 'MAX' : on ? Math.ceil(R.total - R.t) + 's' : U.cost[lv] + ' CR';
     btn.querySelector('.pg').style.width = on ? (R.t / R.total * 100) + '%' : '0'; btn.classList.toggle('dis', maxed || (!!R && !on) || (!R && RES.credits < U.cost[lv])); }); }
+$('uDeploy').addEventListener('click', () => { if (focusUnit && focusUnit.kind === 'heli') Battle.command('deploy', [focusUnit]); });
 let uiT = 0;
 let terrToggle = false;
 $('bTerr').addEventListener('click', () => { terrToggle = !terrToggle; $('bTerr').style.borderColor = terrToggle ? 'var(--cyan)' : ''; $('bTerr').style.background = terrToggle ? 'rgba(30,100,150,.5)' : ''; });
@@ -1902,6 +1910,10 @@ function updateUI(dt) {
   $('uEn').textContent = `${en2} / 100`; $('uEnBar').style.width = en2 + '%';
   $('sAtk').textContent = R.atk; $('sDef').textContent = R.def; $('sMov').textContent = R.mov.toFixed(1); $('sRange').textContent = R.range; $('sRate').textContent = R.rate; $('sSight').textContent = R.sight;
   $('w1').textContent = R.w1; $('w2').textContent = R.w2;
+  // gunship transport: seats and an unload button
+  const isH = u.kind === 'heli', n = isH && u.cargo ? u.cargo.length : 0; $('uTroops').classList.toggle('uihidden', !isH);
+  if (isH) { $('uTroopN').textContent = n + ' / 6'; $('uSeats').innerHTML = [...Array(6)].map((_, i) => `<i style="flex:1;height:7px;background:${i < n ? 'var(--cyan)' : 'rgba(255,255,255,.1)'}"></i>`).join('');
+    const busy = u.tr && u.tr.phase === 'drop'; $('uDeploy').disabled = !n || busy; $('uDeploy').style.opacity = n && !busy ? 1 : 0.4; $('uDeploy').lastChild.textContent = busy ? 'DEPLOYING…' : 'DEPLOY TROOPS'; }
   $('unitinfo').querySelectorAll('.wep img')[0].src = 'assets/ui/' + R.i1 + '.png'; $('unitinfo').querySelectorAll('.wep img')[1].src = 'assets/ui/' + R.i2 + '.png';
 }
 

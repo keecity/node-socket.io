@@ -1704,10 +1704,10 @@ function poseSoldier(s, dt) { const B = s.bones, b = n => B[BI[n]], run = s.spee
   s.gun.position.set(-0.03 + 0.02 * aim, -0.07 + 0.06 * aim, 0.14 - rec * 0.03); s.gun.rotation.set(-0.12 * (1 - aim), 0, 0);
   setRot(b('root'), 0, 0, 0); }
 // ---- behaviour
-const soldierTargets = s => [...soldiers.filter(o => o.alive && o.team !== s.team), ...robots.filter(r => r.team !== s.team && r.state !== 'ko')];
+const soldierTargets = s => [...soldiers.filter(o => o.alive && !o.inHeli && o.team !== s.team), ...robots.filter(r => r.team !== s.team && r.state !== 'ko')];
 function soldierHit(s, amount, by) { if (!s.alive) return; s.hp -= amount; if (s.hp <= 0) { s.alive = false; s.sel = false; s.deadT = 0; s.state = 'dead'; if (by) log(s.team, `<b>${unitName(by)}</b> kills <b>${unitName(s)}</b>`); }
   else if (by && !s.target && (!s.order || s.order.type !== 'move')) s.target = by; return 'hit'; }
-function soldierImpact(pt, radius, power, kind) { for (const s of soldiers) { if (!s.alive) continue; const d = wdist2(s.pos.x, s.pos.z, pt.x, pt.z); if (d > radius + 0.06 || pt.y > s.pos.y + SOLD_H * 1.2) continue;
+function soldierImpact(pt, radius, power, kind) { for (const s of soldiers) { if (!s.alive || s.inHeli) continue; const d = wdist2(s.pos.x, s.pos.z, pt.x, pt.z); if (d > radius + 0.06 || pt.y > s.pos.y + SOLD_H * 1.2) continue;
   soldierHit(s, kind === 'step' || kind === 'land' ? 999 : kind === 'bullet' ? 6 : 90 * power, null); } }
 function soldierFire(s, T) { const m = new THREE.Vector3(); s.muzzle.getWorldPosition(m); m.divideScalar(S); m.x = s.pos.x + (m.x - s.root.position.x); m.z = s.pos.z + (m.z - s.root.position.z);
   const tp = tgtPos(T, new THREE.Vector3()); near(tp, s.pos, tp); FX.flash(m, 0.035, [1, 0.85, 0.5]); s.recoil = 1; s.shots++;
@@ -1717,15 +1717,17 @@ function soldierFire(s, T) { const m = new THREE.Vector3(); s.muzzle.getWorldPos
   const tr = hRounds.find(r => !r.alive); if (tr) { tr.alive = true; tr.owner = s; tr.life = 0.25; tr.m.material = hRoundMats[s.team]; tr.m.visible = true; tr.p.copy(m); tr.v.subVectors(tp, m).normalize().multiplyScalar(14); tr.m.scale.set(1.2, 1.2, 1); tr.tracerOnly = true; } }
 function updateSoldiers(dt) { const c = camD();
   for (let i = soldiers.length - 1; i >= 0; i--) { const s = soldiers[i];
+    if (s.inHeli) { s.pos.x = s.inHeli.pos.x; s.pos.z = s.inHeli.pos.z; continue; }
     if (!s.alive) { s.deadT += dt; if (s.deadT > 30) { battleRoot.remove(s.root); scene.remove(s.bar.g); soldiers.splice(i, 1); continue; } }
     else {
       s.recoil = Math.max(0, s.recoil - dt * 8);
       if (s.target && (!alive(s.target) || wdist2(s.pos.x, s.pos.z, s.target.pos.x, s.target.pos.z) > SOLD_RANGE * 1.6)) s.target = null;
       if (!s.target && (!s.order || s.order.type !== 'move')) { let best = null, bd = SOLD_RANGE; for (const e of soldierTargets(s)) { const d = wdist2(s.pos.x, s.pos.z, e.pos.x, e.pos.z); if (d < bd) { bd = d; best = e; } } s.target = best; }
       let goal = null, want = 0;
-      if (s.order && s.order.type === 'move') { if (!s.order.path) s.order.path = offroad({ x: s.pos.x, z: s.pos.z }, { x: s.order.x, z: s.order.z }, [], true);
+      if (s.order && s.order.type === 'board' && (!alive(s.order.heli) || !s.order.heli.tr)) s.order = null;
+      if (s.order && (s.order.type === 'move' || s.order.type === 'board')) { if (!s.order.path) s.order.path = offroad({ x: s.pos.x, z: s.pos.z }, { x: s.order.x, z: s.order.z }, [], true);
         const P = s.order.path; while (P.length > 1 && wdist2(s.pos.x, s.pos.z, P[0].x, P[0].z) < 0.15) P.shift(); goal = P[0]; want = SOLD_SPEED[1];
-        if (P.length === 1 && wdist2(s.pos.x, s.pos.z, goal.x, goal.z) < 0.08) s.order = null; }
+        if (P.length === 1 && wdist2(s.pos.x, s.pos.z, goal.x, goal.z) < (s.order.type === 'board' ? 0.3 : 0.08)) { if (s.order.type === 'board') { goal = null; want = 0; } else s.order = null; } }   /* boarding troops wait at the landing spot */
       else if (s.target) { const d = wdist2(s.pos.x, s.pos.z, s.target.pos.x, s.target.pos.z); if (d > SOLD_RANGE * 0.9) { goal = s.target.pos; want = SOLD_SPEED[1]; } }
       if (goal) { const dx = wd(goal.x - s.pos.x), dz = wd(goal.z - s.pos.z), yaw = Math.atan2(dx, dz); let dy = Math.atan2(Math.sin(yaw - s.yaw), Math.cos(yaw - s.yaw)); s.yaw += clamp(dy, -6 * dt, 6 * dt);
         s.speed += (want - s.speed) * Math.min(1, dt * 5);
@@ -1747,6 +1749,34 @@ function updateSoldiers(dt) { const c = camD();
     placeBar(s, s.root.position.x * S, (s.pos.y + SOLD_H) * S, s.root.position.z * S, s.alive); } }
 function spawnSquad(team, n) { const t = towns[team]; for (let i = 0; i < n; i++) { const a = rand(0, 6.28), r = rand(1.2, 2.4); let x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r;
   for (let k = 0; k < 30 && (lotBlocked(wm(x), wm(z), []) || roadAt(x * S, z * S) > 0.5); k++) { x += rand(-0.4, 0.4); z += rand(-0.4, 0.4); } makeSoldier(team, x, z, i % 2); } }
+// ------------------------------------------------------------------ air transport: soldiers board gunships
+// A gunship carries up to 6 soldiers. Told to pick them up it lands beside them and they walk aboard; given a destination
+// while carrying troops it lands there and they jump out (DEPLOY unloads wherever it is).
+const HELI_SEATS = 6;
+function trGoal(h, dt) { const tr = h.tr, gy = Math.max(Hd(tr.x, tr.z), 0), d = wdist2(h.pos.x, h.pos.z, tr.x, tr.z);
+  if (d > 0.25) { tr.down = false; return { x: tr.x, z: tr.z, y: Math.max(gy, Hd(h.pos.x, h.pos.z), 0) + 1.35 }; }
+  const G = { x: tr.x, z: tr.z, y: gy + h.skid, land: true }; if (h.pos.y > G.y + 0.06) return G;
+  // on the ground
+  if (!tr.down) { tr.down = true; tr.t = 0; FX.dust(new THREE.Vector3(tr.x, gy, tr.z), 14, { size: [0.1, 0.5], life: [0.6, 1.2], vel: 0.8, up: 0.05, a: 0.4 }); }
+  tr.t += dt; h.vel.set(0, 0, 0);
+  if (tr.phase === 'pickup') { for (const s of soldiers) if (s.alive && !s.inHeli && s.order && s.order.type === 'board' && s.order.heli === h && wdist2(s.pos.x, s.pos.z, h.pos.x, h.pos.z) < 0.45) boardHeli(s, h);
+    const coming = soldiers.some(s => s.alive && !s.inHeli && s.order && s.order.type === 'board' && s.order.heli === h);
+    if ((!coming && tr.t > 1.5) || tr.t > 25 || h.cargo.length >= HELI_SEATS) { h.tr = null; if (h.cargo.length && h.team === 0) log(0, `<b>${unitName(h)}</b> lifts off with ${h.cargo.length} soldier${h.cargo.length > 1 ? 's' : ''}`); } }
+  else if (tr.phase === 'drop') { tr.dt = (tr.dt || 0) - dt; if (tr.dt <= 0 && h.cargo.length) { tr.dt = 0.3; unloadOne(h); } if (!h.cargo.length && tr.t > 0.8) h.tr = null; }
+  return G; }
+function boardHeli(s, h) { if (h.cargo.length >= HELI_SEATS) { s.order = null; return; } s.inHeli = h; s.sel = false; s.order = null; s.target = null; s.root.visible = false; s.bar.g.visible = false; h.cargo.push(s); }
+function unloadOne(h) { const s = h.cargo.shift(), k = HELI_SEATS - h.cargo.length, a = h.yaw + Math.PI / 2 + (k % 2 ? 1 : -1) * (0.4 + k * 0.25);
+  s.inHeli = null; s.pos.set(wm(h.pos.x + Math.sin(a) * 0.35), 0, wm(h.pos.z + Math.cos(a) * 0.35)); s.pos.y = Hd(s.pos.x, s.pos.z); s.yaw = a; s.root.visible = true; s.speed = 0; s.state = 'idle';
+  s.order = { type: 'move', x: wm(s.pos.x + Math.sin(a) * 0.4), z: wm(s.pos.z + Math.cos(a) * 0.4) }; }
+// orders from the interface
+function orderBoard(sel, h) { const troops = sel.filter(u => u.kind === 'soldier' && !u.inHeli).slice(0, HELI_SEATS - h.cargo.length); if (!troops.length) return;
+  let cx = 0, cz = 0; for (const s of troops) { cx += wd(s.pos.x - troops[0].pos.x); cz += wd(s.pos.z - troops[0].pos.z); } cx = wm(troops[0].pos.x + cx / troops.length); cz = wm(troops[0].pos.z + cz / troops.length);
+  // land on open ground near the group
+  let best = { x: cx, z: cz }; for (let i = 0; i < 40; i++) { const a = rand(0, 6.28), r = rand(0, 1.2), x = wm(cx + Math.cos(a) * r), z = wm(cz + Math.sin(a) * r); if (Hd(x, z) > 2 / S * 1.2 && !lotBlocked(x, z, []) && roadAt(x * S, z * S) < 0.5) { best = { x, z }; break; } }
+  h.tr = { phase: 'pickup', x: best.x, z: best.z }; h.target = null; h.anchor = { x: best.x, z: best.z }; if (h.mode === 'landed') h.mode = 'takeoff';
+  for (const s of troops) { s.order = { type: 'board', heli: h, x: best.x, z: best.z }; s.target = null; s.stuck = 0; }
+  log(0, `${troops.length} soldier${troops.length > 1 ? 's' : ''} boarding <b>${unitName(h)}</b>`); }
+function orderDrop(h, x, z) { h.tr = { phase: 'drop', x, z }; h.target = null; h.anchor = { x, z }; if (h.mode === 'landed') h.mode = 'takeoff'; }
 // ---- smashing cars: robots crush them underfoot, weapons blow them up; wrecks burn, then explode
 function carStomp(x, z, rad) {   // a foot or a landing robot comes down here (demo units)
   for (const car of cars) { if (car.dead || car.wx === undefined) continue; const dx = wd(car.wx / S - x), dz = wd(car.wz / S - z);
@@ -2837,13 +2867,13 @@ function makeHeli(team, x, z) {
     pos: new THREE.Vector3(wm(x), Hd(x, z) + 1.6, wm(z)), vel: new THREE.Vector3(), acc: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, hp: heliMaxHp(team), maxHp: heliMaxHp(team), alive: true, falling: false,
     fuel: heliFuelMax(team), fuelMax: heliFuelMax(team), mode: 'fly', home: null, pad: null, rotor: 1, sortie: false, skid: HELI_SKID,
     target: null, retarget: 0, orb: rand(0, 6.28), orbDir: chance(.5) ? 1 : -1, gunT: 0, gunCD: rand(1, 2), fireAcc: 0, msCD: rand(3, 5), msQueue: 0, msT: 0, podI: 0, spin: 0,
-    anchor: { x: wm(x), z: wm(z) }, sel: false };
+    anchor: { x: wm(x), z: wm(z) }, sel: false, cargo: [], tr: null };
   helis.push(h); makeBars(h, 1.1, 1.35); return h;
 }
 function heliHit(h, amount, by, at) {
   if (!h.alive) return; h.hp -= amount; const p = at || h.pos; FX.sparks(p, amount > 30 ? 30 : 5, [1, 0.8, 0.45], 1.4); if (amount > 30) FX.flash(p, 0.3, [1, 0.8, 0.5]);
   if (by && !alive(h.target)) h.target = by;
-  if (h.hp <= 0) { h.alive = false; h.falling = true; h.sel = false; h.vel.add(new THREE.Vector3(rand(-0.6, 0.6), 0.3, rand(-0.6, 0.6))); h.spin = rand(5, 8) * (chance(.5) ? 1 : -1); FX.explosion(h.pos.clone(), 0.45);
+  if (h.hp <= 0) { for (const s of h.cargo || []) { s.inHeli = null; s.alive = false; s.hp = 0; s.state = 'dead'; s.deadT = 99; } if (h.cargo) h.cargo.length = 0; h.tr = null; h.alive = false; h.falling = true; h.sel = false; h.vel.add(new THREE.Vector3(rand(-0.6, 0.6), 0.3, rand(-0.6, 0.6))); h.spin = rand(5, 8) * (chance(.5) ? 1 : -1); FX.explosion(h.pos.clone(), 0.45);
     log(h.team, `${by ? `<b>${unitName(by)}</b> shoots down ` : ''}<b>${unitName(h)}</b>`); }
   return 'hit';
 }
@@ -2901,7 +2931,7 @@ function updateHeli(h, dt) {
     return; }
   const t = performance.now() / 1000;
   if (heliService(h, dt)) { h.nav.visible = (t * 2 + h.team) % 1 < 0.5; return; }
-  const G = h.goTo, up = HELI_UP[h.team], vMax = 0.9 * (1 + 0.15 * up.engine) * (G && G.land ? 0.5 : 1), aMax = 1.1 * (1 + 0.15 * up.engine);
+  const G = h.tr && h.mode === 'fly' ? trGoal(h, dt) : h.goTo, up = HELI_UP[h.team], vMax = 0.9 * (1 + 0.15 * up.engine) * (G && G.land ? 0.5 : 1), aMax = 1.1 * (1 + 0.15 * up.engine);
   h.retarget -= dt;
   if (h.retarget <= 0 || !alive(h.target)) { h.retarget = rand(2, 4); h.target = h.order?.type === 'attack' && alive(h.order.target) ? h.order.target : heliTargetNear(h); }
   const T = G ? null : alive(h.target) ? h.target : null;
@@ -3030,12 +3060,14 @@ const Battle = {
     log(null, 'Destroy the <b>Cobalt</b> forces and their HQ tower. Your HQ tower brings reinforcements.');
     return { x: towns[0].x * S, z: (towns[0].z + 2) * S };
   },
-  selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive)]; },
-  enemiesVisible() { return [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
+  selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive && !s.inHeli)]; },
+  enemiesVisible() { return [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
   screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   // commands from the interface
+  board: (sel, h) => orderBoard(sel, h),
   command(kind, sel) { sel = sel || Battle.selectables().filter(u => u.sel);
+    if (kind === 'deploy') { for (const u of sel) if (u.kind === 'heli' && u.cargo && u.cargo.length) orderDrop(u, u.pos.x, u.pos.z); return; }
     for (const u of sel) { if (u.kind === 'soldier') { if (kind === 'stop' || kind === 'hold') { u.order = null; u.target = null; } continue; }
       if (u.kind !== 'robot') { if (kind === 'stop') { u.anchor = { x: u.pos.x, z: u.pos.z }; u.target = null; } continue; }
       if (kind === 'stop') { u.order = null; u.target = null; u.path = null; if (!['ko', 'fly', 'jump', 'air', 'dive'].includes(u.state)) toIdle(u, 0.12, 0.3); }
@@ -3054,6 +3086,7 @@ const Battle = {
         for (let t = 0; t <= L; t += 0.1) { const px = x + dx * t / L, pz = z + dz * t / L; if (passableD(px, pz)) { x = wm(px); z = wm(pz); break; } } }
       if (u.kind === 'soldier') { const k = sel.filter(v => v.kind === 'soldier').indexOf(u), a2 = k * 2.4, r2 = 0.3 * Math.sqrt(k);   // soldiers form up tighter than mechs
         u.order = { type: 'move', x: wm(gx + Math.cos(a2) * r2), z: wm(gz + Math.sin(a2) * r2) }; u.target = null; u.stuck = 0; }
+      else if (u.kind === 'heli' && u.cargo && u.cargo.length) orderDrop(u, x, z);
       else if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; }
       else { u.order = { type: 'move', x, z }; u.target = null; if (u.state === 'fly') { u.flyGoal = { x, z }; if (u.flyPhase === 'down' && u.y > 0.3 && u.boost > 10) { u.flyPhase = 'cruise'; play(u, 'Boost_Forward', 0.2); } } else if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; const rt = u.pilot.react * 0.5; u.thinkT = rt; if (u.state !== 'idle') toIdle(u, 0.12, rt); else u.st = 0; } } });
   },
