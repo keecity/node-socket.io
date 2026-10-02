@@ -78,7 +78,7 @@ function give(p) {
   ball.free = false; ball.holder = p; ball.pass = null; ball.ent.enabled = false; ball.lastTouch = p.team;
   for (const q of P) q.ballNode.enabled = (q === p);
   if (game.offense !== p.team) { game.offense = p.team; game.shotClock = SHOT_CLOCK; }
-  p.action = null; p.holdT = 0; p.stall = 0; p.react = 0.25; p.think = 0.2;
+  p.action = null; p.holdT = 0; p.stall = 0; p.react = 0.2; p.think = 0.05;
 }
 function release(p0, v, spinBack) {
   ball.free = true; ball.holder = null; ball.pos.copy(p0); ball.vel.copy(v); ball.ent.enabled = true; ball.crossed = false;
@@ -142,14 +142,15 @@ function restart() { game.score = [0, 0]; $('banner').className = ''; toast('Fir
 function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
-  game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
+  stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
   sfx('swish'); game.phase = 'scored'; game.timer = 1.6; hud();
   if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; }
 }
 
 // ====================================================================== actions
-function startShot(p) {
+const stats = { pass: 0, shot: 0, dunk: 0, steal: 0, block: 0, made: 0 }; window.__stats = stats;
+function startShot(p) { stats.shot++;
   const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z); p.vel.set(0, 0, 0);
   p.action = { type: 'shoot', t: 0, done: false }; setAnim(p, 'Shoot', 0.1);
   const c = closestDefender(p); if (c && d2(c.pos, p.pos) < 2.4 && !c.action && Math.random() < 0.75) c.pendingBlock = 0.1 + Math.random() * 0.15;
@@ -160,11 +161,12 @@ function shotRelease(p) {
   game.shot = { shooter: p, pts: dr > ARC ? 3 : 2, assist: p.lastPasser && p.holdT < 3 ? p.lastPasser : null };
   if (c && c.action && c.action.type === 'block' && c.action.t > 0.2 && c.action.t < 0.75 && cd < 1.35 && Math.random() < 0.38) {
     const away = flat(p.pos.x - A.rim.x, p.pos.z - A.rim.z).normalize();
-    release(p0, new pc.Vec3(away.x * 3.5 + (Math.random() - .5) * 3, 2.2, away.z * 3.5 + (Math.random() - .5) * 3), false);
-    game.shot = null; game.phase = 'loose'; ball.lastTouch = c.team; toast('REJECTED by ' + c.name + '!', true); sfx('block'); return;
+    const inC = flat(-p0.x, -p0.z).normalize(), dir2 = away.mulScalar(0.6).add(inC.mulScalar(0.4)).normalize();
+    release(p0, new pc.Vec3(dir2.x * 2.6 + (Math.random() - .5) * 1.2, 1.6, dir2.z * 2.6 + (Math.random() - .5) * 1.2), false);
+    game.shot = null; game.phase = 'loose'; ball.lastTouch = c.team; stats.block++; toast('REJECTED by ' + c.name + '!', true); sfx('block'); return;
   }
-  let make = dr < 3 ? 0.6 : dr < 4.5 ? 0.53 : dr < ARC ? 0.5 - 0.035 * (dr - 4.5) : 0.38 - 0.06 * (dr - ARC);
-  make = Math.max(0.15, make) * (cd < 1.0 ? 0.5 : cd < 1.6 ? 0.7 : cd < 2.4 ? 0.88 : 1);
+  let make = dr < 3 ? 0.7 : dr < 4.5 ? 0.62 : dr < ARC ? 0.58 - 0.03 * (dr - 4.5) : 0.45 - 0.06 * (dr - ARC);
+  make = Math.max(0.18, make) * (cd < 1.0 ? 0.55 : cd < 1.6 ? 0.75 : cd < 2.4 ? 0.9 : 1);
   if (game.shotClock < 1) make *= 0.8;
   const tgt = A.rim.clone();
   if (Math.random() < make) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
@@ -173,7 +175,7 @@ function shotRelease(p) {
   release(p0, tgt.sub(p0).sub(new pc.Vec3(0, -0.5 * G * T * T, 0)).mulScalar(1 / T), true);
   ball.lastTouch = p.team;
 }
-function startDunk(p) {
+function startDunk(p) { stats.dunk++;
   const A = attackHoop(p.team), dx = A.rim.x - p.pos.x, dz = A.rim.z - p.pos.z, l = Math.hypot(dx, dz);
   p.pos.set(A.rim.x - dx / l * DUNK_DIST, 0, A.rim.z - dz / l * DUNK_DIST); faceTo(p, A.rim.x, A.rim.z); place(p);
   p.vel.set(0, 0, 0); p.action = { type: 'dunk', t: 0, done: false }; setAnim(p, 'Dunk', 0.08);
@@ -185,12 +187,14 @@ function dunkRelease(p) {
   game.shot = { shooter: p, pts: 2, dunk: true, assist: p.lastPasser && p.holdT < 3 ? p.lastPasser : null };
   release(p0, new pc.Vec3(0, -4.5, 0), false); ball.crossed = true; scored(A); sfx('board');
 }
-function startPass(p, r) {
+function startPass(p, r) { stats.pass++;
   faceTo(p, r.pos.x, r.pos.z); p.vel.mulScalar(0.3); p.action = { type: 'pass', t: 0, to: r, done: false }; setAnim(p, 'Pass', 0.08);
 }
 function passRelease(p, r) {
   const p0 = p.ballNode.getPosition().clone(), dist = d2(p.pos, r.pos);
-  const T = 0.22 + dist / 11, lead = r.pos.clone().add(r.vel.clone().mulScalar(T)); clamp(lead);
+  const T = 0.22 + dist / 11, lead = r.pos.clone().add(r.vel.clone().mulScalar(T * 0.35));
+  lead.x = Math.max(-13.4, Math.min(13.4, lead.x)); lead.z = Math.max(-6.4, Math.min(6.4, lead.z));
+  r.catchAt = lead.clone();
   const tgt = new pc.Vec3(lead.x, 1.25, lead.z);
   release(p0, tgt.sub(p0).sub(new pc.Vec3(0, -0.5 * G * T * T, 0)).mulScalar(1 / T), false);
   ball.pass = { from: p, to: r, t: 0, T, tried: new Set() }; ball.lastTouch = p.team; r.react = 0;
@@ -213,9 +217,13 @@ function updateActions(dt) {
       if (!a.done && a.t >= 0.3) {
         a.done = true; const h = ball.holder;
         if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 1.45 && Math.random() < 0.22) {
-          const away = flat(h.pos.x - p.pos.x, h.pos.z - p.pos.z).normalize();
-          release(h.ballNode.getPosition().clone(), new pc.Vec3(-away.x * 2.5 + (Math.random() - .5) * 2, 1.2, -away.z * 2.5 + (Math.random() - .5) * 2), false);
-          ball.lastTouch = p.team; game.phase = 'loose'; toast(p.name + ' pokes it loose!'); sfx('block');
+          if (Math.random() < 0.5) { give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, toast(p.name + ' with the steal!', true); sfx('block'); }
+          else {
+            const to = flat(p.pos.x - h.pos.x, p.pos.z - h.pos.z).normalize();
+            release(h.ballNode.getPosition().clone(), new pc.Vec3(to.x * 2.2 + (Math.random() - .5), 0.8, to.z * 2.2 + (Math.random() - .5)), false);
+            ball.lastTouch = p.team; game.phase = 'loose'; toast(p.name + ' pokes it loose!'); sfx('block');
+            h.react = 0.5;
+          }
         }
       }
       if (a.t >= 0.8) p.action = null;
@@ -282,9 +290,14 @@ function handlerAI(p, dt) {
     p.think = 0.3 + Math.random() * 0.2;
     const inFront = flat(c.pos.x - p.pos.x, c.pos.z - p.pos.z).dot(toRim) > 0.2 && cd < 1.6;
     const facing = toRim.dot(fwd(p)) > 0.55;
-    if (dr < DUNK_DIST + 0.5 && dr > DUNK_DIST - 0.8 && facing && (laneClear(p.pos, A.rim, 1.0, 1 - p.team) || Math.random() < 0.12)) return startDunk(p);
-    const open = cd > 2.0, sc = game.shotClock;
-    if (frontcourt && dr < 8.6 && (sc < 2.2 || (open && dr > 2.6 && Math.random() < (dr > ARC ? 0.33 : 0.42)) || (p.stall > 1.6 && dr < 7 && Math.random() < 0.5))) return startShot(p);
+    const rimGuard = team(1 - p.team).some(q => d2(q.pos, A.rim) < 2.6);
+    if (dr < DUNK_DIST + 0.5 && dr > DUNK_DIST - 0.8 && facing) {
+      if (laneClear(p.pos, A.rim, 1.4, 1 - p.team) && !rimGuard) return startDunk(p);
+      // walled off at the rim: kick it out or pull up over the help
+      p.holdT = Math.max(p.holdT, 0.7); p.stall += 0.6;
+    }
+    const open = cd > 1.6, sc = game.shotClock;
+    if (frontcourt && dr < 8.4 && (sc < 2.5 || (open && dr > 2.4 && Math.random() < (dr > ARC ? 0.35 : 0.5)) || (cd > 1.1 && dr < 6 && p.holdT > 2.5 && Math.random() < 0.25) || (p.stall > 1.2 && dr < 7.5 && Math.random() < 0.55))) return startShot(p);
     if (p.holdT > 0.6) {
       let best = null, bestScore = 0;
       for (const m of mates) {
@@ -316,7 +329,7 @@ function handlerAI(p, dt) {
 function offballAI(p, dt) {
   const A = attackHoop(p.team), dir = Math.sign(A.rim.x), h = ball.holder;
   p.timer -= dt;
-  if (ball.pass && ball.pass.to === p) { p.vel.mulScalar(Math.pow(0.02, dt)); faceTo(p, ball.pos.x, ball.pos.z, 10, dt); setAnim(p, 'Ready', 0.12); return; }
+  if (ball.pass && ball.pass.to === p) { steer(p, p.catchAt || p.pos, 4.5, dt, 20); faceTo(p, ball.pos.x, ball.pos.z, 10, dt); animMove(p, dt, 'offball'); if (p.vel.length() < 1) setAnim(p, 'Ready', 0.12); return; }
   let goal;
   const hb = h ? bodyPos(h) : ball.pos, frontcourt = hb.x * dir > 0;
   if (!frontcourt) {
@@ -336,6 +349,16 @@ function offballAI(p, dt) {
 }
 
 // ====================================================================== defense (man-to-man)
+function isHelper(p) {
+  const h = ball.holder; if (!h) return false;
+  const D = defendHoop(p.team), hp = bodyPos(h), hd = d2(hp, D.rim); if (hd > 7.5) return false;
+  const od = man(h);   // on-ball defender
+  const beaten = d2(od.pos, D.rim) > hd - 0.3 || d2(od.pos, hp) > 2.2;
+  if (!beaten && hd > 4.5) return false;
+  const others = team(p.team).filter(q => q !== od);
+  others.sort((a, b) => d2(a.pos, D.rim) - d2(b.pos, D.rim));
+  return others[0] === p;
+}
 function defenseAI(p, dt) {
   const m = man(p), D = defendHoop(p.team), mp = bodyPos(m), bp = ball.holder ? bodyPos(ball.holder) : ball.pos;
   const toRim = flat(D.rim.x - mp.x, D.rim.z - mp.z), mr = toRim.length(); toRim.normalize();
@@ -346,6 +369,9 @@ function defenseAI(p, dt) {
     const gap = Math.max(0.95, Math.min(1.5, mr * 0.18));
     goal = mp.clone().add(toRim.mulScalar(gap));
     if (!p.action && !m.action && d2(p.pos, mp) < 1.35 && Math.random() < dt * 0.35) startSteal(p);
+  } else if (ball.holder && ball.holder.team !== p.team && isHelper(p)) {
+    const hp = bodyPos(ball.holder), hr = flat(hp.x - D.rim.x, hp.z - D.rim.z).normalize();
+    goal = flat(D.rim.x + hr.x * 1.7, D.rim.z + hr.z * 1.7);
   } else {
     const help = mr < 5 ? 0.25 : 0.4;
     goal = flat(mp.x * (1 - help) + (bp.x * 0.55 + D.rim.x * 0.45) * help, mp.z * (1 - help) + (bp.z * 0.55 + D.rim.z * 0.45) * help);
@@ -358,8 +384,8 @@ function defenseAI(p, dt) {
     const dB = ball.pos.distance(new pc.Vec3(p.pos.x, 1.2, p.pos.z));
     if (dB < 0.9 && ball.pos.y < 2.3) {
       ball.pass.tried.add(p.id);
-      if (Math.random() < 0.45) { give(p); setAnim(p, 'Dribble', 0.1); game.phase = 'live'; toast(p.name + ' picks it off!', true); sfx('block'); }
-      else { ball.vel.x *= 0.5; ball.vel.z *= 0.5; ball.vel.y = 1.5; ball.pass = null; ball.lastTouch = p.team; game.phase = 'loose'; toast('Deflected by ' + p.name); }
+      if (Math.random() < 0.45) { give(p); setAnim(p, 'Dribble', 0.1); game.phase = 'live'; stats.steal++, toast(p.name + ' picks it off!', true); sfx('block'); }
+      else { ball.vel.x *= 0.25; ball.vel.z *= 0.25; ball.vel.y = 1.2; ball.pass = null; ball.lastTouch = p.team; game.phase = 'loose'; toast('Deflected by ' + p.name); }
     }
   }
 }
@@ -376,7 +402,8 @@ function chase(p, dt) {
 }
 
 // ====================================================================== solid bodies (a set defender outweighs the dribbler)
-function bodies() {
+function bodies() { for (let it = 0; it < 3; it++) { bodies1(); for (const p of P) clamp(p.pos); } }
+function bodies1() {
   for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
     const a = P[i], b = P[j], pa = bodyPos(a), pb = bodyPos(b);
     const dx = pb.x - pa.x, dz = pb.z - pa.z, l = Math.hypot(dx, dz), min = BODY_R * 2;
@@ -441,12 +468,13 @@ app.on('update', dt => {
     }
     if (ball.pass) {
       ball.pass.t += dt; const r = ball.pass.to;
-      if (ball.free && ball.pos.distance(new pc.Vec3(r.pos.x, 1.2, r.pos.z)) < 0.85) { give(r); setAnim(r, 'Dribble', 0.12); }
+      if (ball.free && d2(ball.pos, r.pos) < 1.0 && ball.pos.y < 2.4) { give(r); setAnim(r, 'Dribble', 0.12); }
       else if (ball.pass.t > ball.pass.T + 0.5) { ball.pass = null; game.phase = 'loose'; }
     }
     if (game.phase === 'air' && ball.free && ball.pos.y < RIM_Y - 0.7 && !ball.crossed) { game.phase = 'loose'; game.shot = null; }
     if (ball.free && (Math.abs(ball.pos.x) > 14.7 || Math.abs(ball.pos.z) > 7.6)) {
       const spot = clamp(flat(ball.pos.x * 0.97, ball.pos.z * 0.93));
+      (window.__oob = window.__oob || []).push({ pass: !!ball.pass, phase: game.phase, pos: [ball.pos.x.toFixed(1), ball.pos.y.toFixed(1), ball.pos.z.toFixed(1)], vel: [ball.vel.x.toFixed(1), ball.vel.y.toFixed(1), ball.vel.z.toFixed(1)] });
       toast('Out of bounds'); inbound(1 - ball.lastTouch, spot);
     }
     if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); inbound(1 - game.offense, flat(0, 0)); }
