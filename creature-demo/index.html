@@ -177,6 +177,11 @@ details summary { cursor: pointer; font-weight: 600; }
         <input id="tailLen" type="range" min="0.4" max="2.5" step="0.05" value="1">
       </div>
       <div class="slider">
+        <label for="tailHeight">Tail height</label><output id="tailHeightOut"></output>
+        <input id="tailHeight" type="range" min="-0.3" max="0.5" step="0.02" value="0.32">
+        <small>Where the tail root sits on the rump; higher continues the spine line.</small>
+      </div>
+      <div class="slider">
         <label for="tailSegs">Tail segments</label><output id="tailSegsOut"></output>
         <input id="tailSegs" type="range" min="2" max="8" step="1" value="3">
         <small>Bones along the tail: more segments give a smoother, whippier wave. Rebuilds.</small>
@@ -349,7 +354,7 @@ const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -679,8 +684,13 @@ function assemble() {
   const tlb = { min: [-tail.max[0] * -tailSc[0], tail.min[1] * tailSc[1], tail.min[2] * tailSc[2]], max: [-tail.min[0] * -tailSc[0], tail.max[1] * tailSc[1], tail.max[2] * tailSc[2]] };
   const tailSegs = Math.round(settings.tailSegs);
   const tailL = tlb.max[0] - tlb.min[0];
-  const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * 0.2, 0];
-  const tailOff = [rump[0] - tlb.max[0] + tailL * (0.1 + ov * 0.3), rump[1] - tlb.max[1] + (tlb.max[1] - tlb.min[1]) * 0.2, -(tlb.min[2] + tlb.max[2]) / 2];
+  // socket high on the rump, continuing the spine line (Tail height moves it up or down)
+  const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * settings.tailHeight, 0];
+  // attach by the tail's real root: centroid of its body-side end (kit min-x end; mirrored to max-x here)
+  const rootC = (() => { const c = [0, 0, 0]; let n = 0, ext = tail.max[0] - tail.min[0];
+    for (const vr of tail.variants) for (let i = 0; i < vr.pos.length; i += 3) if (vr.pos[i] < tail.min[0] + ext * 0.12) { c[0] += vr.pos[i] * tailSc[0]; c[1] += vr.pos[i+1] * tailSc[1]; c[2] += vr.pos[i+2] * tailSc[2]; n++; }
+    return c.map(v => v / Math.max(n, 1)); })();
+  const tailOff = [rump[0] - rootC[0] + tailL * (0.1 + ov * 0.3), rump[1] - rootC[1], -rootC[2]];
   const tailBase = buf.pos.length / 3;
   addPart(buf, tail, { scale: tailSc, offset: tailOff, slot: 'tail', socket: rump });
   // tail chain follows the actual curl: joints at the centroids of distance bands from the rump
@@ -1691,6 +1701,7 @@ for (const part of ['upper', 'lower', 'foot']) {
   el.addEventListener('change', () => rebuild(`legs: ${part} girth ×${el.value}`));
 }
 bindSlider('tailLen', 'tailLen', v => `×${v.toFixed(2)}`, true);
+bindSlider('tailHeight', 'tailHeight', v => `${Math.round(v * 100)}% of body height`, true);
 bindSlider('tailSegs', 'tailSegs', v => `${v} bones`, true);
 bindSlider('crouch', 'crouch', v => v < 0.05 ? 'standing' : v > 0.9 ? 'squat' : `${Math.round(v * 100)}%`, false);
 bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
@@ -1722,7 +1733,7 @@ $('patSeg').addEventListener('click', e => { const b = e.target.closest('[data-p
 $('patColor').addEventListener('change', e => { settings.patColor = e.target.value; rebuild('skin colour ' + e.target.value); });
 
 // ---------- DNA: the whole creature as a portable code ----------
-const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs', 'girth'];
+const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs', 'girth', 'tailHeight'];
 function dnaEncode() {
   const d = { v: 1, pairs: genome.pairs, recipe, s: Object.fromEntries(DNA_KEYS.map(k => [k, settings[k]])) };
   return 'HOG1.' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
@@ -1730,7 +1741,7 @@ function dnaEncode() {
 function syncUi() {
   for (const end of ['front', 'hind']) for (const part of ['upper', 'lower', 'foot']) { const el = $(`seg-${end}-${part}`); el.value = settings.legs[end][part]; el.dispatchEvent(new Event('input')); }
   for (const part of ['upper', 'lower', 'foot']) { const el = $(`girth-${part}`); el.value = settings.girth[part]; el.dispatchEvent(new Event('input')); }
-  for (const id of ['tailLen', 'tailSegs', 'posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'patAmount', 'patScale', 'counter', 'terrain']) {
+  for (const id of ['tailHeight', 'tailLen', 'tailSegs', 'posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'patAmount', 'patScale', 'counter', 'terrain']) {
     const el = $(id); if (el) { el.value = settings[id]; el.dispatchEvent(new Event('input')); }
   }
   $('ref').value = settings.ref; $('refInfo').textContent = refInfoText(settings.ref);
@@ -1754,7 +1765,7 @@ $('presets').addEventListener('click', e => {
   const b = e.target.closest('[data-preset]'); if (!b) return;
   const p = PRESETS[b.dataset.preset];
   genome.pairs = p.pairs; for (const k in p.recipe) recipe[k] = p.recipe[k].slice();
-  Object.assign(settings, { patScale: 1, patAmount: 0.6, patColor: '#8a4f5a', elbow: true, lift: 0.7, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } } }, JSON.parse(JSON.stringify(p.s)));
+  Object.assign(settings, { patScale: 1, patAmount: 0.6, patColor: '#8a4f5a', elbow: true, lift: 0.7, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } } }, JSON.parse(JSON.stringify(p.s)));
   syncUi(); rebuild('preset: ' + b.textContent);
 });
 $('dnaCopy').onclick = async () => {
