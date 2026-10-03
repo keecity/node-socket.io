@@ -19937,7 +19937,7 @@ canEl.addEventListener('pointerdown', e => {
 function onRelease(e) {
   if (!human.down) return; human.down = false;
   if (defMode()) {           // defense: a short tap moves the closest defender (holding just chases)
-    const dd = myDefender(); if (dd && performance.now() - human.t0 < 300) { const g = groundAt(human.x, human.y); if (g) moveOrder(dd, g); } return;
+    const dd = myDefender(); if (dd && performance.now() - human.t0 < 250) { const g = groundAt(human.x, human.y); if (g) moveOrder(dd, g); } return;
   }
   if (!human.auto && !human.meter) meterEl.className = '';
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
@@ -19989,19 +19989,15 @@ function moveOrder(p, g) {
 }
 function humanAI(p, dt) {
   p.holdT += dt;
-  if (human.down && performance.now() - human.t0 > 300) {   // only a real hold sets up a shot; taps keep the player moving
-    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
+  if (human.down && performance.now() - human.t0 > 250) {   // a 0.25 s hold brings up the shot meter
+    if (!human.meter && performance.now() - human.t0 > 250) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
     // the more open the shooter, the wider the perfect (green) window
     const op = openness(p), dr = d2(p.pos, attackHoop(p.team).rim);
     const df = dr < 3 ? 1.3 : dr < 5 ? 1.1 : dr < ARC ? 0.9 : dr < 8 ? 0.75 : 0.6;   // closer shots get a wider window too
     setZone(Math.min(0.45, (op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27) * df));
     human.mspeed = op < 1.0 ? 1.15 : op < 1.6 ? 1.0 : op < 2.4 ? 0.88 : op < 3.5 ? 0.78 : 0.68;   // open shooters get a slower sweep
     $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
-    if (human.meter) { }
-    // holding = setting up a shot: plant right away and cancel any move order
-    p.moveTarget = null; p.sprint = false; p.sprintT = 0; p.vel.set(0, 0, 0);
-    const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 8, dt); animMove(p, dt, 'handler'); return;
-  }
+  }   // holding the meter does not stop the player: they keep travelling until the shot is released
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.4 * sprintMul(p, dt), dt, p.sprint ? 18 : 13);
     if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; p.sprintT = 0; }
