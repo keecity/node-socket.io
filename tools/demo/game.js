@@ -85,6 +85,7 @@ const ballRing = new pc.Entity('Ball ring'); ballRing.addComponent('render', { t
 ballRing.setLocalScale(1.7, 0.04, 1.7); app.root.addChild(ballRing); ballRing.enabled = false;
 const game = { phase: 'intro', timer: 0.8, offense: 0, shotClock: SHOT_CLOCK, shot: null, score: [0, 0], paused: false, lastScoreTeam: 0, time: 0 };
 function give(p) {
+  if (ball.free) sfx('catch', 0.8);
   ball.free = false; ball.holder = p; ball.pass = null; ball.ent.enabled = false; ball.lastTouch = p.team;
   for (const q of P) q.ballNode.enabled = (q === p);
   if (game.offense !== p.team) { game.offense = p.team; game.shotClock = SHOT_CLOCK; }
@@ -215,7 +216,7 @@ function passRelease(p, r) {
   r.catchAt = lead.clone();
   const tgt = new pc.Vec3(lead.x, 1.25, lead.z);
   release(p0, tgt.sub(p0).sub(new pc.Vec3(0, -0.5 * G * T * T, 0)).mulScalar(1 / T), false);
-  ball.pass = { from: p, to: r, t: 0, T, tried: new Set() }; ball.lastTouch = p.team; r.react = 0;
+  sfx('pass', 0.8); ball.pass = { from: p, to: r, t: 0, T, tried: new Set() }; ball.lastTouch = p.team; r.react = 0;
 }
 // ---- fouls and free throws
 const FT_DIST = 4.6;
@@ -595,7 +596,7 @@ function startAudio() {
   if (actx) { actx.resume(); return; }
   try { actx = new AudioContext(); } catch (e) { return; }
   master = actx.createGain(); master.gain.value = $('mute').classList.contains('on') ? 0 : 1; master.connect(actx.destination);
-  for (const k of ['bounce', 'net', 'cheer', 'crowd', 'boo', 'rim', 'whistle']) actx.decodeAudioData(bytes(ASSETS['snd_' + k]).buffer).then(buf => {
+  for (const k of ['bounce', 'net', 'cheer', 'crowd', 'boo', 'rim', 'whistle', 'catch', 'pass']) actx.decodeAudioData(bytes(ASSETS['snd_' + k]).buffer).then(buf => {
     SND[k] = buf;
     if (k === 'crowd') { crowdSrc = actx.createBufferSource(); crowdSrc.buffer = buf; crowdSrc.loop = true; const g = crowdGain = actx.createGain(); g.gain.value = 0.35; crowdSrc.connect(g); g.connect(master); crowdSrc.start(); }
   }).catch(() => {});
