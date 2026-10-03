@@ -119,6 +119,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   #abpanel .mini { height: 5px; background: rgba(255,255,255,.08); } #abpanel .mini i { display: block; height: 100%; }
   #abpanel .st { font-size: 11px; color: var(--dim); width: 64px; text-align: right; } #abpanel h6 { margin: 4px 0 0; font-size: 11px; letter-spacing: .12em; color: var(--dim); }
   #abpanel .abtn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; background: rgba(18,34,52,.9); border: 1px solid var(--line); color: var(--text); font: 600 13px 'Rajdhani', sans-serif; cursor: pointer; text-align: left; position: relative; overflow: hidden; }
+  #hgpanel .abtn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; background: rgba(18,34,52,.9); border: 1px solid var(--line); color: var(--text); font: 600 13px 'Rajdhani', sans-serif; cursor: pointer; text-align: left; position: relative; overflow: hidden; } #hgpanel .abtn span { flex: 1; } #hgpanel .abtn small { color: var(--gold); font-size: 11px; } #hgpanel .abtn .pg { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--cyan); } #hgpanel .abtn .ico { width: 18px; height: 18px; } #hgpanel .abtn.dis { opacity: .45; cursor: default; } #hgpanel .lv { display: inline-flex; gap: 2px; margin-left: 6px; } #hgpanel .lv b { width: 7px; height: 7px; border: 1px solid var(--cyan); } #hgpanel .lv b.f { background: var(--cyan); }
   #abpanel .abtn:hover { border-color: var(--cyan); } #abpanel .abtn.dis { opacity: .45; cursor: default; } #abpanel .abtn .ico { width: 18px; height: 18px; }
   #abpanel .abtn span { flex: 1; } #abpanel .abtn small { color: var(--gold); font-size: 11px; } #abpanel .abtn .pg { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--cyan); }
   #abpanel .lv { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; } #abpanel .lv b { width: 7px; height: 7px; border: 1px solid var(--cyan); } #abpanel .lv b.f { background: var(--cyan); }
@@ -204,8 +205,18 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <button class="cmd off" data-c="repair" title="Coming soon"><img class="ico" src="assets/ui/repair.png" alt="">REPAIR</button>
     <button class="cmd" data-c="deploy" title="Unload soldiers from the selected gunship"><img class="ico" src="assets/ui/deploy.png" alt="">DEPLOY</button>
   </div>
-  <div class="pn uihidden" id="builds"><button class="cmd" id="bOutpost" title="Radar outpost: extends territory near the border and detects enemies"><img class="ico" src="assets/ui/sight.png" alt="">OUTPOST<small id="opCost" style="font-size:9px;color:var(--gold)">600 CR</small></button><button class="cmd" id="bAirbase" title="Air base: lands, refuels and repairs 3 gunships; builds gunships and researches upgrades"><img class="ico" src="assets/ui/deploy.png" alt="">AIR BASE<small style="font-size:9px;color:var(--gold)">1500 CR</small></button><button class="cmd" id="bPump" title="Oil pump: generates oil while it stands"><img class="ico" src="assets/ui/power.png" alt="">OIL PUMP<small style="font-size:9px;color:var(--gold)">800 CR</small></button><button class="cmd" id="bCamp" title="Woodcutter camp: fells nearby trees for wood until none are left in reach"><img class="ico" src="assets/ui/repair.png" alt="">WOOD<small style="font-size:9px;color:var(--gold)">500 CR</small></button><button class="cmd" id="bMine" title="Mine: dug into a mountain side; ore rides the conveyor into the hopper and storage bins"><img class="ico" src="assets/ui/alloy.png" alt="">MINE<small style="font-size:9px;color:var(--gold)">1200 CR</small></button><button class="cmd" id="bFarm" title="Farm: one crop, grows over time and is harvested for food"><img class="ico" src="assets/ui/supply.png" alt="">FARM<small style="font-size:9px;color:var(--gold)">400 CR</small></button><button class="cmd" id="bWh" title="Warehouse: semi trucks deploy from here to collect lumber and ore"><img class="ico" src="assets/ui/deploy.png" alt="">DEPOT<small style="font-size:9px;color:var(--gold)">1000 CR</small></button><span id="buildHint" style="align-self:center;font-size:12px;color:var(--dim);margin-left:10px;max-width:240px"></span></div>
+  <div class="pn uihidden" id="builds"><button class="cmd" id="bOutpost" title="Radar outpost: extends territory near the border and detects enemies"><img class="ico" src="assets/ui/sight.png" alt="">OUTPOST<small id="opCost" style="font-size:9px;color:var(--gold)">600 CR</small></button><button class="cmd" id="bAirbase" title="Air base: lands, refuels and repairs 3 gunships; builds gunships and researches upgrades"><img class="ico" src="assets/ui/deploy.png" alt="">AIR BASE<small style="font-size:9px;color:var(--gold)">1500 CR</small></button><button class="cmd" id="bPump" title="Oil pump: generates oil while it stands"><img class="ico" src="assets/ui/power.png" alt="">OIL PUMP<small style="font-size:9px;color:var(--gold)">800 CR</small></button><button class="cmd" id="bCamp" title="Woodcutter camp: fells nearby trees for wood until none are left in reach"><img class="ico" src="assets/ui/repair.png" alt="">WOOD<small style="font-size:9px;color:var(--gold)">500 CR</small></button><button class="cmd" id="bMine" title="Mine: dug into a mountain side; ore rides the conveyor into the hopper and storage bins"><img class="ico" src="assets/ui/alloy.png" alt="">MINE<small style="font-size:9px;color:var(--gold)">1200 CR</small></button><button class="cmd" id="bFarm" title="Farm: one crop, grows over time and is harvested for food"><img class="ico" src="assets/ui/supply.png" alt="">FARM<small style="font-size:9px;color:var(--gold)">400 CR</small></button><button class="cmd" id="bWh" title="Warehouse: semi trucks deploy from here to collect lumber and ore"><img class="ico" src="assets/ui/deploy.png" alt="">DEPOT<small style="font-size:9px;color:var(--gold)">1000 CR</small></button><button class="cmd" id="bHangar" title="Mech hangar: builds, repairs and upgrades mechs one at a time; researches mech upgrades"><img class="ico" src="assets/ui/repair.png" alt="">HANGAR<small style="font-size:9px;color:var(--gold)">1800 CR</small></button><span id="buildHint" style="align-self:center;font-size:12px;color:var(--dim);margin-left:10px;max-width:240px"></span></div>
+  <div id="uSvc" class="uihidden" style="margin:0 12px 10px;padding:7px 9px;background:rgba(255,255,255,.04);border:1px solid var(--line2)">
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);letter-spacing:.08em"><span style="flex:1">MECH UPGRADES</span><span id="uLvl"></span></div>
+    <div id="uSvcSt" style="font-size:12px;margin:4px 0 6px;color:var(--cyan)"></div>
+    <div style="display:flex;gap:6px"><button id="uRepair" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:5px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:700 13px Rajdhani,sans-serif;cursor:pointer"><img class="ico" src="assets/ui/repair.png" alt="" style="width:16px;height:16px">REPAIR</button>
+    <button id="uUpgrade" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:5px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:700 13px Rajdhani,sans-serif;cursor:pointer"><img class="ico" src="assets/ui/power.png" alt="" style="width:16px;height:16px">UPGRADE</button></div></div>
 </div>
+<div id="hgpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:282px;font-size:13px"><div class="hd"><span>Mech hangar</span><img class="ico" id="hgClose" src="assets/ui/exit.png" alt="Close"></div>
+  <div class="bd" style="padding:6px 10px 8px;display:flex;flex-direction:column;gap:5px"><div class="barrow"><img class="ico" src="assets/ui/health.png" alt=""><div class="bar"><i id="hgHpBar" style="background:var(--green)"></i></div><span class="n" id="hgHp"></span></div>
+    <h6 style="margin:4px 0 0;font-size:11px;letter-spacing:.12em;color:var(--dim)">BAY</h6><div id="hgBay" style="font-size:12px"></div>
+    <div id="hgBuilds" style="display:flex;flex-direction:column;gap:4px"></div>
+    <h6 style="margin:4px 0 0;font-size:11px;letter-spacing:.12em;color:var(--dim)">RESEARCH</h6><div id="hgRes" style="display:flex;flex-direction:column;gap:4px"></div></div></div>
 <div id="abpanel" class="ui pn uihidden"><div class="hd"><span>Air base</span><img class="ico" id="abClose" src="assets/ui/exit.png" alt="Close"></div>
   <div class="bd"><div class="barrow"><img class="ico" src="assets/ui/health.png" alt=""><div class="bar"><i id="abHpBar" style="background:var(--green)"></i></div><span class="n" id="abHp"></span></div>
     <h6>LANDING PADS</h6><div id="abPads"></div>
@@ -1740,7 +1751,7 @@ addEventListener('mouseup', e => {
   for (const u of Battle.selectables()) { const p = toScreen(u, v3); if (!p) continue;
     if (click ? Math.hypot(p.x - x1, p.y - y1) < 24 : p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) picked.push(u); }
   if (click && picked.length > 1) picked.length = 1;
-  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); }
+  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); } }
   Battle.select(picked);
   drag = null; box.hidden = true;
 });
@@ -1800,6 +1811,8 @@ const BUILDS = {
     check: (x, z, r) => Battle.canPlacePump(0, x, z, r), build: (x, z, r) => Battle.buildPump(x, z, r), snap: (x, z) => Battle.oilSnap(x, z), tip: 'Place on an oil field inside your territory (fields show on the minimap). The pump lines up with the field; R flips it, right-click cancels.' },
   outpost: { btn: 'bOutpost', cost: () => Battle.OUTPOST_COST, ghost: () => Battle.outpostGhost(), err: () => Battle.outpostError, name: 'Outpost', ring: true,
     check: (x, z) => Battle.canPlaceOutpost(0, x, z), build: (x, z, r) => Battle.buildOutpost(x, z, r), tip: 'Place inside your territory, near the border to extend it. Wheel / Q / E / R rotate, right-click cancels.' },
+  hangar: { btn: 'bHangar', cost: () => Battle.HG_COST, ghost: () => Battle.hangarGhost(), err: () => Battle.hangarError, name: 'Mech hangar',
+    check: (x, z, r) => Battle.canPlaceHangar(0, x, z, r), build: (x, z, r) => Battle.buildHangar(x, z, r), tip: 'Place on flat ground inside your territory; the doors open onto the apron. Wheel / Q / E / R rotate, right-click cancels.' },
   airbase: { btn: 'bAirbase', cost: () => Battle.AB_COST, ghost: () => Battle.airbaseGhost(), err: () => Battle.airbaseError, name: 'Air base',
     check: (x, z, r) => Battle.canPlaceAirbase(0, x, z, r), build: (x, z, r) => Battle.buildAirbase(x, z, r), tip: 'Place fully inside your territory on flat, clear ground. Wheel / Q / E / R rotate, right-click cancels.' } };
 function startPlacing(kind) { const B = BUILDS[kind]; if (placing) { const was = placing.kind; stopPlacing(); if (was === kind) return; }
@@ -1814,6 +1827,7 @@ $('bCamp').addEventListener('click', () => startPlacing('camp'));
 $('bMine').addEventListener('click', () => startPlacing('mine'));
 $('bFarm').addEventListener('click', () => startPlacing('farm'));
 $('bWh').addEventListener('click', () => startPlacing('wh'));
+$('bHangar').addEventListener('click', () => startPlacing('hangar'));
 function hint(t) { $('buildHint').textContent = t; const tip = $('placeTip'); tip.textContent = t; tip.style.display = placing && t ? 'block' : 'none'; tip.style.color = placing && placing.ok ? '#8dffb0' : '#ff9b9b'; }   // the reason also shows beside the cursor
 function stopPlacing() { $('placeTip').style.display = 'none'; if (!placing) return; scene.remove(placing.g); scene.remove(placing.ring); $(placing.B.btn).classList.remove('on'); placing = null; hint(''); }
 el.addEventListener('mousemove', e => { if (!placing) return; const tip = $('placeTip'); tip.style.left = (e.clientX + 18) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; let t = pickGround(e.clientX, e.clientY); if (!t) return; if (placing.B.snap) { const sn = placing.B.snap(t.x, t.z); if (sn) { t = sn; placing.rot = sn.rot + (Math.cos(placing.rot - sn.rot) < 0 ? Math.PI : 0); } }
@@ -1847,12 +1861,33 @@ function gotoAlert() { if (!lastAlert) return; cam.x = lastAlert.x; cam.z = last
 addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && e.target === document.body) { e.preventDefault(); gotoAlert(); } });
 let lastAlert = null; $('alertbar').style.pointerEvents = 'auto'; $('alertbar').style.cursor = 'pointer'; $('alertbar').addEventListener('mousedown', e => e.stopPropagation()); $('alertbar').addEventListener('click', gotoAlert);
 function showAlert() {}
+// ---- mech hangar panel: bay, mech production, team research
+let hgSel = null; const LVL = n => `<span class="lv">${[0, 1, 2].map(i => `<b class="${i < n ? 'f' : ''}"></b>`).join('')}</span>`;
+function openHG(h) { if (!h.done) return feedMsg('Hangar under construction: ' + Math.ceil(Battle.siteLeft(h)) + ' s left'); hgSel = h; $('hgpanel').classList.remove('uihidden'); $('abpanel').classList.add('uihidden'); abSel = null; hgRender(true); }
+$('hgClose').addEventListener('click', () => { hgSel = null; $('hgpanel').classList.add('uihidden'); });
+function hgRender(full) { const h = hgSel; if (!h) return; if (!h.alive) { hgSel = null; $('hgpanel').classList.add('uihidden'); return; }
+  $('hgHpBar').style.width = (h.hp / h.maxHp * 100) + '%'; $('hgHp').textContent = Math.ceil(h.hp) + ' / ' + h.maxHp;
+  const J = h.job, bay = h.bay ? (J ? (J.upTime ? 'Upgrading ' : 'Repairing ') + (h.bay.role || 'mech') + ' — ' + Math.round(h.bay.hp / h.bay.maxHp * 100) + '% hull' : 'Rolling out') : h.building ? 'Building ' + h.buildQ[0] + ' — ' + Math.round(h.buildT / Battle.MECH_BUILD * 100) + '%' : 'Empty';
+  $('hgBay').innerHTML = bay + (h.queue.length ? `<br><span style="color:var(--dim)">${h.queue.length} mech${h.queue.length > 1 ? 's' : ''} waiting in line</span>` : '') + (h.buildQ.length > (h.building ? 1 : 0) ? `<br><span style="color:var(--dim)">Build queue: ${h.buildQ.length}</span>` : '');
+  const sig = [h.buildQ.join(), h.building, Battle.mechResearch[0] && Battle.mechResearch[0].key, JSON.stringify(Battle.MECH_UP[0])].join('|');
+  if (full || sig !== h.uiSig) { h.uiSig = sig;
+    $('hgBuilds').innerHTML = Object.keys(Battle.MECH_COST).map(r => `<button class="abtn" data-r="${r}"><img class="ico" src="assets/ui/supply.png" alt=""><span>Build ${r}</span><small>${Battle.MECH_COST[r]} CR</small><i class="pg"></i></button>`).join('');
+    $('hgBuilds').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const r = b.dataset.r; if (RES.credits < Battle.MECH_COST[r]) return feedMsg('Not enough credits'); const why = Battle.queueMech(hgSel, r); if (why) return feedMsg(why); RES.credits -= Battle.MECH_COST[r]; hgRender(); }));
+    $('hgRes').innerHTML = Object.entries(Battle.MECH_UPGRADES).map(([k, U]) => { const lv = Battle.MECH_UP[0][k], max = lv >= U.cost.length;
+      return `<button class="abtn${max ? ' dis' : ''}" data-k="${k}" title="${U.desc}"><img class="ico" src="assets/ui/power.png" alt=""><span>${U.name}${LVL(lv)}</span><small>${max ? 'MAX' : U.cost[lv] + ' CR'}</small><i class="pg"></i></button>`; }).join('');
+    $('hgRes').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const k = b.dataset.k, U = Battle.MECH_UPGRADES[k], lv = Battle.MECH_UP[0][k];
+      if (lv >= U.cost.length) return; if (RES.credits < U.cost[lv]) return feedMsg('Not enough credits'); const why = Battle.startMechResearch(0, k); if (why) return feedMsg(why); RES.credits -= U.cost[lv]; hgRender(); })); }
+  const bb = $('hgBuilds').querySelectorAll('.pg'); bb.forEach(p => { p.style.width = '0%'; }); if (h.building) { const i = Object.keys(Battle.MECH_COST).indexOf(h.buildQ[0]); if (bb[i]) bb[i].style.width = (h.buildT / Battle.MECH_BUILD * 100) + '%'; }
+  const r = Battle.mechResearch[0]; $('hgRes').querySelectorAll('button').forEach(b => { b.querySelector('.pg').style.width = r && r.key === b.dataset.k ? (r.t / r.total * 100) + '%' : '0%'; }); }
 // ---- air base panel: pads, gunship production, research
 let abSel = null;
 function openAB(b) { if (!b.done) return feedMsg('Air base under construction: ' + Math.ceil(Battle.siteLeft(b)) + ' s left'); abSel = b; $('abpanel').classList.remove('uihidden'); abRender(true); }
 $('abClose').addEventListener('click', () => { abSel = null; $('abpanel').classList.add('uihidden'); });
 $('abBuild').addEventListener('click', () => { if (!abSel) return; if (RES.credits < Battle.HELI_COST) return feedMsg('Not enough credits');
   const why = Battle.queueHeli(abSel); if (why) return feedMsg(why); RES.credits -= Battle.HELI_COST; abRender(); });
+const sendSvc = mode => { const R = sel.filter(u => u.kind === 'robot' && u.team === 0 && u.state !== 'ko'); if (!R.length) return; let msg = null;
+  for (const u of R) { if (mode === 'upgrade' && !Battle.needsUpgrade(u)) { msg = msg || 'Already fully upgraded'; continue; } const why = Battle.requestService(u, mode); if (why && why !== 'busy') msg = why; } if (msg) feedMsg(msg); };
+$('uRepair').addEventListener('click', () => sendSvc('repair')); $('uUpgrade').addEventListener('click', () => sendSvc('upgrade'));
 function feedMsg(msg) { const f = $('feed'); const d = document.createElement('div'); d.textContent = msg; f.append(d); setTimeout(() => d.remove(), 3000); }
 const pctBar = (v, col) => `<div class="mini"><i style="width:${Math.max(0, Math.min(100, v * 100)).toFixed(0)}%;background:${col}"></i></div>`;
 function abRender(full) { const b = abSel; if (!b) return; if (!b.alive) { abSel = null; $('abpanel').classList.add('uihidden'); return; }
@@ -1880,7 +1915,7 @@ $('bTerr').addEventListener('click', () => { terrToggle = !terrToggle; $('bTerr'
 function updateUI(dt) {
   TERR_SHOW.value += ((terrToggle || placing ? 1 : 0) - TERR_SHOW.value) * Math.min(1, dt * 8);
   if (!PAUSED) { missionT += dt; for (const k in RES) RES[k] += RATE[k] / 60 * dt; }
-  uiT -= dt; if (uiT > 0) return; uiT = 0.15; abRender();
+  uiT -= dt; if (uiT > 0) return; uiT = 0.15; abRender(); hgRender();
   $('mclock').textContent = fmtT(missionT);
   $('rPower').innerHTML = Math.floor(RES.power).toLocaleString() + `<i>+${RATE.power}/min</i>`;
   $('rCredits').innerHTML = Math.floor(RES.credits).toLocaleString() + `<i>+${RATE.credits}/min</i>`;
@@ -1914,6 +1949,11 @@ function updateUI(dt) {
   const isH = u.kind === 'heli', n = isH && u.cargo ? u.cargo.length : 0; $('uTroops').classList.toggle('uihidden', !isH);
   if (isH) { $('uTroopN').textContent = n + ' / 6'; $('uSeats').innerHTML = [...Array(6)].map((_, i) => `<i style="flex:1;height:7px;background:${i < n ? 'var(--cyan)' : 'rgba(255,255,255,.1)'}"></i>`).join('');
     const busy = u.tr && u.tr.phase === 'drop'; $('uDeploy').disabled = !n || busy; $('uDeploy').style.opacity = n && !busy ? 1 : 0.4; $('uDeploy').lastChild.textContent = busy ? 'DEPLOYING…' : 'DEPLOY TROOPS'; }
+  const isR = u.kind === 'robot'; $('uSvc').classList.toggle('uihidden', !isR || u.team !== 0);
+  if (isR) { const L = Battle.mechLvl(u); $('uLvl').innerHTML = 'W' + LVL(L.weapons) + ' A' + LVL(L.armor) + ' B' + LVL(L.boost);
+    const h = u.docked || (u.svc && u.svc.h), pos = h && !u.docked ? h.queue.indexOf(u) : -1;
+    $('uSvcSt').textContent = u.docked ? (u.docked.job ? (u.docked.job.upTime ? 'Upgrading in the hangar bay…' : 'Repairing in the hangar bay…') : 'Leaving the hangar') : u.svc ? (u.svc.mode === 'upgrade' ? 'Upgrade' : 'Repair') + (pos <= 0 ? ': heading into the hangar' : ': waiting in line, #' + (pos + 1)) : Battle.needsUpgrade(u) ? 'Upgrades available at a hangar' : '';
+    $('uUpgrade').style.opacity = Battle.needsUpgrade(u) ? 1 : 0.4; $('uRepair').style.opacity = u.hp < u.maxHp ? 1 : 0.4; }
   $('unitinfo').querySelectorAll('.wep img')[0].src = 'assets/ui/' + R.i1 + '.png'; $('unitinfo').querySelectorAll('.wep img')[1].src = 'assets/ui/' + R.i2 + '.png';
 }
 
