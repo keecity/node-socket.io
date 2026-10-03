@@ -112,6 +112,11 @@ details summary { cursor: pointer; font-weight: 600; }
         <small>0 = on all legs, 1 = standing upright. Front legs that can't reach the ground become arms.</small>
       </div>
       <div class="slider">
+        <label for="crouch">Crouch</label><output id="crouchOut"></output>
+        <input id="crouch" type="range" min="0" max="1" step="0.01" value="0">
+        <small>Lowers the hips over planted feet so knees and ankles bend; 1 = deep squat. Hold C to squat. Live.</small>
+      </div>
+      <div class="slider">
         <label for="front">Front legs</label><output id="frontOut"></output>
         <input id="front" type="range" min="0.5" max="1.6" step="0.01" value="1">
       </div>
@@ -233,7 +238,8 @@ const MANIFESTS = {
                 { on: 'hold', action: 'turn_left', key: 'A', label: 'Turn left (hold)', play: 'locomotion' },
                 { on: 'hold', action: 'turn_right', key: 'D', label: 'Turn right (hold)', play: 'locomotion' },
                 { on: 'input', action: 'gait', key: 'G', label: 'Switch gait (trot / wave)', play: 'locomotion' },
-                { on: 'input', action: 'jump', key: 'Space', label: 'Jump', play: 'jump' } ] },
+                { on: 'input', action: 'jump', key: 'Space', label: 'Jump', play: 'jump' },
+                { on: 'hold', action: 'squat', key: 'C', label: 'Squat (hold)', play: 'crouch' } ] },
   head: { socket: 'neck', bones: ['neck', 'head'], seam: true, stabilize: true,
     animations: { oink: { clip: 'nod', duration: 0.8 }, look: { clip: 'look', loop: true } },
     triggers: [ { on: 'input', action: 'oink', key: 'O', label: 'Oink (head nod)', play: 'oink' },
@@ -267,7 +273,7 @@ const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -1202,6 +1208,7 @@ function trigger(action) {
   if (action === 'gait') { setGait(settings.gait === 'trot' ? 'wave' : 'trot'); return; }
   if (action === 'jump') { if (!loco.jump && !loco.stomp) loco.jump = { t: 0 }; return; }
   if (action === 'stomp') { if (!loco.jump && !loco.stomp) loco.stomp = { t: 0 }; return; }
+  if (action === 'squat') { loco.squatUntil = time + 1.2; return; }
   if (action === 'turn_left' || action === 'turn_right') { loco.burst = { dir: action === 'turn_left' ? 1 : -1, until: time + 0.9 }; return; }
   for (const [cat, m] of Object.entries(MANIFESTS)) for (const tr of m.triggers) {
     if (tr.on !== 'input' || tr.action !== action) continue;
@@ -1227,7 +1234,11 @@ function animate(dt) {
   const hips = asm.bones.filter(b => b.leg);
   const frontX = Math.max(...hips.map(b => b.pos[0])), rearX = Math.min(...hips.map(b => b.pos[0]));
   const pelvisX = asm.bones[0].pos[0];
-  const hF = asm.hipY * settings.front, hR = hipY;
+  // crouch / squat: lower the hips toward the planted feet; the IK folds knees and ankles to match
+  const crouchTarget = Math.max(settings.crouch, loco.held.has('squat') || (loco.squatUntil > time) ? 0.85 : 0);
+  loco.crouch = (loco.crouch || 0) + (crouchTarget - (loco.crouch || 0)) * Math.min(1, dt * 5);
+  const sink = 1 - loco.crouch * 0.45;
+  const hF = asm.hipY * settings.front * sink, hR = hipY * sink;
   const legPitch = pairs > 1 ? Math.asin(clamp((hF - hR) / Math.max(frontX - rearX, 1e-3), -0.8, 0.8)) : 0;
   const upright = 1.33;   // ~76° when fully standing
   const bodyPitch = legPitch + settings.posture * (upright - legPitch);
@@ -1471,6 +1482,7 @@ const bindSlider = (id, key, fmt, rebind) => {
   if (rebind) el.addEventListener('change', () => rebuild(`rebind: ${key} = ${el.value}`));
 };
 bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
+bindSlider('crouch', 'crouch', v => v < 0.05 ? 'standing' : v > 0.9 ? 'squat' : `${Math.round(v * 100)}%`, false);
 bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
 bindSlider('hind', 'hind', v => `×${v.toFixed(2)}`, false);
 bindSlider('fat', 'fat', v => v < 0.1 ? 'lean' : v > 0.8 ? 'heavy' : `${Math.round(v * 100)}%`, true);
