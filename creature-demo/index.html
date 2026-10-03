@@ -1073,6 +1073,9 @@ function initLegs() {
     l.a1 = Math.atan2(v1.y, v1.x); l.a2 = Math.atan2(v2.y, v2.x);
     l.bend = Math.sign(v1.x * v2.y - v1.y * v2.x) || 1;
     l.ankleZ = v1.z + v2.z;
+    // how extended this leg already is at rest; reach is judged relative to it
+    l.restRatio = Math.hypot(l.ankleRoot[0] - l.hipRoot[0], l.ankleRoot[1] - l.hipRoot[1], l.ankleRoot[2] - l.hipRoot[2]) / (l.l1 + l.l2);
+    l.isArm = false;
     return l;
   });
 }
@@ -1115,9 +1118,14 @@ function solveLeg(l, footWorld, footPitch, toeCurl) {
   l.hip.setLocalRotation(qA.mul(qB));
   l.knee.setLocalRotation(qC.setFromAxisAngle(AZ, kneeRot * R2D));
   // foot stays level with the ground (plus the step's pitch), whatever the leg above does
-  qA.setFromAxisAngle(AY, loco.yaw * R2D); qB.setFromAxisAngle(AZ, footPitch);
+  // ankle pitch and toe curl ease toward their targets (damped), so mode switches and swing
+  // start/end never snap the foot
+  const k = 1 - Math.exp(-frameDt * 14);
+  l.pitchS = l.pitchS === undefined ? footPitch : l.pitchS + (footPitch - l.pitchS) * k;
+  l.curlS = l.curlS === undefined ? toeCurl : l.curlS + (toeCurl - l.curlS) * k;
+  qA.setFromAxisAngle(AY, loco.yaw * R2D); qB.setFromAxisAngle(AZ, l.pitchS);
   l.ankle.setRotation(qA.mul(qB));
-  l.toe.setLocalRotation(qC.setFromAxisAngle(AZ, toeCurl));
+  l.toe.setLocalRotation(qC.setFromAxisAngle(AZ, l.curlS));
 }
 
 // ---------- Motion references: gait profiles sampled from real animal clips ----------
@@ -1136,7 +1144,8 @@ function refFoot(l, R, home, fx, fz, pairs, wr) {
   const smp = k => refSample(W.legs[key][k], u) * (1 - wr) + refSample(Rn.legs[key][k], u) * wr;
   const dx = smp('dx'), dy = smp('dy') * settings.lift, len = (l.l1 + l.l2) * l.L;
   refTmp.set(home.x + fx * dx * len, home.y + dy * len, home.z + fz * dx * len);
-  return { p: refTmp, pitch: -clamp(dy * 110, 0, 35), curl: clamp(dy * 140, 0, 30) };
+  const lift = pc.math.smoothstep(0, 0.18, dy);           // smooth 0..1 as the foot leaves the ground
+  return { p: refTmp, pitch: -32 * lift, curl: 26 * lift };
 }
 function refInfoText(name) {
   if (name === 'procedural') return 'Foot paths, timing and body motion come from the built-in gait.';
@@ -1163,8 +1172,10 @@ function trigger(action) {
 }
 const activeShot = pred => creature.oneShots.find(o => pred(o) && time - o.start < o.dur);
 
+let frameDt = 1 / 60;
 function animate(dt) {
   if (!creature) return;
+  frameDt = dt;
   time += dt;
   const { bones, asm, legs } = creature;
   creature.oneShots = creature.oneShots.filter(o => time - o.start < o.dur);
@@ -1270,11 +1281,15 @@ function animate(dt) {
     homeOf(l, home);
     if (l.needsPlant) { l.plant.copy(home); l.needsPlant = false; }
     const reach = (l.l1 + l.l2) * l.L;
-    const need = l.hip.getPosition().distance(home) / reach;   // can this hip reach its foothold at all?
-    l.arm += (pc.math.smoothstep(0.93, 1.08, need) - l.arm) * Math.min(1, dt * 4);
-    if (settings.posture > 0.55 && l.pair === 0 && pairs > 1) l.arm += (1 - l.arm) * Math.min(1, dt * 4);
+    // can this hip still reach its foothold? (relative to how extended the leg is at rest)
+    const need = l.hip.getPosition().distance(home) / (reach * Math.max(l.restRatio, 0.5));
+    let want = l.pair === pairs - 1 && pairs > 1 ? 0 : pc.math.smoothstep(1.05, 1.2, need);   // hind legs carry the stance
+    if (settings.posture > 0.55 && l.pair === 0 && pairs > 1) want = 1;
+    l.arm += (want - l.arm) * Math.min(1, dt * 4);
+    // hysteresis: switch modes only well past the midpoint, so a leg can't flicker between them
+    if (!l.isArm && l.arm > 0.65) l.isArm = true; else if (l.isArm && l.arm < 0.35) l.isArm = false;
   }
-  const groundLegs = legs.filter(l => l.arm < 0.5);
+  const groundLegs = legs.filter(l => !l.isArm);
   const settling = groundLegs.some(l => l.inSwing && !l.skip) || groundLegs.some(l => l.plant.distance(homeOf(l, home)) > 0.012 * l.L);
   if (settling && f < 1.3) f = 1.3;
   if (!loco.jump && !loco.stomp) loco.cycle += f * dt;
@@ -1284,8 +1299,8 @@ function animate(dt) {
   for (const l of legs) {
     homeOf(l, home);
     let pitch = 0, curl = 0;
-    if (l.arm > 0.5) { l.plant.copy(home); l.inSwing = false; }
-    if (l.arm > 0.5 && !loco.jump) {
+    if (l.isArm) { l.plant.copy(home); l.inSwing = false; }
+    if (l.isArm && !loco.jump) {
       // held in front of the chest, swinging a little against the stride
       const reach = (l.l1 + l.l2) * l.L, hp = l.hip.restPos;
       armPose.set(hp.x + 0.32 * reach + 0.05 * reach * Math.sin(cyc + (l.side > 0 ? 0 : Math.PI)) * Math.min(amt, 1), hp.y - 0.5 * reach, hp.z * 1.15);
@@ -1318,7 +1333,7 @@ function animate(dt) {
         curl = 28 * Math.sin(Math.PI * Math.min(1, s * 1.5));
       } else l.foot.copy(l.plant);
     }
-    if (Rf && loco.refW > 0 && l.arm < 0.5 && !loco.jump && !(loco.stomp && l.pair === 0)) {
+    if (Rf && loco.refW > 0 && !l.isArm && !loco.jump && !(loco.stomp && l.pair === 0)) {
       const rf = refFoot(l, Rf, home, fwdX, fwdZ, pairs, wr), m = loco.refW;
       l.foot.lerp(l.foot, rf.p, m); pitch = pitch * (1 - m) + rf.pitch * m; curl = curl * (1 - m) + rf.curl * m;
     }
