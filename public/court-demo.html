@@ -28,7 +28,7 @@ canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;widt
 </style></head><body><canvas id="scene"></canvas>
 <div id="board"><div class="team t0"><span>PURPLE</span><b id="s0">0</b><i class="dot" id="poss0"></i></div><div id="mid"><small>SHOT</small><div id="clock"></div><small>TO 21</small></div><div class="team t1"><span>TEAL</span><b id="s1">0</b><i class="dot" id="poss1"></i></div></div>
 <div id="tags"></div><div id="toast"></div><div id="banner"></div><div id="loading">Warming up… <small style="display:block;font-size:12px;color:#7f9cab;margin-top:8px">If this text never changes, this viewer is not running the page's scripts. Open the file in a browser.</small></div><div id="status"></div>
-<div id="meter"><div class="zone"></div><div class="perfect"></div><div id="mark"></div><span id="mlabel">RELEASE IN THE CENTRE</span></div><div id="ring"></div><div id="stamina"><div id="stam"></div><span>STAMINA</span></div><div id="hint">You are <b>Purple</b> · tap court to move · tap a teammate to pass · double-tap to sprint · hold to shoot · on defense get close and tap to steal</div>
+<div id="meter"><div class="zone"></div><div class="perfect"></div><div id="mark"></div><span id="mlabel">RELEASE IN THE CENTRE</span></div><div id="ring"></div><div id="stamina"><div id="stam"></div><span>STAMINA</span></div><div id="hint">You are <b>Purple</b> · tap court to move · tap a teammate to pass · keep tapping the spot to sprint · hold to shoot · on defense get close and tap to steal</div>
 <div id="controls"><button id="mode">Watch AI</button><button id="pause">Pause</button><button id="speed">1×</button><button id="cam">Broadcast cam</button><button id="restart">Restart</button><button id="mute">Mute</button></div>
 <script>window.addEventListener("error",e=>{const l=document.getElementById("loading");if(l&&!l.hidden)l.textContent="Error: "+e.message;});</script><script>document.getElementById("loading").textContent="Loading engine\u2026";</script><script>/**
  * @license
@@ -19960,21 +19960,23 @@ function humanDefAI(p, dt) {
   if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.6 * sprintMul(p, dt), dt, p.sprint ? 18 : 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);
-    if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; }
+    if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; p.sprintT = 0; }
   } else defenseAI(p, dt);            // no order: stay on your man
   p.label.classList.toggle('near', near);
 }
 // sprint: tapping the same spot again (within 1.5 s) sprints there, burning stamina; empty bar = normal run
 function sprintMul(p, dt) {
-  if (!p.sprint) return 1;
-  if (human.stamina <= 0) { p.sprint = false; return 1; }
+  // sprint while banked sprint time and stamina last
+  if (!(p.sprintT > 0) || human.stamina <= 0) { p.sprint = false; return 1; }
+  p.sprint = true; p.sprintT -= dt;
   human.stamina = Math.max(0, human.stamina - dt * 0.35); human.drain = 0.25; return 1.45;
 }
 function moveOrder(p, g) {
-  const now = performance.now(), L = human.lastTap;
-  const again = L && now - L.t < 1500 && Math.hypot(human.x - L.x, human.y - L.y) < 70;
-  p.moveTarget = clamp(g); p.sprint = again && human.stamina > 0.05; ring(g, p.sprint);
-  human.lastTap = { t: now, x: human.x, y: human.y };
+  // first tap: run there. Every extra tap in the same area while still on the way banks +0.5 s of sprint (max 3 s)
+  const sameArea = p.moveTarget && d2(p.moveTarget, g) < 1.6;
+  if (sameArea) p.sprintT = Math.min(3, (p.sprintT > 0 ? p.sprintT : 0) + 0.5);
+  else p.sprintT = 0;
+  p.moveTarget = clamp(g); ring(g, p.sprintT > 0 && human.stamina > 0.05);
 }
 function humanAI(p, dt) {
   p.holdT += dt;
@@ -19986,12 +19988,12 @@ function humanAI(p, dt) {
     $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
     if (human.meter) { }
     // holding = setting up a shot: plant right away and cancel any move order
-    p.moveTarget = null; p.sprint = false; p.vel.set(0, 0, 0);
+    p.moveTarget = null; p.sprint = false; p.sprintT = 0; p.vel.set(0, 0, 0);
     const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 8, dt); animMove(p, dt, 'handler'); return;
   }
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.4 * sprintMul(p, dt), dt, p.sprint ? 18 : 13);
-    if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; }
+    if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; p.sprintT = 0; }
   } else p.vel.mulScalar(Math.pow(0.02, dt));
   animMove(p, dt, 'handler');
   if (!p.moveTarget && p.vel.length() < 0.5) { const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 5, dt); }
