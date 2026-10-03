@@ -97,6 +97,16 @@ details summary { cursor: pointer; font-weight: 600; }
     <section>
       <h2>Body plan</h2>
       <div class="slider">
+        <label for="fat">Weight</label><output id="fatOut"></output>
+        <input id="fat" type="range" min="0" max="1" step="0.05" value="0.3">
+        <small>Lean to fat: inflates the torso most (with belly sag), limbs less. Heavier creatures step lower and bounce more. Rebuilds.</small>
+      </div>
+      <div class="slider">
+        <label for="size">Size</label><output id="sizeOut"></output>
+        <input id="size" type="range" min="0.5" max="2" step="0.05" value="1">
+        <small>Scales the whole creature, legs and stride included. Rebuilds.</small>
+      </div>
+      <div class="slider">
         <label for="posture">Posture</label><output id="postureOut"></output>
         <input id="posture" type="range" min="0" max="1" step="0.01" value="0">
         <small>0 = on all legs, 1 = standing upright. Front legs that can't reach the ground become arms.</small>
@@ -257,7 +267,7 @@ const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -388,7 +398,7 @@ function updateCamera() {
 }
 
 // ---------- Assembly: place parts at sockets (rest pose) ----------
-const S = 1.6;          // kit → world scale
+let S = 1.6;            // kit → world scale (× the Size slider, set per build)
 let kit, creature = null;
 
 // Recipe blend: every variant of a slot is normalised into the same (weighted-average) bounding box,
@@ -572,7 +582,7 @@ function assemble() {
       legs.push(id);
     }
   }
-  return { buf, bones, legs, hipY };
+  return { buf, bones, legs, hipY, bodyCenterY: bodyCenter[1], bodyH };
 }
 
 // ---------- Bind: proximity skinning (the "projection" step) ----------
@@ -688,7 +698,8 @@ function fuseMesh(asm, h, k) {
   const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
   for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], P[i+a]); mx[a] = Math.max(mx[a], P[i+a]); }
   const zr = Math.max(-mn[2], mx[2]); mn[2] = -zr; mx[2] = zr;   // grid symmetric about the centreline
-  const pad = k + 4 * h;
+  const fatMax = settings.fat * 0.05 * settings.size * 1.6;   // deepest inflation (belly)
+  const pad = k + fatMax + 4 * h;
   const o = mn.map(v => v - pad);
   const nx = Math.ceil((mx[0] - mn[0] + 2 * pad) / h) + 1, ny = Math.ceil((mx[1] - mn[1] + 2 * pad) / h) + 1, nz = Math.ceil((mx[2] - mn[2] + 2 * pad) / h) + 1;
   const N = nx * ny * nz, at = (x, y, z) => x + nx * (y + ny * z);
@@ -700,7 +711,7 @@ function fuseMesh(asm, h, k) {
     if (!groups.has(sl)) groups.set(sl, new Map());
     const g = groups.get(sl); if (!g.has(key)) g.set(key, { w: wOf[I[t3]], list: [] }); g.get(key).list.push(t3);
   }
-  const margin = Math.ceil(k / h) + 3;
+  const margin = Math.ceil((k + fatMax) / h) + 3;
   const parts = new Map();
   const cp = new Float64Array(6);
   const dims = [nx, ny, nz];
@@ -773,6 +784,18 @@ function fuseMesh(asm, h, k) {
       }
     }
     lap('morph');
+    // weight: push the surface outward by an amount per part (soft tissue), with extra sag under the belly
+    const fat = settings.fat * 0.05 * settings.size;
+    if (fat > 0) {
+      const share = name === 'body' ? 1 : name === 'head' ? 0.45 : name === 'tail' ? 0.4 : /a$/.test(name) ? 0.6 : /b$/.test(name) ? 0.22 : 0.06;
+      const cy = asm.bodyCenterY, bh = asm.bodyH;
+      for (let y = 0; y < ly; y++) {
+        const wy = o[1] + (y + bmin[1]) * h;
+        const sag = name === 'body' ? 0.6 * clamp((cy - wy) / bh + 0.5, 0, 1) : 0;
+        const d = fat * (share + sag);
+        for (let z = 0; z < lz; z++) for (let x = 0; x < lx; x++) sdf[x + lx * (y + ly * z)] -= d;
+      }
+    }
     parts.set(name, { sdf, bmin, lx, ly, lz, variants: vars.size });
   }
 
@@ -989,6 +1012,7 @@ function projectOntoFused(fused, asm, src, r) {
 function build(reason) {
   const t0 = performance.now();
   const steps = [];
+  S = 1.6 * settings.size;
   const asm = assemble();
   steps.push(`attach  ${asm.legs.length} legs + head + tail + body (rest pose)`);
   const root = new pc.Entity('creature');
@@ -1010,7 +1034,7 @@ function build(reason) {
 
   let positions, normals, indices, bi, bw, colors, srcTris = asm.buf.idx.length / 3;
   if (settings.fuse) {
-    const fused = fuseMesh(asm, settings.voxel, settings.fuseR);
+    const fused = fuseMesh(asm, settings.voxel * settings.size, settings.fuseR * settings.size);
     const t4 = performance.now();
     const proj = projectOntoFused(fused, asm, src, settings.fuseR);
     const t5 = performance.now();
@@ -1157,7 +1181,7 @@ function refFoot(l, R, home, fx, fz, pairs, wr) {
   else if (l.pair < pairs - 1) shift = (1 - l.pair / (pairs - 1)) * (W.legs['F' + side].touchdown - W.legs['H' + side].touchdown);
   const u = loco.refPhase - shift;
   const smp = k => refSample(W.legs[key][k], u) * (1 - wr) + refSample(Rn.legs[key][k], u) * wr;
-  const dx = smp('dx'), dy = smp('dy') * settings.lift, len = (l.l1 + l.l2) * l.L;
+  const dx = smp('dx'), dy = smp('dy') * settings.lift * (1 - settings.fat * 0.35), len = (l.l1 + l.l2) * l.L;
   refTmp.set(home.x + fx * dx * len, home.y + dy * len, home.z + fz * dx * len);
   const lift = pc.math.smoothstep(0, 0.18, dy);           // smooth 0..1 as the foot leaves the ground
   return { p: refTmp, pitch: -32 * lift, curl: 26 * lift };
@@ -1275,7 +1299,7 @@ function animate(dt) {
 
   // --- spine: bob, roll, lateral bend into the stride and into turns, breathing
   const cyc = 2 * Math.PI * loco.cycle;
-  const bob = (settings.gait === 'trot' ? Math.cos(2 * cyc) : Math.cos(2 * pairs * cyc)) * 0.008 * L * Math.min(amt, 1) * procW - rb.bob;
+  const bob = (settings.gait === 'trot' ? Math.cos(2 * cyc) : Math.cos(2 * pairs * cyc)) * 0.008 * L * Math.min(amt, 1) * procW * (1 + settings.fat * 1.5) - rb.bob * (1 + settings.fat * 0.8);
   const breathe = Math.sin(time * 1.7);
   const pelvis = bones.pelvis;
   pelvis.setLocalPosition(pelvis.restPos.x, pelvis.restPos.y - bob - 0.004 * L * (1 - Math.min(amt, 1)) * (breathe * 0.5 + 0.5), pelvis.restPos.z);
@@ -1310,7 +1334,7 @@ function animate(dt) {
   if (!loco.jump && !loco.stomp) loco.cycle += f * dt;
 
   // --- legs
-  const liftH = 0.15 * hipY * clamp(0.6 + amt * 0.5, 0.6, 1.2);
+  const liftH = 0.15 * hipY * clamp(0.6 + amt * 0.5, 0.6, 1.2) * (1 - settings.fat * 0.35);   // heavier → lower steps
   for (const l of legs) {
     homeOf(l, home);
     let pitch = 0, curl = 0;
@@ -1449,6 +1473,8 @@ const bindSlider = (id, key, fmt, rebind) => {
 bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
 bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
 bindSlider('hind', 'hind', v => `×${v.toFixed(2)}`, false);
+bindSlider('fat', 'fat', v => v < 0.1 ? 'lean' : v > 0.8 ? 'heavy' : `${Math.round(v * 100)}%`, true);
+bindSlider('size', 'size', v => `×${v.toFixed(2)}`, true);
 bindSlider('shoulder', 'shoulder', v => `${Math.round(v * 100)}% of body height`, true);
 bindSlider('rearFwd', 'rearFwd', v => `${Math.round(v * 100)}% of body length`, true);
 bindSlider('rake', 'rake', v => `${v}°`, true);
