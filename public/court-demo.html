@@ -19493,7 +19493,7 @@ function scored(H) {
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
-  sfx('net'); setTimeout(() => sfx(t === HUMAN ? 'cheer' : 'boo', t === HUMAN ? 0.9 : 0.6), 150); game.phase = 'scored'; game.timer = 1.6; hud();
+  sfx('net'); setTimeout(() => t === HUMAN ? cheer() : sfx('boo', 0.6), 150); game.phase = 'scored'; game.timer = 1.6; hud();
   if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; }
 }
 
@@ -19886,7 +19886,7 @@ app.on('update', dt => {
 });
 
 // ====================================================================== sound
-let actx = null, master = null, crowdSrc = null; const SND = {}, lastPlay = {};
+let actx = null, master = null, crowdSrc = null, crowdGain = null; const SND = {}, lastPlay = {};
 function sfx(kind, vol = 1) {
   if (!actx) return;
   if (SND[kind]) {                                   // recorded samples
@@ -19904,8 +19904,14 @@ function startAudio() {
   master = actx.createGain(); master.gain.value = $('mute').classList.contains('on') ? 0 : 1; master.connect(actx.destination);
   for (const k of ['bounce', 'net', 'cheer', 'crowd', 'boo', 'rim']) actx.decodeAudioData(bytes(ASSETS['snd_' + k]).buffer).then(buf => {
     SND[k] = buf;
-    if (k === 'crowd') { crowdSrc = actx.createBufferSource(); crowdSrc.buffer = buf; crowdSrc.loop = true; const g = actx.createGain(); g.gain.value = 0.35; crowdSrc.connect(g); g.connect(master); crowdSrc.start(); }
+    if (k === 'crowd') { crowdSrc = actx.createBufferSource(); crowdSrc.buffer = buf; crowdSrc.loop = true; const g = crowdGain = actx.createGain(); g.gain.value = 0.35; crowdSrc.connect(g); g.connect(master); crowdSrc.start(); }
   }).catch(() => {});
+}
+// a made basket: layered cheer clips over a crowd swell that fades back down over ~4 s
+function cheer() {
+  if (!actx) return; sfx('cheer', 0.9);
+  [0.75, 1.5, 2.3].forEach((d, i) => setTimeout(() => { lastPlay.cheer = -9; sfx('cheer', 0.7 - i * 0.18); }, d * 1000));
+  if (crowdGain) { const t = actx.currentTime, gg = crowdGain.gain; gg.cancelScheduledValues(t); gg.setValueAtTime(gg.value, t); gg.linearRampToValueAtTime(1.0, t + 0.4); gg.setValueAtTime(1.0, t + 2.2); gg.linearRampToValueAtTime(0.35, t + 4.5); }
 }
 document.addEventListener('pointerdown', startAudio);
 // dribble bounce: the held ball's lowest point in the bounce
