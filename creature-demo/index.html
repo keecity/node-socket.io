@@ -742,7 +742,7 @@ function assemble() {
     // aim = average of the first stretch and the whole root→tip line, so any style trails backward as a whole
     const a1 = band(0.18, 0.32), a2 = band(0.85, 1.0);
     const u1 = Math.hypot(a1[0] - rootC[0], a1[1] - rootC[1]) || 1, u2 = Math.hypot(a2[0] - rootC[0], a2[1] - rootC[1]) || 1;
-    return [rootC[0] + (a1[0] - rootC[0]) / u1 + (a2[0] - rootC[0]) / u2, rootC[1] + (a1[1] - rootC[1]) / u1 + (a2[1] - rootC[1]) / u2]; })();
+    return [rootC[0] + (a1[0] - rootC[0]) / u1 + 2 * (a2[0] - rootC[0]) / u2, rootC[1] + (a1[1] - rootC[1]) / u1 + 2 * (a2[1] - rootC[1]) / u2]; })();   // root→tip line weighted 2:1
   const tailRot = (Math.PI - 0.12) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~7° up
   const sinkIn = tailL * (0.16 + ov * 0.3 + 0.95 * short);                                                  // root cap buried in the rump
   const tailOff = [rump[0] - rootC[0] + sinkIn, rump[1] - rootC[1], -rootC[2]];
