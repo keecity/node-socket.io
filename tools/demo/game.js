@@ -635,12 +635,11 @@ function moveOrder(p, g) {
 }
 function humanAI(p, dt) {
   p.holdT += dt;
-  if (human.down) {
+  if (human.down && performance.now() - human.t0 > 300) {   // only a real hold sets up a shot; taps keep the player moving
     if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; $('mlabel').textContent = 'RELEASE IN THE CENTRE'; }
     if (human.meter) { }
     // holding = setting up a shot: plant right away and cancel any move order
-    if (performance.now() - human.t0 > 120) { p.moveTarget = null; p.vel.set(0, 0, 0); }
-    else p.vel.mulScalar(Math.pow(0.001, dt));
+    p.moveTarget = null; p.sprint = false; p.vel.set(0, 0, 0);
     const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 8, dt); animMove(p, dt, 'handler'); return;
   }
   if (p.moveTarget) {
