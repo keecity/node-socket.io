@@ -60,9 +60,10 @@ function makePlayer(team, idx) {
   model.anim.loadStateGraph({ layers: [{ name: 'Base', weight: 1, states: [{ name: 'START' }, ...Object.entries(CLIPS).map(([n, loop]) => ({ name: n, speed: 1, loop: !!loop }))], transitions: [{ from: 'START', to: 'Ready' }] }], parameters: {} });
   for (const a of playerAsset.resource.animations) model.anim.assignAnimation(a.resource.name, a.resource, undefined, 1, !!CLIPS[a.resource.name]);
   const label = document.createElement('div'); label.className = 'tag t' + team; label.textContent = NAMES[team][idx]; $('tags').appendChild(label);
+  const sb = document.createElement('i'); sb.className = 'sbar'; const sf = document.createElement('b'); sb.appendChild(sf); if (team === 0) label.appendChild(sb);
   return { id: P.length, team, idx, name: NAMES[team][idx], ent, model, label, ballNode: model.findByName('basketball'), rootBone: model.findByName('root'), head: model.findByName('head'),
     k, runClip: ['Run', 'RunB', 'RunC', 'RunC', 'Run', 'RunB'][P.length], spd: [1.0, 0.94, 1.07, 1.04, 0.97, 1.0][P.length],
-    pos: new pc.Vec3(), vel: new pc.Vec3(), yaw: 0, state: 'Ready', action: null, think: Math.random() * .3, timer: 0, cut: 0, juke: 0, stall: 0, react: 0, holdT: 0 };
+    stamina: 1, drain: 0, pos: new pc.Vec3(), vel: new pc.Vec3(), yaw: 0, state: 'Ready', action: null, think: Math.random() * .3, timer: 0, cut: 0, juke: 0, stall: 0, react: 0, holdT: 0 };
 }
 for (let t = 0; t < 2; t++) for (let i = 0; i < 3; i++) P.push(makePlayer(t, i));
 const team = t => P.filter(p => p.team === t);
@@ -79,6 +80,9 @@ const bodyPos = p => (p.action && p.action.type === 'dunk') ? p.rootBone.getPosi
 // ====================================================================== ball
 const ball = { ent: P[0].ballNode.clone(), pos: new pc.Vec3(), vel: new pc.Vec3(), q: new pc.Quat(), spin: new pc.Vec3(), free: false, holder: null, pass: null, lastTouch: 0, crossed: false };
 app.root.addChild(ball.ent); ball.ent.setLocalScale(S, S, S); ball.ent.enabled = false;
+const ringMat = new pc.StandardMaterial(); ringMat.diffuse = new pc.Color(0, 0, 0); ringMat.emissive = new pc.Color(0.25, 1.6, 0.45); ringMat.opacity = 0.95; ringMat.blendType = pc.BLEND_NORMAL; ringMat.depthWrite = false; ringMat.update();
+const ballRing = new pc.Entity('Ball ring'); ballRing.addComponent('render', { type: 'torus', material: ringMat, castShadows: false, receiveShadows: false });
+ballRing.setLocalScale(1.7, 0.04, 1.7); app.root.addChild(ballRing); ballRing.enabled = false;
 const game = { phase: 'intro', timer: 0.8, offense: 0, shotClock: SHOT_CLOCK, shot: null, score: [0, 0], paused: false, lastScoreTeam: 0, time: 0 };
 function give(p) {
   ball.free = false; ball.holder = p; ball.pass = null; ball.ent.enabled = false; ball.lastTouch = p.team;
@@ -528,8 +532,12 @@ app.on('update', dt => {
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
   if (human.meter && !human.auto && !myBall() && !human.down && !(human.freeze > 0)) { human.meter = false; meterEl.className = ''; }
-  if (human.drain > 0) human.drain -= dt; else human.stamina = Math.min(1, human.stamina + dt * 0.15);
-  $('stam').style.width = (human.stamina * 100).toFixed(1) + '%'; $('stamina').classList.toggle('low', human.stamina < 0.25); $('stamina').hidden = !human.on;
+  for (const q of team(HUMAN)) {   // each player has their own stamina
+    if (q.drain > 0) q.drain -= dt; else q.stamina = Math.min(1, q.stamina + dt * 0.15);
+    const f = q.label.querySelector('.sbar b'); if (f) { f.style.width = (q.stamina * 100).toFixed(0) + '%'; f.parentNode.classList.toggle('low', q.stamina < 0.25); f.parentNode.hidden = !human.on; }
+  }
+  // green ring under the ball handler
+  const bh = ball.holder; ballRing.enabled = !!bh; if (bh) { const bp = bodyPos(bh); ballRing.setPosition(bp.x, 0.03, bp.z); }
   updateActions(dt);
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
   bodies();
@@ -566,7 +574,7 @@ function setZone(halfM) {   // halfM: perfect window half-width in marker units 
   pf.style.left = (50 - w / 2) + '%'; pf.style.width = w + '%';
   meterEl.style.setProperty('--g0', (50 - w / 2) + '%'); meterEl.style.setProperty('--g1', (50 + w / 2) + '%');
 }
-const meterPos = () => Math.sin(human.mt * Math.PI * 1.7 - Math.PI / 2);
+const meterPos = () => Math.sin(human.mt * Math.PI * 1.15 - Math.PI / 2);
 const human = { stamina: 1, lastTap: null, on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
 function groundAt(sx, sy) {
   const a = camera.camera.screenToWorld(sx, sy, camera.camera.nearClip), b = camera.camera.screenToWorld(sx, sy, camera.camera.farClip);
@@ -629,16 +637,16 @@ function humanDefAI(p, dt) {
 // sprint: tapping the same spot again (within 1.5 s) sprints there, burning stamina; empty bar = normal run
 function sprintMul(p, dt) {
   // sprint while banked sprint time and stamina last
-  if (!(p.sprintT > 0) || human.stamina <= 0) { p.sprint = false; return 1; }
+  if (!(p.sprintT > 0) || p.stamina <= 0) { p.sprint = false; return 1; }
   p.sprint = true; p.sprintT -= dt;
-  human.stamina = Math.max(0, human.stamina - dt * 0.35); human.drain = 0.25; return 1.45;
+  p.stamina = Math.max(0, p.stamina - dt * 0.35); p.drain = 0.25; return 1.45;
 }
 function moveOrder(p, g) {
   // first tap: run there. Every extra tap in the same area while still on the way banks +0.5 s of sprint (max 3 s)
   const sameArea = p.moveTarget && d2(p.moveTarget, g) < 1.6;
   if (sameArea) p.sprintT = Math.min(3, (p.sprintT > 0 ? p.sprintT : 0) + 0.5);
   else p.sprintT = 0;
-  p.moveTarget = clamp(g); ring(g, p.sprintT > 0 && human.stamina > 0.05);
+  p.moveTarget = clamp(g); ring(g, p.sprintT > 0 && p.stamina > 0.05);
 }
 function humanAI(p, dt) {
   p.holdT += dt;
