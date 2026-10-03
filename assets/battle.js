@@ -1314,7 +1314,7 @@ const woodRate = team => camps.filter(p => p.team === team && p.alive && p.done 
 // ------------------------------------------------------------------ mines
 // Dug into a mountain side: ore rides the conveyor out of the tunnel into the hopper; a full hopper tips into the three storage
 // bins; when all bins are full the pickup (the truck, later) empties them and the ore is banked.
-let mineProto = null, MINE_ERR = null; const mines = [], ORE = [600, 600], MN_COST = 1200, MN_HP = 1600, MN_SLOPE = 0.55, MN_ORE_PER_LOAD = 300, MN_K = 0.12;
+let mineProto = null, MINE_ERR = null; const mines = [], ORE = [600, 600], MN_COST = 1200, MN_HP = 1600, MN_SLOPE = 0.55, MN_ORE_PER_LOAD = 300, MN_K = 0.07;
 // model-space layout (units of the mine model): the yard that is levelled, and the tunnel that runs into the hill
 const MN_YARD = [-4.6, 13.4, -12.9, 5.5], MN_TUN = [-15.2, -3.9, -14.8, -3.6], MN_UP = Math.atan2(-0.9, -0.43);   // MN_UP: direction of the tunnel, into the hill
 const MN_EXT = MN_YARD.map(v => v * MN_K);
