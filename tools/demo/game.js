@@ -495,7 +495,7 @@ function updateCamera(dt) {
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
     const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
     pos = new pc.Vec3(side * -34 + drift, 19, 0); look = new pc.Vec3(side * 0.8 + drift, -1.5, 0); fov = 40;
-    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.7 / aspect, 12.6);
+    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 12.6);
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
@@ -585,11 +585,12 @@ function viewFrame(dt) {
   } else if (human.meter) { human.mt += dt * (human.mspeed || 1); markEl.style.left = (50 + 46 * meterPos()) + '%'; }
   if (defMode()) {   // defense: the steal meter shows while your closest defender is in range
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
-    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; human.stealT0 = performance.now(); meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'TAP TO STEAL'; }
+    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; human.stealT0 = performance.now(); meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'STEAL TIMING'; }
     else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
   if (human.meter && !human.auto && !myBall() && !human.down && !(human.freeze > 0)) { human.meter = false; meterEl.className = ''; }
+  if (!human.meter && !(human.freeze > 0)) $('mlabel').textContent = defMode() ? 'STEAL TIMING' : 'SHOT TIMING';
   for (const q of P) { const f = q.label.querySelector('.sbar b'); if (f) { f.style.width = (q.stamina * 100).toFixed(0) + '%'; f.parentNode.classList.toggle('low', q.stamina < 0.25); f.parentNode.hidden = !(human.on && q.team === HUMAN); } }
   const bh = ball.holder; ballRing.enabled = !!bh; if (bh) { const bp = bodyPos(bh); ballRing.setPosition(bp.x, 0.03, bp.z); }   // green ring under the ball handler
   if (!ball.free) dribbleSound();
@@ -639,6 +640,7 @@ function dribbleSound() {
 
 // ====================================================================== controls
 let speed = 1;
+$('menu-btn').onclick = () => { $('controls').hidden = !$('controls').hidden; };
 $('pause').onclick = () => { game.paused = !game.paused; $('pause').textContent = game.paused ? 'Play' : 'Pause'; app.timeScale = game.paused ? 0 : speed; };
 $('speed').onclick = () => { speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1; app.timeScale = game.paused ? 0 : speed; $('speed').textContent = speed + '×'; };
 const CAMS = ['arena', 'broadcast', 'follow'], CAMNAME = { arena: 'Arena cam', broadcast: 'Broadcast cam', follow: 'Follow cam' };
@@ -852,7 +854,7 @@ function onlineMode(on, team) {
   if (TUT) endTutorial(true); tutBtn.hidden = on;
   HUMAN = team; human.on = true; game.paused = false; app.timeScale = 1; speed = 1; $('speed').textContent = '1×'; $('pause').textContent = 'Pause';
   for (const id of ['mode', 'pause', 'speed', 'restart']) $(id).hidden = on;
-  $('hint').innerHTML = 'You are <b>' + (team ? 'Teal' : 'Purple') + '</b>' + (on ? ' · online vs a friend' : '') + ' · tap court to move · tap a teammate to pass · keep tapping the spot to sprint · hold to shoot · on defense get close and tap to steal';
+  $('hint').innerHTML = (on ? 'You are <b>' + (team ? 'Teal' : 'Purple') + '</b> &nbsp;•&nbsp; ' : '') + 'Tap to move &nbsp;•&nbsp; Tap teammate to pass &nbsp;•&nbsp; Hold to shoot';
   $('hint').hidden = false; human.meter = human.auto = false; meterEl.className = '';
 }
 async function leaveGame(msg) {
