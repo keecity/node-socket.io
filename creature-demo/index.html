@@ -625,8 +625,18 @@ function bind(asm, { plain = false } = {}) {
       // neighbours in the same chain (parent or child of an owning bone), at a lower bias
       bones.forEach((b, i) => {
         if (ownSet.has(i)) return;
-        const near = (b.parent && ownSet.has(byName[b.parent])) || owners.some(o => bones[o].parent === b.name);
-        if (near) cands.push({ i, w: 0.35 / Math.pow(segDist(p, b.pos, b.tip) + 0.01, k) });
+        const isChild = b.parent && ownSet.has(byName[b.parent]);
+        const parentOf = owners.find(o => bones[o].parent === b.name);
+        if (!isChild && parentOf === undefined) return;
+        // a neighbouring bone only pulls vertices on its own side of the joint (with a small blend band),
+        // so e.g. the shin can drag the ankle cuff but never the toes
+        const j = isChild ? b.pos : bones[parentOf].pos;                       // the shared joint
+        const dir = isChild ? b.tip : b.pos;                                   // a point inside the neighbour
+        const dx = dir[0] - j[0], dy = dir[1] - j[1], dz = dir[2] - j[2], dl = Math.hypot(dx, dy, dz) || 1;
+        const side = ((p[0] - j[0]) * dx + (p[1] - j[1]) * dy + (p[2] - j[2]) * dz) / dl;
+        const band = 0.012 * S;
+        const gate = pc.math.smoothstep(-band, band, side);
+        if (gate > 0) cands.push({ i, w: 0.35 * gate / Math.pow(segDist(p, b.pos, b.tip) + 0.01, k) });
       });
     }
     const bodyIdx = byName[bones[owners[0]].parent] ?? 0;   // the bone this part hangs from
