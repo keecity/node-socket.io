@@ -180,7 +180,7 @@ function digits(el, v, set) {   // numbers drawn with the sprite-sheet digits
 }
 function hud() {
   digits($('s0'), game.score[0], 'w'); digits($('s1'), game.score[1], 'w');
-  digits($('clock'), game.phase === 'live' || game.phase === 'air' || game.phase === 'loose' ? Math.max(0, Math.ceil(game.shotClock)) : '', 'g');
+  digits($('clock'), game.phase === 'live' || game.phase === 'air' || game.phase === 'loose' ? Math.max(0, Math.ceil(game.shotClock)) : game.phase === 'ftwait' && game.ft && game.timer <= 0 && ctl(game.ft.shooter.team) ? Math.max(0, Math.ceil(10 + game.timer)) : '', 'g');
   $('poss0').classList.toggle('on', game.offense === 0); $('poss1').classList.toggle('on', game.offense === 1);
 }
 function inbound(t, spot) {
@@ -206,7 +206,7 @@ function inboundPass(h, r) {   // throw it in; the clock and play start with the
   if (!r) { let bd = 1e9; for (const q of team(h.team)) { if (q === h) continue; const c = closestDefender(q), sc = d2(q.pos, h.pos) - (c ? Math.min(2, d2(c.pos, q.pos)) : 2) * 1.5; if (sc < bd) { bd = sc; r = q; } } }
   if (!r) return; r.lastPasser = null; game.phase = 'live'; game.inbounder = null; toast((h.team ? 'Teal' : 'Purple') + ' ball'); startPass(h, r);
 }
-function restart() { game.score = [0, 0]; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
+function restart() { game.score = [0, 0]; game.crowd = [1, 1]; game.distract = 0; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
 function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
@@ -241,7 +241,7 @@ function shotRelease(p) {
   let make = dr < 3 ? 0.7 : dr < 4.5 ? 0.62 : dr < ARC ? 0.58 - 0.03 * (dr - 4.5) : 0.45 - 0.06 * (dr - ARC);
   make = Math.max(0.18, make) * (cd < 1.0 ? 0.55 : cd < 1.6 ? 0.75 : cd < 2.4 ? 0.9 : 1);
   if (game.shotClock < 1) make *= 0.8;
-  if (game.shot.ft) make = 0.76;
+  if (game.shot.ft) make = 0.76 - 0.3 * Math.min(1, game.ftDistract || 0);   // a rattled shooter
   if (p.shotQ !== undefined) {   // player's timed release: 1 = dead centre, 0 = edge of the meter
     const q = p.shotQ; delete p.shotQ;
     make = q >= 1 ? 0.99 : make * (0.15 + 1.25 * q * q);
@@ -288,7 +288,31 @@ function callFoul(def, shooter, n = 2, kind = 'Reach-in foul') {
   for (const q of P) { q.action = null; delete q.pendingBlock; q.vel.set(0, 0, 0); }
   toast(kind + ' on ' + def.name + ' (' + (def.team ? 'Teal' : 'Purple') + ') — ' + (shooter.team ? 'Teal' : 'Purple') + (n === 1 ? ' shoots 1' : ' shoots ' + n), true); sfx('whistle', 0.9);
 }
-function ftShoot(q) { const s = game.ft.shooter; game.phase = 'ftair'; game.ftMade = false; game.ft.left--; game.timer = 3.2; if (q !== undefined) s.shotQ = q; startShot(s); }
+// ---- crowd distraction: the other side taps while a free throw is being lined up. Each tap shakes the
+// shooter's screen, speeds up their meter and makes the crowd boo; it burns a small crowd meter that never refills.
+// Stop tapping (or run the meter dry) and the shooter's meter settles back to normal.
+const CROWD_TAP = 0.1;
+function canDistract(t) { return game.phase === 'ftwait' && game.ft && game.ft.shooter.team !== t && game.timer <= 0 && (game.crowd || [1, 1])[t] > 0; }
+function distract(t) {
+  if (!canDistract(t)) return;
+  game.crowd[t] = Math.max(0, game.crowd[t] - CROWD_TAP); game.distract = Math.min(1.4, (game.distract || 0) + 0.45);
+  sfx('boo', 0.3); netEv('shake'); shake(game.ft.shooter.team);
+}
+function shake(shooterTeam) {   // only the shooter's screen shakes
+  if (!human.on || shooterTeam !== HUMAN) return;
+  const c = document.body; c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
+}
+function crowdFrame(dt) {      // host: decay the distraction, let the computer heckle a player at the line
+  if (!game.crowd) game.crowd = [1, 1];
+  game.distract = Math.max(0, (game.distract || 0) - dt * 1.6);
+  if (game.ft && game.crowd[1 - game.ft.shooter.team] <= 0) game.distract = 0;
+  if (game.phase === 'ftwait' && game.ft && game.timer <= 0) {
+    const ai = 1 - game.ft.shooter.team;
+    if (!ctl(ai) && ctl(game.ft.shooter.team) && game.crowd[ai] > 0.35 && Math.random() < dt * 2.2) distract(ai);
+    if (ctl(game.ft.shooter.team) && game.timer < -10) { toast('Too slow — 10 seconds!', true); ftShoot(0); }   // 10 s to shoot
+  }
+}
+function ftShoot(q) { game.ftDistract = game.distract || 0; const s = game.ft.shooter; game.phase = 'ftair'; game.ftMade = false; game.ft.left--; game.timer = 3.2; if (q !== undefined) s.shotQ = q; startShot(s); }
 function lineUpFT() {
   const f = game.ft, s = f.shooter, A = attackHoop(f.team), dir = Math.sign(A.rim.x);   // dir points from centre to that hoop
   s.pos.copy(flat(A.rim.x - dir * FT_DIST, 0));
@@ -586,7 +610,7 @@ app.on('update', dt => {
   if (game.phase === 'intro') { if (game.timer <= 0) { if (!tutSeen() && !NET.role) startTutorial(); else restart(); } }
   else if (game.phase === 'inbound') {
     const h = game.inbounder;
-    for (const p of P) if (!p.action) { p.vel.mulScalar(Math.pow(0.05, dt)); if (p === h) setAnim(p, 'Idle', 0.2); else animMove(p, dt, p.team === game.offense ? 'offball' : 'stance'); if (p !== h && p.team === game.offense) faceTo(p, h.pos.x, h.pos.z, 5, dt); }
+    for (const p of P) if (!p.action) { p.vel.mulScalar(Math.pow(0.05, dt)); setAnim(p, p === h ? 'Idle' : p.team === game.offense ? 'Ready' : 'Defend', 0.25); if (p !== h && p.team === game.offense) faceTo(p, h.pos.x, h.pos.z, 5, dt); }
     if (h && ball.holder === h && !h.action && (game.timer <= 0 && !ctl(h.team) || game.timer < -5)) inboundPass(h);
   }
   else if (game.phase === 'scored') {
@@ -594,9 +618,9 @@ app.on('update', dt => {
     if (game.timer <= 0 && !P.some(p => p.action && p.action.type === 'dunk')) { const a = game.andOne; game.andOne = null; if (a) callFoul(a.def, a.shooter, 1, 'And one! Foul'); else inbound(1 - game.lastScoreTeam); }
   } else if (game.phase === 'ftset') {
     for (const p of P) { p.vel.mulScalar(Math.pow(0.05, dt)); if (!p.action) animMove(p, dt, 'stance'); }
-    if (game.timer <= 0) { lineUpFT(); game.phase = 'ftwait'; game.timer = 1.2; toast('Free throw ' + (game.ft.n - game.ft.left + 1) + ' of ' + game.ft.n + (ctl(game.ft.shooter.team) ? ' — hold & release' : '')); }
+    if (game.timer <= 0) { lineUpFT(); game.phase = 'ftwait'; game.timer = 1.2; toast('Free throw ' + (game.ft.n - game.ft.left + 1) + ' of ' + game.ft.n + (ctl(game.ft.shooter.team) ? ' — hold & release' : '')); if (human.on && game.ft.shooter.team !== HUMAN && game.crowd && game.crowd[HUMAN] > 0) setTimeout(() => toastL('Tap to distract the shooter!', false), 1300); }
   } else if (game.phase === 'ftwait') {
-    if (game.timer <= 0 && !ctl(game.ft.shooter.team)) ftShoot();   // a player-controlled shooter takes it with the meter
+    if (game.timer <= -2.4 && !ctl(game.ft.shooter.team)) ftShoot();   // a player-controlled shooter takes it with the meter
   } else if (game.phase === 'ftair') {
     if (game.timer <= 0 || (game.ftMade && game.timer < 1.4) || (!game.ftMade && game.ft.left === 0 && ball.free && ball.pos.y < RIM_Y - 0.7 && ball.vel.y < 0 && game.timer < 2.4)) {
       const f = game.ft;
@@ -644,7 +668,7 @@ app.on('update', dt => {
     if (!p.action || p.action.type !== 'dunk') { clamp(p.pos); place(p); }
   }
   if (ball.free) stepBall(dt);
-  updateCamera(dt); fadeHoops(dt); hud(); netSend();
+  crowdFrame(dt); updateCamera(dt); fadeHoops(dt); hud(); netSend();
 });
 // HUD pieces every screen runs (host or guest): meters, stamina bars, ball ring, dribble sound
 function viewFrame(dt) {
@@ -652,7 +676,7 @@ function viewFrame(dt) {
   if (human.freeze > 0) {      // hold the marker where the player stopped it
     human.freeze -= dt;
     if (human.freeze <= 0) { human.mt = 0; if (human.after === 'hide') { human.meter = false; meterEl.className = ''; } human.after = null; }
-  } else if (human.meter) { human.mt += dt * (human.mspeed || 1); markEl.style.left = (50 + 46 * meterPos()) + '%'; }
+  } else if (human.meter) { human.mt += dt * (human.mspeed || 1) * (myFT() ? 1 + (game.distract || 0) : 1); markEl.style.left = (50 + 46 * meterPos()) + '%'; }
   if (defMode()) {   // defense: the steal meter shows while your closest defender is in range
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
     if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; human.stealT0 = performance.now(); meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'STEAL TIMING'; }
@@ -666,6 +690,8 @@ function viewFrame(dt) {
   const mine = !bh || bh.team === HUMAN || !human.on;   // green: your team has it, red: the other team does
   if (ringMat.mine !== mine) { ringMat.mine = mine; ringMat.emissive = mine ? new pc.Color(0.25, 1.6, 0.45) : new pc.Color(1.7, 0.18, 0.15); ringMat.update(); }
   if (!ball.free) dribbleSound();
+  const cs = human.on && game.ft && game.ft.shooter.team !== HUMAN && /^ft/.test(game.phase), cv = (game.crowd || [1, 1])[HUMAN];
+  $('crowd').className = cs ? 'show' + (cv <= 0 ? ' empty' : '') : ''; $('crowdfill').style.width = (cv * 100).toFixed(0) + '%';
 }
 
 // ====================================================================== sound
@@ -741,6 +767,7 @@ function myInbound() { return human.on && game.phase === 'inbound' && game.inbou
 function myFT() { return human.on && game.phase === 'ftwait' && game.timer <= 0 && game.ft && ball.holder === game.ft.shooter && ball.holder.team === HUMAN; }
 function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live' || myFT() || myInbound()); }
 canEl.addEventListener('pointerdown', e => {
+  if (human.on && canDistract(HUMAN)) { act({ t: 'distract', p: -1 }); return; }
   if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
   if (defMode()) {
     const d = closestDef();
@@ -850,6 +877,7 @@ function act(c) {               // a command from this screen's player
   } else apply(c, HUMAN);
 }
 function apply(c, t) {          // runs on the host only; t = the team the command came from
+  if (c.t === 'distract') return distract(t);
   const p = P[c.p]; if (!p || p.team !== t) return;
   if (game.phase === 'ftwait' && c.t === 'shoot' && game.ft && game.ft.shooter === p && game.timer <= 0) return ftShoot(Math.max(0, Math.min(1, +c.q || 0)));
   if (game.phase === 'inbound' && c.t === 'pass' && game.inbounder === p && game.timer <= 0) { const r = P[c.to]; if (r && r.team === t && r !== p) inboundPass(p, r); return; }
@@ -867,7 +895,7 @@ function netSend() {            // host: stream the state to the guest (presence
   const now = performance.now(); if (now - NET.sent < 40) return; NET.sent = now;
   const s = {
     ph: game.phase, sc: game.score, sk: Math.max(0, Math.ceil(game.shotClock)), of: game.offense,
-    bh: ball.holder ? ball.holder.id : -1, ft: game.ft ? game.ft.shooter.id : -1, ib: game.inbounder ? game.inbounder.id : -1, tm: r2(game.timer), b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
+    bh: ball.holder ? ball.holder.id : -1, ft: game.ft ? game.ft.shooter.id : -1, ib: game.inbounder ? game.inbounder.id : -1, cr: (game.crowd || [1, 1]).map(r2), dz: r2(game.distract || 0), tm: r2(game.timer), b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
     p: P.map(p => [r2(p.pos.x), r2(p.pos.z), r2(p.yaw), STATES.indexOf(p.state), r2(p.model.anim.speed), ACTS.indexOf(p.action ? p.action.type : ''), r2(p.stamina)])
   };
   NET.room.presence({ host: 1, s, ev: NET.ev }).catch(() => {});
@@ -879,13 +907,14 @@ function onHostState(pr) {      // guest: take in the host's latest state
     if (e[1] === 'toast') toast(String(e[2]).slice(0, 80), !!e[3]);
     else if (e[1] === 'sfx' && typeof e[2] === 'string') sfxL(e[2], +e[3] || 1);
     else if (e[1] === 'score') crowdReact(e[2]);
+    else if (e[1] === 'shake') shake(game.ft ? game.ft.shooter.team : -1);
     else if (e[1] === 'ban') { $('banner').textContent = String(e[2]).slice(0, 40); $('banner').className = e[3] === 'show t0' || e[3] === 'show t1' ? e[3] : ''; }
   }
 }
 function guestFrame(dt) {
   const s = NET.snap;
   if (s) {
-    game.phase = s.ph; game.score = s.sc; game.ft = s.ft >= 0 ? { shooter: P[s.ft] } : null; game.inbounder = s.ib >= 0 ? P[s.ib] : null; game.timer = s.tm; game.shotClock = s.sk; game.offense = s.of;
+    game.phase = s.ph; game.score = s.sc; game.ft = s.ft >= 0 ? { shooter: P[s.ft] } : null; game.inbounder = s.ib >= 0 ? P[s.ib] : null; game.crowd = s.cr || [1, 1]; game.distract = s.dz || 0; game.timer = s.tm; game.shotClock = s.sk; game.offense = s.of;
     const k = Math.min(1, dt * 14);
     P.forEach((p, i) => {
       const v = s.p[i]; if (!v) return;
