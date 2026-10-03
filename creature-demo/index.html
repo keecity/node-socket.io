@@ -109,7 +109,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <div class="mixhead" aria-hidden="true"><span></span><span>1</span><span>2</span><span>3</span><span>4</span></div>
       <div id="parts"></div>
       <div class="row" style="margin-top:6px">
-        <button class="btn" id="randomize">Random recipe</button>
+        <button class="btn" id="randomize">Random creature</button>
         <button class="btn" id="resetRecipe">Reset</button>
       </div>
       <small class="note">Sliders set each variant's share; shapes morph in the fused mesh. Composite mode shows the dominant variant.</small>
@@ -1748,12 +1748,32 @@ $('parts').addEventListener('change', e => {
   if (recipe[t.dataset.cat].every(w => w === 0)) { recipe[t.dataset.cat][+t.dataset.i] = 0.05; t.value = 0.05; syncMixLabels(t.dataset.cat); }
   rebuild(`recipe: ${t.dataset.cat} = [${recipe[t.dataset.cat].map(w => w.toFixed(2)).join(', ')}]`); showManifest();
 });
+// Random creature: every part blend plus body plan, legs, tail, skin and motion, within ranges that stay plausible
 $('randomize').onclick = () => {
+  const R = (lo, hi) => lo + Math.random() * (hi - lo), q = (v, step) => Math.round(v / step) * step, pick = arr => arr[Math.floor(Math.random() * arr.length)];
   for (const [k] of CATS) {
-    const n = k === 'tail' ? TAIL_NAMES.length : 4, a = Math.floor(Math.random() * n), b = Math.floor(Math.random() * n), t = Math.round(Math.random() * 20) / 20;
+    const n = k === 'tail' ? TAIL_NAMES.length : 4, a = Math.floor(Math.random() * n), b = Math.floor(Math.random() * n), t = q(Math.random(), 0.05);
     recipe[k] = new Array(n).fill(0); recipe[k][a] += 1 - t; recipe[k][b] += t;
   }
-  renderParts(); rebuild('recipe: random blend'); showManifest();
+  const r = Math.random();
+  genome.pairs = r < 0.12 ? 1 : r < 0.8 ? 2 : r < 0.93 ? 3 : 4;
+  const biped = genome.pairs === 1 || Math.random() < 0.15;
+  const seg = () => ({ upper: q(R(0.7, 1.4), 0.05), lower: q(R(0.6, 1.4), 0.05), foot: q(R(0.7, 1.3), 0.05) });
+  Object.assign(settings, {
+    posture: biped ? q(R(0.8, 1), 0.01) : (Math.random() < 0.2 ? q(R(0.1, 0.4), 0.01) : 0),
+    front: q(biped ? R(0.6, 0.9) : R(0.8, 1.3), 0.01), hind: q(R(0.8, 1.35), 0.01),
+    crouch: Math.random() < 0.3 ? q(R(0.1, 0.4), 0.01) : 0,
+    fat: q(R(0, 0.9), 0.05), size: q(R(0.8, 1.3), 0.05),
+    shoulder: q(R(0.1, 0.6), 0.05), rearFwd: q(R(0, 0.2), 0.01), rake: Math.round(R(-8, 8)),
+    legs: { front: seg(), hind: seg() },
+    girth: { upper: q(R(1, 1.5), 0.05), lower: q(R(0.6, 0.95), 0.05), foot: q(R(0.8, 1.2), 0.05) },
+    tailLen: q(R(0.5, 1.9), 0.05), tailSegs: Math.round(R(3, 7)), tailHeight: q(R(0.15, 0.45), 0.02),
+    pattern: pick(['none', 'spots', 'stripes', 'patches']), patAmount: q(R(0.35, 0.8), 0.05), patScale: q(R(0.6, 2), 0.05), counter: q(R(0.1, 0.6), 0.05),
+    patColor: '#' + [R(60, 150), R(30, 100), R(40, 110)].map(v => Math.round(v).toString(16).padStart(2, '0')).join(''),
+    ref: biped ? pick(['Chicken', 'Pinguin']) : pick(['procedural', 'Dog', 'Horse', 'Tiger', 'Deer', 'Kitty']),
+    gait: genome.pairs > 2 ? 'wave' : 'trot'
+  });
+  syncUi(); rebuild('random creature');
 };
 $('resetRecipe').onclick = () => { Object.assign(recipe, JSON.parse(JSON.stringify(RECIPE_DEFAULT))); renderParts(); rebuild('recipe: reset'); showManifest(); };
 function setPairs(n) { genome.pairs = pc.math.clamp(n, 1, 4); $('pairsOut').textContent = `${genome.pairs} pair${genome.pairs > 1 ? 's' : ''} · ${genome.pairs * 2} legs`; }
