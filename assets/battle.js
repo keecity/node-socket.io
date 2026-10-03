@@ -616,7 +616,7 @@ function checkIntegrity(p) {
 }
 // damage everything within radius of a point (pt in demo units, any wrapped copy)
 function impact(pt, radius, dir, power, kind = 'hit') {
-  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); soldierImpact(pt, radius, power, kind); hangarImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
+  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); soldierImpact(pt, radius, power, kind); hangarImpact(pt, radius, power, kind); tankImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
   const seen = new Set(); let any = false;
   for (let gx = pt.x - radius - GRID; gx <= pt.x + radius + GRID; gx += GRID) for (let gz = pt.z - radius - GRID; gz <= pt.z + radius + GRID; gz += GRID) for (const p of propsNear(gx, gz)) {
     if (seen.has(p) || !p.alive) continue; seen.add(p);
@@ -704,6 +704,7 @@ const farmAssets = loadGLB('assets/farm.b64.txt').then(prepareFarm, e => { conso
 const semiAssets = loadGLB('assets/semi.b64.txt').then(prepareSemi, e => { console.error('semi model', e); SEMI_ERR = String(e && e.message || e); });
 const soldierAssets = battleAssets.then(() => loadGLB('assets/soldiers.b64.txt')).then(g => prepareSoldiers(g, gltf && gltf.scene), e => console.error('soldier model', e));
 const hangarAssets = loadGLB('assets/hangar.b64.txt').then(prepareHangar, e => { console.error('hangar model', e); HANGAR_ERR = String(e && e.message || e); });
+const tankAssets = loadGLB('assets/tank.b64.txt').then(prepareTank, e => { console.error('tank model', e); TANK_ERR = String(e && e.message || e); });
 const scaffoldAssets = Promise.all([loadGLB('assets/scaffold_wall.b64.txt'), loadGLB('assets/scaffold_top.b64.txt')]).then(([w, t]) => { scWallProto = w.scene; scTopProto = t.scene; }, e => console.error('scaffold models', e));
 
 // ------------------------------------------------------------------ road meshes (built from the merged chains)
@@ -1713,7 +1714,7 @@ function poseSoldier(s, dt) { const B = s.bones, b = n => B[BI[n]], run = s.spee
   s.gun.position.set(-0.03 + 0.02 * aim, -0.07 + 0.06 * aim, 0.14 - rec * 0.03); s.gun.rotation.set(-0.12 * (1 - aim), 0, 0);
   setRot(b('root'), 0, 0, 0); }
 // ---- behaviour
-const soldierTargets = s => [...soldiers.filter(o => o.alive && !o.inHeli && o.team !== s.team), ...robots.filter(r => r.team !== s.team && r.state !== 'ko')];
+const soldierTargets = s => [...soldiers.filter(o => o.alive && !o.inHeli && o.team !== s.team), ...robots.filter(r => r.team !== s.team && r.state !== 'ko'), ...tanks.filter(t => t.team !== s.team && t.alive)];
 function soldierHit(s, amount, by) { if (!s.alive) return; s.hp -= amount; if (s.hp <= 0) { s.alive = false; s.sel = false; s.deadT = 0; s.state = 'dead'; if (by) log(s.team, `<b>${unitName(by)}</b> kills <b>${unitName(s)}</b>`); }
   else if (by && !s.target && (!s.order || s.order.type !== 'move')) s.target = by; return 'hit'; }
 function soldierImpact(pt, radius, power, kind) { for (const s of soldiers) { if (!s.alive || s.inHeli) continue; const d = wdist2(s.pos.x, s.pos.z, pt.x, pt.z); if (d > radius + 0.06 || pt.y > s.pos.y + SOLD_H * 1.2) continue;
@@ -2141,7 +2142,7 @@ const ATTACKS = {
   Melee_Punch_Combo: { hits: [[0.06, 0.16, 40, 'a jab', 'fistL'], [0.36, 0.48, 62, 'a cross', 'fistR']] },
   Melee_Boost_Kick: { hits: [[0.22, 0.36, 75, 'a boost kick', 'footR', 1]] },
 };
-function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'hangar' ? 'hangar' : f.kind === 'soldier' ? 'soldier' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
+function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'hangar' ? 'hangar' : f.kind === 'tank' ? 'tank' : f.kind === 'soldier' ? 'soldier' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
 function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'heli') return heliHit(def, amount, att, at);
   if (def.kind === 'airbase') return airbaseHit(def, amount);
@@ -2151,6 +2152,7 @@ function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'farm') return farmHit(def, amount);
   if (def.kind === 'warehouse') return warehouseHit(def, amount);
   if (def.kind === 'hangar') return hangarHit(def, amount);
+  if (def.kind === 'tank') return tankHit(def, amount, att);
   if (att && att.kind === 'robot' && att.lvl) amount *= 1 + 0.15 * (att.lvl.weapons || 0);   // researched weapons
   if (def.kind === 'soldier') return soldierHit(def, amount, att);
   if (def.state === 'ko') return;
@@ -2330,6 +2332,7 @@ function choose(opts) { const T = 0.32; const list = opts.filter(o => o.s > 0.01
 function nearestEnemy(f, range) {
   let best = null, bd = range;
   for (const r of robots) if (r.team !== f.team && r.state !== 'ko') { const d = wdist2(f.pos.x, f.pos.z, r.pos.x, r.pos.z); if (d < bd) { bd = d; best = r; } }
+  for (const r of tanks) if (r.team !== f.team && r.alive) { const d = wdist2(f.pos.x, f.pos.z, r.pos.x, r.pos.z) + 0.5; if (d < bd) { bd = d; best = r; } }
   if (!best) for (const h of helis) if (h.team !== f.team && h.alive) { const d = wdist2(f.pos.x, f.pos.z, h.pos.x, h.pos.z); if (d < Math.min(bd, 6)) { bd = d; best = h; } }
   return best;
 }
@@ -2635,7 +2638,7 @@ function think(f) {
   }
   const op = tgtFrame(f, o), d = Math.hypot(op.x - f.pos.x, op.z - f.pos.z) / RS, P = f.p, B = f.boost, cd = k => !(f.cool[k] > 0);
   const opts = []; const add = (name, s, fn) => opts.push({ name, s, fn });
-  if (o.kind === 'airbase' || o.kind === 'pumpjack' || o.kind === 'woodcutter' || o.kind === 'mine') {           // structure: close in and shoot it up
+  if (o.kind === 'airbase' || o.kind === 'pumpjack' || o.kind === 'woodcutter' || o.kind === 'mine' || o.kind === 'tank') {           // structure: close in and shoot it up
     add('fire', d < 4.5 && cd('fire') ? 2 : 0, () => { f.cool.fire = rand(1.2, 2.4); f.fireT = rand(1, 1.8); setState(f, 'fire', 'Head_Vulcan_Fire'); });
     if (f.gun && f.gun.energy >= 12) add('gunBurst', d < 5.5 && cd('gunBurst') ? 2.2 : 0, () => { f.cool.gunBurst = rand(0.9, 1.6); gunBurst(f); });
     if (f.gun && f.gun.energy >= 40) add('gunCharge', d < 6 && cd('gunCharge') ? 1.4 : 0, () => { f.cool.gunCharge = rand(4, 6.5); gunCharge(f); });
@@ -3022,6 +3025,7 @@ function heliTargetNear(h) {
   let best = null, bd = 9;
   for (const r of robots) if (r.team !== h.team && r.state !== 'ko') { const d = Math.min(wdist2(h.anchor.x, h.anchor.z, r.pos.x, r.pos.z), wdist2(h.pos.x, h.pos.z, r.pos.x, r.pos.z)); if (d < bd) { bd = d; best = r; } }
   for (const e of helis) if (e.team !== h.team && e.alive) { const d = wdist2(h.pos.x, h.pos.z, e.pos.x, e.pos.z); if (d < Math.min(bd, 5)) { bd = d; best = e; } }
+  for (const e of tanks) if (e.team !== h.team && e.alive) { const d = Math.min(wdist2(h.anchor.x, h.anchor.z, e.pos.x, e.pos.z), wdist2(h.pos.x, h.pos.z, e.pos.x, e.pos.z)) + 0.3; if (d < bd) { bd = d; best = e; } }
   if (!best) for (const b of [...airbases, ...pumpjacks, ...camps, ...mines]) if (b.alive && b.team !== h.team) { const d = Math.min(wdist2(h.anchor.x, h.anchor.z, b.x, b.z), wdist2(h.pos.x, h.pos.z, b.x, b.z)); if (d < 7 && d < bd + 7) { bd = d; best = b; } }
   return best;
 }
@@ -3101,10 +3105,106 @@ function spawnRobot(team, role, k) { const p = spawnPoint(team, k); const f = ma
 function checkVictory() {
   if (gameOver) return;
   for (const team of [0, 1]) {
-    const units = robots.filter(r => r.team === team && r.state !== 'ko').length + helis.filter(h => h.team === team && h.alive).length;
+    const units = robots.filter(r => r.team === team && r.state !== 'ko').length + tanks.filter(t => t.team === team && t.alive).length + helis.filter(h => h.team === team && h.alive).length;
     if (units === 0 && towns[team].hqDown) { gameOver = true; banner(team === 0 ? 'Defeat' : 'Victory', team === 0 ? 'Your forces and HQ are destroyed' : 'Enemy forces and HQ destroyed'); }
   }
 }
+// ------------------------------------------------------------------ tanks
+// The model has no rig: it is split into Hull, Turret (turns about Y), Gun (pivots about X for elevation) and 14 road wheels, so it is
+// animated part by part here — the hull follows the ground's pitch and roll, the turret tracks its target, the gun elevates and recoils,
+// and the wheels spin with the distance travelled (in opposite directions per side when turning on the spot). Built at a depot.
+let tankProto = null, TANK_ERR = null; const tanks = [], shells = [], TANK_K = 0.03, TANK_HP = 1400, TANK_RANGE = 4.5, TANK_RELOAD = 3.2, TANK_DMG = 170, TANK_SPEED = 0.42, TANK_TURN = 1.1, TANK_BUILD = 30;
+const TANK_MATS = [new Map(), new Map()], TANK_TINT = [[0.78, 0.86, 1.05], [0.82, 0.82, 0.8]];
+const shellGeo = new THREE.SphereGeometry(0.012, 6, 4), shellMat = new THREE.MeshBasicMaterial({ color: 0xffd27a, toneMapped: false });
+function prepareTank(g) { tankProto = g.scene; }
+function tankMat(team, m) { let c = TANK_MATS[team].get(m); if (!c) { c = m.clone(); if (/armor/.test(m.name)) c.color.multiply(new THREE.Color(...TANK_TINT[team])); TANK_MATS[team].set(m, c); } return c; }
+function makeTank(team, x, z, yaw = 0) { const model = tankProto.clone(true); model.scale.setScalar(TANK_K); const root = new THREE.Group(); root.add(model); battleRoot.add(root);
+  model.traverse(o => { if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.material = tankMat(team, o.material); });
+  const wheels = []; model.traverse(o => { if (/^Wheel_(Left|Right)_\d+$/.test(o.name)) wheels.push({ o, left: o.name.includes('Left') }); });
+  const t = { kind: 'tank', team, col: TEAM_COL[team], root, model, turret: model.getObjectByName('Turret'), gun: model.getObjectByName('Gun'), wheels,
+    pos: new THREE.Vector3(wm(x), 0, wm(z)), vel: new THREE.Vector3(), yaw, tur: 0, elev: 0, hp: TANK_HP, maxHp: TANK_HP, alive: true, sel: false, order: null, target: null, path: null,
+    v: 0, w: 0, reload: rand(0.5, 1.5), recoil: 0, deadT: 0, pitchG: 0, rollG: 0, repathT: 0, stuckT: 0 };
+  t.gun0 = t.gun.position.z; t.pos.y = Hd(t.pos.x, t.pos.z); makeBars(t, 0.17, 0.22); tanks.push(t); return t; }
+const tankFoes = t => [...robots.filter(r => r.team !== t.team && r.state !== 'ko'), ...tanks.filter(o => o.team !== t.team && o.alive), ...soldiers.filter(s => s.team !== t.team && s.alive && !s.inHeli)];
+function tankAcquire(t) { let best = null, bd = TANK_RANGE * 1.15; for (const e of tankFoes(t)) { const d = wdist2(t.pos.x, t.pos.z, e.pos.x, e.pos.z); if (d < bd) { bd = d; best = e; } }
+  if (!best) for (const L of [hangars, warehouses, airbases, pumpjacks, camps, mines, farms, outposts]) for (const b of L) if (b.alive && b.team !== t.team && b.pos) { const d = wdist2(t.pos.x, t.pos.z, b.x, b.z); if (d < bd) { bd = d; best = b; } }
+  return best; }
+function tankHit(t, amount, by) { if (!t.alive) return; if (by && by.kind === 'soldier') amount *= 0.25; t.hp -= amount;
+  if (by && !t.target && (!t.order || t.order.type !== 'move') && by.pos) t.target = by;
+  if (t.hp <= 0) { t.alive = false; t.sel = false; t.deadT = 0; const p = new THREE.Vector3(t.pos.x, t.pos.y + 0.06, t.pos.z); FX.explosion(p, 0.9); addShake(0.3, p); scorchMarks.add(t.pos.x, t.pos.z, 0, 0.35, 0.35); fires.push({ x: t.pos.x, z: t.pos.z, t: 25 });
+    t.model.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.22); } }); t.turret.rotation.z = rand(-0.25, 0.25); t.turret.position.y += 0.3;
+    if (t.bar) t.bar.g.visible = false; if (t.ring) t.ring.visible = false; log(t.team, `<b>${unitName(t)}</b> destroyed${by ? ' by <b>' + unitName(by) + '</b>' : ''}`); }
+  return 'hit'; }
+function tankImpact(pt, radius, power, kind) { for (const t of tanks) { if (!t.alive || kind === 'step' || kind === 'body') continue; const d = wdist2(t.pos.x, t.pos.z, pt.x, pt.z); if (d > radius + 0.11 || pt.y > t.pos.y + 0.12 + radius) continue;
+  tankHit(t, kind === 'bullet' ? 4 : kind === 'shell' ? 0 : 120 * power, null); } }
+function tankFire(t, e) { const a = t.yaw + t.tur, mz = (1.18 + 3.13) * TANK_K, m = new THREE.Vector3(wm(t.pos.x + Math.sin(a) * mz), t.pos.y + 2.33 * TANK_K, wm(t.pos.z + Math.cos(a) * mz));
+  const to = new THREE.Vector3(e.pos.x, (e.kind === 'robot' ? groundY(e) + 0.4 * RS : e.pos.y + (e.kind === 'soldier' ? SOLD_H * 0.5 : 0.08)), e.pos.z), miss = chance(0.15) ? rand(0.15, 0.35) : 0;
+  if (miss) { to.x = wm(to.x + rand(-1, 1) * miss); to.z = wm(to.z + rand(-1, 1) * miss); to.y = Hd(to.x, to.z); }
+  const L = Math.hypot(wd(to.x - m.x), wd(to.z - m.z), to.y - m.y), mesh = new THREE.Mesh(shellGeo, shellMat); battleRoot.add(mesh);
+  shells.push({ from: m, to, t: 0, dur: Math.max(0.08, L / 22), mesh, by: t, target: miss ? null : e });
+  t.recoil = 1; t.reload = TANK_RELOAD * rand(0.9, 1.1); FX.flash(m, 0.3, [1, 0.8, 0.45]); FX.smoke(m, 6, { size: [0.04, 0.2], life: [0.6, 1.2], a: 0.5, vel: 0.15, up: 0.08 });
+  FX.dust(new THREE.Vector3(t.pos.x, t.pos.y, t.pos.z), 10, { size: [0.05, 0.25], vel: 0.35 }); }
+function updateShells(dt) { const c = camD();
+  for (let i = shells.length - 1; i >= 0; i--) { const s = shells[i]; s.t += dt; const k = Math.min(1, s.t / s.dur);
+    const x = s.from.x + wd(s.to.x - s.from.x) * k, z = s.from.z + wd(s.to.z - s.from.z) * k, y = s.from.y + (s.to.y - s.from.y) * k + Math.sin(k * Math.PI) * 0.03;
+    s.mesh.position.set(disp(x, c.x), y, disp(z, c.z)); if (k < 1) continue;
+    battleRoot.remove(s.mesh); shells.splice(i, 1); const p = new THREE.Vector3(wm(s.to.x), s.to.y, wm(s.to.z));
+    FX.explosion(p, 0.35); impact(p, 0.12, new THREE.Vector3(wd(s.to.x - s.from.x), 0, wd(s.to.z - s.from.z)).normalize(), 0.6, 'shell');
+    if (s.target && alive(s.target)) damage(s.by, s.target, TANK_DMG * rand(0.85, 1.15), null, true, new THREE.Vector3(wd(s.to.x - s.from.x), 0, wd(s.to.z - s.from.z)).normalize(), p); } }
+// drive toward a point along an off-road path that avoids buildings and water
+function tankDrive(t, gx, gz, dt, stopAt = 0.12) { if (!t.path || t.path.goal.x !== gx || t.path.goal.z !== gz || (t.repathT -= dt) < 0) { t.path = offroad({ x: t.pos.x, z: t.pos.z }, { x: gx, z: gz }, [], true); t.path.goal = { x: gx, z: gz }; t.repathT = 4; }
+  const P = t.path; while (P.length > 1 && wdist2(t.pos.x, t.pos.z, P[0].x, P[0].z) < 0.2) P.shift(); const q = P[0], d = wdist2(t.pos.x, t.pos.z, q.x, q.z);
+  if (P.length === 1 && d < stopAt) return true;
+  const want = Math.atan2(wd(q.x - t.pos.x), wd(q.z - t.pos.z)); let dy = want - t.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  t.w = clamp(dy * 3, -TANK_TURN, TANK_TURN); const vmax = Math.abs(dy) > 0.6 ? 0.04 : TANK_SPEED * (P.length === 1 ? clamp(d / 0.5, 0.3, 1) : 1); t.v += (vmax - t.v) * Math.min(1, dt * 2); return false; }
+function updateTanks(dt) { const c = camD();
+  for (let i = tanks.length - 1; i >= 0; i--) { const t = tanks[i];
+    if (!t.alive) { t.deadT += dt; if (t.deadT < 12 && chance(dt * 6)) FX.darkSmoke(new THREE.Vector3(t.pos.x, t.pos.y + 0.08, t.pos.z), 1);
+      if (t.deadT > 60) { battleRoot.remove(t.root); scene.remove(t.bar.g); if (t.ring) battleRoot.remove(t.ring); tanks.splice(i, 1); continue; } }
+    else {
+      t.reload -= dt; t.recoil = Math.max(0, t.recoil - dt * 2.2);
+      const ord = t.order; if (ord && ord.type === 'attack') { if (alive(ord.target)) t.target = ord.target; else t.order = null; }
+      if (t.target && (!alive(t.target) || wdist2(t.pos.x, t.pos.z, t.target.pos ? t.target.pos.x : t.target.x, t.target.pos ? t.target.pos.z : t.target.z) > TANK_RANGE * 1.6)) t.target = null;
+      if (!t.target && (!ord || ord.type !== 'move')) t.target = tankAcquire(t);
+      const e = t.target, ep = e && (e.pos || e), ed = e ? wdist2(t.pos.x, t.pos.z, ep.x, ep.z) : 1e9;
+      t.w = 0; let moving = false;
+      if (ord && ord.type === 'move') { moving = !tankDrive(t, ord.x, ord.z, dt); if (!moving) { t.order = null; t.path = null; } }
+      else if (e && ed > TANK_RANGE * 0.9) moving = !tankDrive(t, ep.x, ep.z, dt, TANK_RANGE * 0.8);
+      else if (!e && ord && ord.type === 'amove') { moving = !tankDrive(t, ord.x, ord.z, dt); if (!moving) t.order = null; }
+      if (!moving) t.v += (0 - t.v) * Math.min(1, dt * 3);
+      // move, keep clear of other vehicles and mechs, follow the ground
+      const ox = t.pos.x, oz = t.pos.z; t.yaw += t.w * dt; t.pos.x = wm(t.pos.x + Math.sin(t.yaw) * t.v * dt); t.pos.z = wm(t.pos.z + Math.cos(t.yaw) * t.v * dt);
+      for (const o of [...tanks, ...robots]) { if (o === t || (o.kind === 'tank' ? !o.alive : o.state === 'ko')) continue; const r = o.kind === 'tank' ? 0.2 : 0.3, dx = wd(t.pos.x - o.pos.x), dz = wd(t.pos.z - o.pos.z), d = Math.hypot(dx, dz);
+        if (d < r && d > 1e-4) { t.pos.x = wm(t.pos.x + dx / d * (r - d) * 0.5); t.pos.z = wm(t.pos.z + dz / d * (r - d) * 0.5); } }
+      const bad = (x, z) => lotBlocked(x, z, []) || Hd(x, z) < 2 / S * 1.05;
+      if (bad(t.pos.x, t.pos.z)) { const step = Math.hypot(wd(t.pos.x - ox), wd(t.pos.z - oz)); let ok = false; t.pos.x = ox; t.pos.z = oz;
+        // slide along whatever is in the way; if boxed in, back up and plan again
+        for (const da of [0.6, -0.6, 1.2, -1.2]) { const a = t.yaw + da, x = wm(ox + Math.sin(a) * step), z = wm(oz + Math.cos(a) * step); if (!bad(x, z)) { t.pos.x = x; t.pos.z = z; ok = true; break; } }
+        if (!ok) { t.stuckT += dt; t.v *= 0.5; if (t.stuckT > 0.8) { t.backT = 0.9; t.stuckT = 0; t.path = null; } } }
+      else t.stuckT = Math.max(0, t.stuckT - dt);
+      if (t.backT > 0) { t.backT -= dt; const x = wm(t.pos.x - Math.sin(t.yaw) * 0.12 * dt), z = wm(t.pos.z - Math.cos(t.yaw) * 0.12 * dt); if (!bad(x, z)) { t.pos.x = x; t.pos.z = z; } t.yaw += 0.6 * dt; t.v = 0; }
+      const moved = Math.hypot(wd(t.pos.x - ox), wd(t.pos.z - oz)), rr = 0.45 * TANK_K, hw = 1.75 * TANK_K;
+      for (const wh of t.wheels) wh.o.rotation.x += (Math.sign(t.v) * moved + (wh.left ? 1 : -1) * t.w * hw * dt) / rr;
+      if (moved > 0.002 && chance(dt * 8)) FX.dust(new THREE.Vector3(wm(t.pos.x - Math.sin(t.yaw) * 0.1), t.pos.y, wm(t.pos.z - Math.cos(t.yaw) * 0.1)), 2, { size: [0.04, 0.18], vel: 0.15, a: 0.3 });
+      // turret and gun: track the target, fire when lined up
+      let aim = 0; if (e) aim = Math.atan2(wd(ep.x - t.pos.x), wd(ep.z - t.pos.z)) - t.yaw;
+      let da = Math.atan2(Math.sin(aim - t.tur), Math.cos(aim - t.tur)); t.tur += clamp(da, -1.6 * dt, 1.6 * dt);
+      t.elev += ((e ? clamp(ed * 0.012, 0, 0.12) : 0) - t.elev) * Math.min(1, dt * 3);
+      if (e && Math.abs(da) < 0.06 && ed < TANK_RANGE && t.reload <= 0) tankFire(t, e);
+    }
+    const ax = 0.1, ay = 0.06, fx = Math.sin(t.yaw), fz = Math.cos(t.yaw), hF = Hd(wm(t.pos.x + fx * ax), wm(t.pos.z + fz * ax)), hB = Hd(wm(t.pos.x - fx * ax), wm(t.pos.z - fz * ax));
+    const hL = Hd(wm(t.pos.x + fz * ay), wm(t.pos.z - fx * ay)), hR = Hd(wm(t.pos.x - fz * ay), wm(t.pos.z + fx * ay));
+    t.pos.y = Math.max((hF + hB + hL + hR) / 4, 2 / S * 1.05); t.pitchG = Math.atan2(hB - hF, 2 * ax); t.rollG = Math.atan2(hL - hR, 2 * ay);
+    t.root.position.set(disp(t.pos.x, c.x), t.pos.y, disp(t.pos.z, c.z)); t.root.rotation.set(t.pitchG - t.recoil * 0.04, t.yaw, t.rollG, 'YXZ');
+    t.turret.rotation.y = t.tur; t.gun.rotation.x = -t.elev; t.gun.position.z = t.gun0 - t.recoil * 0.45;
+    placeBar(t, disp(t.pos.x, c.x) * S, t.pos.y * S, disp(t.pos.z, c.z) * S, t.alive);
+    if (t.sel && t.alive) { const r = ringFor(t); r.visible = true; r.position.set(disp(t.pos.x, c.x), t.pos.y + 0.01, disp(t.pos.z, c.z)); r.scale.setScalar(0.5); } else if (t.ring) t.ring.visible = false; }
+  updateShells(dt); }
+// ---- depots build tanks: one at a time, they roll out of the lot
+function queueTank(w) { if (!w.alive || !w.done) return 'Depot not ready'; w.tankQ = w.tankQ || 0; if (w.tankQ >= 3) return 'Build queue full'; w.tankQ++; if (w.tankQ === 1) w.tankT = 0; return null; }
+function updateDepots(dt) { for (const w of warehouses) { if (!w.alive || !w.done || !w.tankQ) continue; w.tankT = (w.tankT || 0) + dt;
+  if (w.tankT >= TANK_BUILD && tankProto) { w.tankT = 0; w.tankQ--; const p = whWorld(w, rand(-0.3, 0.3), WH_D / 2 + WH_LOT + 0.5), t = makeTank(w.team, p.x, p.z, w.rot);
+    const o = whWorld(w, rand(-0.6, 0.6), WH_D / 2 + WH_LOT + 1.6); t.order = { type: 'move', x: o.x, z: o.z }; log(w.team, `<b>${TEAM_NAME[w.team]}</b> tank rolls out of the depot`); } } }
 // ------------------------------------------------------------------ economy: every building, vehicle, mech and research has a price
 // in credits plus the gathered resources (oil, wood, ore, food). Both sides pay the same prices; mechs are the costliest thing in the game.
 const CR = [6000, 6000], CR_RATE = 540;
@@ -3112,7 +3212,7 @@ const PRICE = {
   camp: { cr: 500 }, farm: { cr: 400, wood: 20 }, pump: { cr: 800, wood: 60 }, mine: { cr: 1200, wood: 120 },
   wh: { cr: 1000, wood: 150, ore: 50 }, outpost: { cr: 600, wood: 80, ore: 60 },
   airbase: { cr: 1500, wood: 250, ore: 300, oil: 150 }, hangar: { cr: 2500, wood: 300, ore: 500, oil: 200 },
-  heli: { cr: 900, ore: 200, oil: 250, food: 40 },
+  heli: { cr: 900, ore: 200, oil: 250, food: 40 }, tank: { cr: 1800, ore: 350, oil: 200 },
   striker: { cr: 3500, ore: 700, oil: 400, food: 200 }, gunner: { cr: 4200, ore: 850, oil: 500, food: 200 } };
 const RES_NAME = { cr: 'credits', oil: 'oil', wood: 'wood', ore: 'ore', food: 'food' };
 const stock = (team, k) => k === 'cr' ? CR[team] : k === 'oil' ? OIL[team] : k === 'wood' ? WOOD[team] : k === 'ore' ? ORE[team] : FOOD[team];
@@ -3140,6 +3240,7 @@ function updateFog(dt) { fogT -= dt; if (fogT > 0) return; fogT = 0.2; fogVis.fi
   for (const h of helis) if (h.team === 0 && h.alive) fogStamp(h.pos.x, h.pos.z, FOG_SIGHT.heli);
   for (const s of soldiers) if (s.team === 0 && s.alive && !s.inHeli) fogStamp(s.pos.x, s.pos.z, FOG_SIGHT.soldier);
   for (const k of trucks) if (k.team === 0 && !k.dead) fogStamp(k.x, k.z, FOG_SIGHT.truck);
+  for (const k of tanks) if (k.team === 0 && k.alive) fogStamp(k.pos.x, k.pos.z, 6);
   // distance (in cells) from the nearest explored cell: two chamfer passes, run twice so it wraps around the map edges
   if (fogDirty) { fogDirty = false; const N = FOG_N, D = fogDist, a = 1, d2 = 1.414; for (let i = 0; i < N * N; i++) D[i] = fogExp[i] ? 0 : 1e4;
     for (let rep = 0; rep < 2; rep++) {
@@ -3160,6 +3261,7 @@ function applyFog() { if (!FOG_ON) return;
   for (const s of soldiers) if (s.team === 1 && !s.inHeli) { const v = fogVisible(s.pos.x, s.pos.z); s.root.visible = v; if (!v && s.bar) s.bar.g.visible = false; }
   for (const k of trucks) if (k.team === 1 && !k.dead) { const v = fogVisible(k.x, k.z); k.obj.visible = v; if (!v) { if (k.trailer.visible) { k.trailer.visible = false; k.fogTr = k.trailer; } } else if (k.fogTr) { if (k.fogTr === k.trailer) k.trailer.visible = true; k.fogTr = null; } }
   for (const t of towns) if (!t.found) t.root.visible = false;
+  for (const k of tanks) if (k.team === 1) { const v = fogVisible(k.pos.x, k.pos.z); k.root.visible = v; if (!v && k.bar) k.bar.g.visible = false; }
   for (const L of [outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
 const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
 // ---- enemy AI helpers
@@ -3183,6 +3285,8 @@ function aiBuildNext() { const T = missionClock, P = towns[0], pl = q => -wdist2
   const keys = ['outpost', 'pump', 'wh', 'mine', 'camp', 'farm', 'hangar'];
   for (let i = 0; i < plan.length; i++) if (plan[i][0] && plan[i][1]()) { spend(1, PRICE[keys[i]]); return; } }
 // hangar: build mechs while the army is small, research, send badly damaged mechs out of the fight for repair and idle ones for upgrades
+function aiDepot() { const W1 = warehouses.filter(w => w.alive && w.done && w.team === 1); if (!W1.length || !tankProto) return;
+  const n = tanks.filter(t => t.team === 1 && t.alive).length + W1.reduce((a, w) => a + (w.tankQ || 0), 0); if (n < 4 && ORE[1] > 500 && !canAfford(1, PRICE.tank) && !queueTank(W1[0])) spend(1, PRICE.tank); }
 function aiHangar() { const H = hangars.filter(h => h.alive && h.done && h.team === 1); if (!H.length) return;
   const army = robots.filter(r => r.team === 1 && r.state !== 'ko').length, queued = H.reduce((n, h) => n + h.buildQ.length, 0);
   const role = chance(0.4) ? 'gunner' : 'striker'; if (army + queued < 8 && !canAfford(1, PRICE[role]) && !queueMech(H[0], role)) spend(1, PRICE[role]);
@@ -3220,7 +3324,7 @@ function teamUpdate(dt) {
     if (mine.length && !research[1] && ORE[1] > 1500 && chance(0.3)) { const k = Object.keys(UPGRADES)[Math.floor(rand(0, 4))], lv = HELI_UP[1][k]; if (lv < UPGRADES[k].cost.length) { const c = researchPrice(UPGRADES[k].cost[lv]); if (!canAfford(1, c) && !startResearch(1, k)) spend(1, c); } } }
   // enemy AI: economy and support — outposts toward the player, pumps on its oil fields, a depot, woodcutters by forests,
   // farms, a mine in a hillside, a mech hangar; then keeps the hangar busy and sends its soldiers into battle by gunship
-  aiEcoT -= dt; if (aiEcoT <= 0 && !towns[1].hqDown) { aiEcoT = 9; if (missionClock > 45) aiBuildNext(); aiHangar(); aiInfantry(); }
+  aiEcoT -= dt; if (aiEcoT <= 0 && !towns[1].hqDown) { aiEcoT = 9; if (missionClock > 45) aiBuildNext(); aiHangar(); aiDepot(); aiInfantry(); }
   missionClock += dt;
   for (const h of helis) if (h.team === 1 && h.alive && h.mode === 'landed' && h.fuel > h.fuelMax * 0.9 && h.hp > h.maxHp * 0.9 && chance(dt * 0.05)) h.sortie = true;
   // enemy AI: send attack waves toward the player's units / HQ
@@ -3228,10 +3332,11 @@ function teamUpdate(dt) {
   if (waveT <= 0) { waveT = rand(55, 80);
     const idle = robots.filter(r => r.team === 1 && r.state !== 'ko' && !r.order && !alive(r.target));
     const targets = robots.filter(r => r.team === 0 && r.state !== 'ko');
-    if (idle.length >= 2) {
+    if (idle.length >= 2 || tanks.filter(k => k.team === 1 && k.alive && !k.order && !k.target).length >= 2) {
       const keep = Math.max(1, Math.floor(idle.length * 0.3)); const go = idle.slice(keep);
       const pab = airbases.filter(b => b.alive && b.team === 0), tgt = pab.length && chance(0.4) ? pab[0] : targets.length ? targets[Math.floor(RNG() * targets.length)].pos : towns[0];
       go.forEach((r, i) => { r.order = { type: 'amove', x: wm(tgt.x + rand(-1, 1)), z: wm(tgt.z + rand(-1, 1)) }; });
+      for (const k of tanks) if (k.team === 1 && k.alive && !k.order && !k.target) { k.order = { type: 'amove', x: wm(tgt.x + rand(-1.5, 1.5)), z: wm(tgt.z + rand(-1.5, 1.5)) }; k.path = null; }
       for (const eh of helis.filter(h => h.team === 1 && h.alive)) { eh.anchor = { x: wm(tgt.x), z: wm(tgt.z) }; eh.sortie = true; }
       log(1, `<b>Cobalt</b> launches an attack with ${go.length} robots`);
     }
@@ -3240,7 +3345,7 @@ function teamUpdate(dt) {
 
 // ------------------------------------------------------------------ public API used by the page
 const Battle = {
-  ready: Promise.all([battleAssets, pumpAssets, woodAssets, mineAssets, farmAssets, semiAssets, soldierAssets, hangarAssets]),
+  ready: Promise.all([battleAssets, pumpAssets, woodAssets, mineAssets, farmAssets, semiAssets, soldierAssets, hangarAssets, tankAssets]),
   start() {
     const res = () => { for (const p of PARTS) p.setScale(renderer.getDrawingBufferSize(new THREE.Vector2()).y); };
     addEventListener('resize', res); res();
@@ -3262,19 +3367,20 @@ const Battle = {
     log(null, 'Destroy the <b>Cobalt</b> forces and their HQ tower. Build a mech hangar to field more mechs.');
     return { x: towns[0].x * S, z: (towns[0].z + 2) * S };
   },
-  selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive && !s.inHeli)]; },
-  enemiesVisible() { return [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
+  selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive && !s.inHeli), ...tanks.filter(t => t.team === 0 && t.alive)]; },
+  enemiesVisible() { return [...tanks.filter(t => t.team === 1 && t.alive && fogSeen(t)), ...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
-  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
+  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.kind === 'tank' ? u.pos.y + 0.06 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   // commands from the interface
   board: (sel, h) => orderBoard(sel, h),
   command(kind, sel) { sel = sel || Battle.selectables().filter(u => u.sel);
     if (kind === 'deploy') { for (const u of sel) if (u.kind === 'heli' && u.cargo && u.cargo.length) orderDrop(u, u.pos.x, u.pos.z); return; }
     for (const u of sel) { if (u.kind === 'soldier') { if (kind === 'stop' || kind === 'hold') { u.order = null; u.target = null; } continue; }
+      if (u.kind === 'tank') { if (kind === 'stop' || kind === 'hold') { u.order = null; u.target = null; u.path = null; } continue; }
       if (u.kind !== 'robot') { if (kind === 'stop') { u.anchor = { x: u.pos.x, z: u.pos.z }; u.target = null; } continue; }
       if (kind === 'stop') { u.order = null; u.target = null; u.path = null; if (!['ko', 'fly', 'jump', 'air', 'dive'].includes(u.state)) toIdle(u, 0.12, 0.3); }
       if (kind === 'hold') { u.order = { type: 'hold', x: u.pos.x, z: u.pos.z }; u.path = null; if (u.state === 'walk') toIdle(u, 0.12, 0.2); } } },
-  amove(sel, ground) { for (const u of sel) if (u.kind === 'robot') { u.order = { type: 'amove', x: wm(ground.x / S), z: wm(ground.z / S) }; u.target = null; u.thinkT = 0; } },
+  amove(sel, ground) { for (const u of sel) if (u.kind === 'tank') { u.order = { type: 'amove', x: wm(ground.x / S), z: wm(ground.z / S) }; u.target = null; u.path = null; } else if (u.kind === 'robot') { u.order = { type: 'amove', x: wm(ground.x / S), z: wm(ground.z / S) }; u.target = null; u.thinkT = 0; } },
   select(list) { for (const u of Battle.selectables()) u.sel = false; for (const u of list) u.sel = true; },
   order(sel, ground, enemy) {
     if (!sel.length) return; if (enemy && !fogSeen(enemy)) enemy = null;
@@ -3286,6 +3392,7 @@ const Battle = {
       if (u.kind === 'robot' && !passableD(x, z)) {           // goal in deep water: stop at the last dry ground on the way
         const dx = wd(u.pos.x - x), dz = wd(u.pos.z - z), L = Math.hypot(dx, dz) || 1;
         for (let t = 0; t <= L; t += 0.1) { const px = x + dx * t / L, pz = z + dz * t / L; if (passableD(px, pz)) { x = wm(px); z = wm(pz); break; } } }
+      if (u.kind === 'tank') { const k = sel.filter(v => v.kind === 'tank').indexOf(u), a2 = k * 2.4, r2 = 0.45 * Math.sqrt(k); u.order = { type: 'move', x: wm(gx + Math.cos(a2) * r2), z: wm(gz + Math.sin(a2) * r2) }; u.target = null; u.path = null; return; }
       if (u.kind === 'soldier') { const k = sel.filter(v => v.kind === 'soldier').indexOf(u), a2 = k * 2.4, r2 = 0.3 * Math.sqrt(k);   // soldiers form up tighter than mechs
         u.order = { type: 'move', x: wm(gx + Math.cos(a2) * r2), z: wm(gz + Math.sin(a2) * r2) }; u.target = null; u.stuck = 0; }
       else if (u.kind === 'heli' && u.cargo && u.cargo.length) orderDrop(u, x, z);
@@ -3294,7 +3401,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt);
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3330,6 +3437,7 @@ const Battle = {
   drawMini(ctx, s) {
     for (const t of towns) { if (FOG_ON && !t.found) continue; ctx.strokeStyle = t.idx === 0 ? '#ff5aa8' : t.idx === 1 ? '#46b8ff' : '#e8e0d0'; ctx.lineWidth = 1.5; ctx.strokeRect(t.x * S * s - 5, t.z * S * s - 5, 10, 10); }
     for (const r of robots) { if (r.state === 'ko' || !fogSeen(r)) continue; ctx.fillStyle = r.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(r.pos.x * S * s - 2, r.pos.z * S * s - 2, 4, 4); }
+    for (const t of tanks) { if (!t.alive || !fogSeen(t)) continue; ctx.fillStyle = t.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(t.pos.x * S * s - 1.5, t.pos.z * S * s - 1.5, 3, 3); }
     for (const h of helis) { if (!h.alive || !fogSeen(h)) continue; ctx.fillStyle = h.team ? '#9fe0ff' : '#ffb0d8'; ctx.beginPath(); ctx.arc(h.pos.x * S * s, h.pos.z * S * s, 3, 0, 7); ctx.fill(); }
   },
   hud() {
@@ -3341,6 +3449,7 @@ const Battle = {
     el.innerHTML = `<b class="t0">Violet</b> ${my.length} robots · ${heliTxt(0)}${towns[0]?.hqDown ? ' · HQ down' : ''}<br><b class="t1">Cobalt</b> ${en.length} robots · ${heliTxt(1)}${towns[1]?.hqDown ? ' · HQ down' : ''}`
       + (sel.length ? `<br>Selected: ${sel.length} · ${sel.map(u => Math.ceil(u.hp / u.maxHp * 100) + '%').slice(0, 8).join(' ')}` : '');
   },
+  tanks, TANK_BUILD, queueTank, get tankError() { return TANK_ERR; }, _makeTank: (team, x, z, yaw) => makeTank(team, x, z, yaw), warehouseAt2D: (xw, zw) => { const x = wm(xw / S), z = wm(zw / S); return warehouses.find(w => w.alive && inWhLot(w, x, z, 0)) || null; },
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
