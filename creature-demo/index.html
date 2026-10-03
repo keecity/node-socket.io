@@ -47,6 +47,12 @@ section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppe
 .segs label { display: grid; text-align: center; }
 .segs input { width: 100%; accent-color: var(--accent); margin: 0; }
 .segs output { font: 11px var(--f-mono); color: var(--muted); }
+.gen { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.gen select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); min-width: 0; }
+.species { margin-top: 8px; font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.species b { font: 600 15px var(--f-display); }
+.species i { color: var(--muted); }
+.species ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
 .pitch { font: 12px var(--f-mono); color: var(--ink); background: var(--chip); border-radius: 6px; padding: 6px 8px; margin: 2px 0 10px; }
 .part { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; }
 .part > span { font-weight: 600; }
@@ -108,8 +114,23 @@ details summary { cursor: pointer; font-weight: 600; }
       <h2>Recipe · blend the 4 kit variants per part</h2>
       <div class="mixhead" aria-hidden="true"><span></span><span>1</span><span>2</span><span>3</span><span>4</span></div>
       <div id="parts"></div>
+      <h2 style="margin-top:4px">Generator</h2>
+      <div class="gen">
+        <select id="arch" aria-label="Archetype">
+          <option value="any">Any archetype</option>
+          <option value="grazer">Grazer</option><option value="stalker">Stalker</option><option value="bruiser">Bruiser</option>
+          <option value="hound">Hound</option><option value="runner">Runner (biped)</option><option value="waddler">Waddler (biped)</option>
+          <option value="crawler">Crawler (many legs)</option>
+        </select>
+        <button class="btn primary" id="randomize">Generate</button>
+      </div>
+      <div class="slider" style="margin-top:8px">
+        <label for="variation">Variation</label><output id="variationOut"></output>
+        <input id="variation" type="range" min="0" max="1" step="0.05" value="0.45">
+        <small>Low = textbook members of the archetype; high = stranger mutations (the rules still apply).</small>
+      </div>
+      <div class="species" id="species" hidden></div>
       <div class="row" style="margin-top:6px">
-        <button class="btn" id="randomize">Random creature</button>
         <button class="btn" id="resetRecipe">Reset</button>
       </div>
       <small class="note">Sliders set each variant's share; shapes morph in the fused mesh. Composite mode shows the dominant variant.</small>
@@ -361,7 +382,7 @@ const TAIL_NAMES = ['Pig curl', 'Pig hook', 'Pig sweep', 'Pig coil',
 const tailWeights = (a, b, t) => TAIL_NAMES.map((_, i) => (i === a ? 1 - t : 0) + (i === b ? t : 0));
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: tailWeights(0, 0, 0) };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, variation: 0.45, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -1748,32 +1769,115 @@ $('parts').addEventListener('change', e => {
   if (recipe[t.dataset.cat].every(w => w === 0)) { recipe[t.dataset.cat][+t.dataset.i] = 0.05; t.value = 0.05; syncMixLabels(t.dataset.cat); }
   rebuild(`recipe: ${t.dataset.cat} = [${recipe[t.dataset.cat].map(w => w.toFixed(2)).join(', ')}]`); showManifest();
 });
-// Random creature: every part blend plus body plan, legs, tail, skin and motion, within ranges that stay plausible
-$('randomize').onclick = () => {
-  const R = (lo, hi) => lo + Math.random() * (hi - lo), q = (v, step) => Math.round(v / step) * step, pick = arr => arr[Math.floor(Math.random() * arr.length)];
-  for (const [k] of CATS) {
-    const n = k === 'tail' ? TAIL_NAMES.length : 4, a = Math.floor(Math.random() * n), b = Math.floor(Math.random() * n), t = q(Math.random(), 0.05);
-    recipe[k] = new Array(n).fill(0); recipe[k][a] += 1 - t; recipe[k][b] += t;
+// ---------- Generator: archetypes (coherent body plans) + anatomy rules ----------
+// Each archetype gives [min, max] ranges that belong together; Variation widens how far a roll may stray from
+// the middle of each range. The rules then fix anything that contradicts itself and report what they changed.
+const T = n => TAIL_NAMES.indexOf(n);
+const ARCHETYPES = {
+  grazer:  { label: 'Grazer',  pairs: [2], biped: false, fat: [0, 0.25], size: [0.95, 1.3], posture: [0, 0], crouch: [0, 0.05], front: [1.05, 1.4], hind: [1.1, 1.45],
+             upper: [0.9, 1.1], lower: [1.15, 1.45], foot: [0.65, 0.85], gU: [1.05, 1.25], gL: [0.6, 0.75], shoulder: [0.35, 0.6], tailLen: [0.7, 1.2],
+             tails: ['Slender S', 'Whip', 'Tufted', 'Pig sweep'], patterns: ['spots', 'patches', 'none'], refs: ['Horse', 'Deer'] },
+  stalker: { label: 'Stalker', pairs: [2], biped: false, fat: [0.05, 0.3], size: [0.9, 1.2], posture: [0, 0.05], crouch: [0.12, 0.3], front: [0.95, 1.1], hind: [1, 1.15],
+             upper: [0.95, 1.15], lower: [0.85, 1.05], foot: [0.9, 1.1], gU: [1.15, 1.4], gL: [0.7, 0.85], shoulder: [0.3, 0.55], tailLen: [1.4, 2.1],
+             tails: ['Whip', 'Slender S', 'Ridged', 'Thick S'], patterns: ['stripes', 'spots'], refs: ['Tiger', 'Kitty'] },
+  bruiser: { label: 'Bruiser', pairs: [2], biped: false, fat: [0.6, 1], size: [1.05, 1.45], posture: [0, 0.15], crouch: [0, 0.15], front: [0.8, 1], hind: [0.8, 0.95],
+             upper: [0.85, 1], lower: [0.7, 0.85], foot: [1, 1.2], gU: [1.35, 1.6], gL: [0.8, 0.95], shoulder: [0.45, 0.75], tailLen: [0.4, 0.7],
+             tails: ['Stub', 'Pig curl', 'Fat taper', 'Club'], patterns: ['patches', 'none'], refs: ['Dog', 'procedural'] },
+  hound:   { label: 'Hound',   pairs: [2], biped: false, fat: [0.15, 0.4], size: [0.85, 1.1], posture: [0, 0], crouch: [0, 0.1], front: [0.95, 1.1], hind: [0.95, 1.1],
+             upper: [0.95, 1.1], lower: [0.95, 1.15], foot: [0.85, 1], gU: [1.1, 1.3], gL: [0.7, 0.85], shoulder: [0.3, 0.5], tailLen: [0.9, 1.4],
+             tails: ['Pig sweep', 'Thick S', 'Slender S', 'Bulb', 'Leaf'], patterns: ['patches', 'spots', 'none'], refs: ['Dog'] },
+  runner:  { label: 'Runner',  pairs: [2], biped: true, fat: [0, 0.2], size: [0.95, 1.25], posture: [0.85, 1], crouch: [0.1, 0.3], front: [0.6, 0.8], hind: [1.2, 1.5],
+             upper: [1.1, 1.35], lower: [0.85, 1.05], foot: [1.05, 1.3], gU: [1.2, 1.45], gL: [0.6, 0.75], shoulder: [0.15, 0.3], tailLen: [1.6, 2.4],
+             tails: ['Croc', 'Spiny', 'Ridged', 'Segmented', 'Spike'], patterns: ['stripes', 'spots'], refs: ['Chicken'] },
+  waddler: { label: 'Waddler', pairs: [2], biped: true, fat: [0.6, 1], size: [0.85, 1.15], posture: [0.8, 1], crouch: [0.15, 0.35], front: [0.6, 0.8], hind: [0.75, 0.95],
+             upper: [0.75, 0.9], lower: [0.65, 0.8], foot: [1.05, 1.3], gU: [1.3, 1.55], gL: [0.8, 0.95], shoulder: [0.4, 0.6], tailLen: [0.4, 0.75],
+             tails: ['Stub', 'Paddle', 'Leaf', 'Pig curl'], patterns: ['none', 'patches'], refs: ['Pinguin'] },
+  crawler: { label: 'Crawler', pairs: [3, 4], biped: false, fat: [0.1, 0.4], size: [0.8, 1.05], posture: [0, 0], crouch: [0.15, 0.35], front: [0.75, 0.95], hind: [0.75, 0.95],
+             upper: [0.75, 0.9], lower: [0.7, 0.85], foot: [0.85, 1], gU: [1.05, 1.25], gL: [0.7, 0.85], shoulder: [0.2, 0.4], tailLen: [1.2, 1.9],
+             tails: ['Segmented', 'Spiny', 'Croc', 'Club', 'Forked'], patterns: ['spots', 'stripes'], refs: ['procedural'] }
+};
+// Latin-ish species names from the body plan
+const NAME_ROOT = { grazer: ['Cervo', 'Equi', 'Grami', 'Prato'], stalker: ['Felo', 'Lyco', 'Umbra', 'Tigri'], bruiser: ['Ursa', 'Grossi', 'Taurо', 'Robu'],
+  hound: ['Cani', 'Vulpi', 'Lupo', 'Sagi'], runner: ['Dromo', 'Veloci', 'Cursi', 'Raptori'], waddler: ['Pingui', 'Obesi', 'Tardi', 'Globo'], crawler: ['Myrio', 'Scolo', 'Multi', 'Repto'] };
+function speciesName(arch, st) {
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const genus = pick(NAME_ROOT[arch]).replace('о', 'o') + pick(['porcus', 'sus', 'pig', 'scrofa']);
+  const ep = st.tailLen > 1.6 ? 'longicauda' : st.fat > 0.65 ? 'crassus' : genome.pairs > 2 ? 'multipes' : st.hind > 1.25 ? 'longipes' : st.pattern === 'stripes' ? 'virgatus' : st.pattern === 'spots' ? 'maculatus' : 'vulgaris';
+  return genus.charAt(0).toUpperCase() + genus.slice(1) + ' ' + ep;
+}
+function enforceRules(st, arch) {
+  const rules = [];
+  const L = st.legs;
+  // weight-bearing: heavy bodies need thick, shorter legs
+  if (st.fat > 0.55) {
+    const g = 1.25 + (st.fat - 0.55) * 0.6;
+    if (st.girth.upper < g) { st.girth.upper = +g.toFixed(2); rules.push('heavy body → thicker upper legs'); }
+    const cap = 1.15 - (st.fat - 0.55) * 0.4;
+    if (st.hind > cap || st.front > cap) { st.hind = Math.min(st.hind, cap); st.front = Math.min(st.front, cap); rules.push('heavy body → legs shortened to carry the weight'); }
+    if (st.ref === 'Horse' || st.ref === 'Deer') { st.ref = 'Dog'; rules.push('heavy body → no long-legged gait'); }
   }
-  const r = Math.random();
-  genome.pairs = r < 0.12 ? 1 : r < 0.8 ? 2 : r < 0.93 ? 3 : 4;
-  const biped = genome.pairs === 1 || Math.random() < 0.15;
-  const seg = () => ({ upper: q(R(0.7, 1.4), 0.05), lower: q(R(0.6, 1.4), 0.05), foot: q(R(0.7, 1.3), 0.05) });
-  Object.assign(settings, {
-    posture: biped ? q(R(0.8, 1), 0.01) : (Math.random() < 0.2 ? q(R(0.1, 0.4), 0.01) : 0),
-    front: q(biped ? R(0.6, 0.9) : R(0.8, 1.3), 0.01), hind: q(R(0.8, 1.35), 0.01),
-    crouch: Math.random() < 0.3 ? q(R(0.1, 0.4), 0.01) : 0,
-    fat: q(R(0, 0.9), 0.05), size: q(R(0.8, 1.3), 0.05),
-    shoulder: q(R(0.1, 0.6), 0.05), rearFwd: q(R(0, 0.2), 0.01), rake: Math.round(R(-8, 8)),
-    legs: { front: seg(), hind: seg() },
-    girth: { upper: q(R(1, 1.5), 0.05), lower: q(R(0.6, 0.95), 0.05), foot: q(R(0.8, 1.2), 0.05) },
-    tailLen: q(R(0.5, 1.9), 0.05), tailSegs: Math.round(R(3, 7)), tailHeight: q(R(0.15, 0.45), 0.02),
-    pattern: pick(['none', 'spots', 'stripes', 'patches']), patAmount: q(R(0.35, 0.8), 0.05), patScale: q(R(0.6, 2), 0.05), counter: q(R(0.1, 0.6), 0.05),
-    patColor: '#' + [R(60, 150), R(30, 100), R(40, 110)].map(v => Math.round(v).toString(16).padStart(2, '0')).join(''),
-    ref: biped ? pick(['Chicken', 'Pinguin']) : pick(['procedural', 'Dog', 'Horse', 'Tiger', 'Deer', 'Kitty']),
-    gait: genome.pairs > 2 ? 'wave' : 'trot'
-  });
-  syncUi(); rebuild('random creature');
+  // allometry: bigger animals get relatively thicker legs
+  if (st.size > 1.15) { const add = (st.size - 1.15) * 0.8; st.girth.upper = +(st.girth.upper + add).toFixed(2); st.girth.lower = +(st.girth.lower + add * 0.6).toFixed(2); rules.push('large size → legs thickened (scaling)'); }
+  // segment proportions
+  for (const end of ['front', 'hind']) {
+    const S = L[end];
+    if (S.lower > S.upper * 1.3) { S.lower = +(S.upper * 1.3).toFixed(2); rules.push(`${end} lower leg capped at 1.3× the upper`); }
+    if (S.foot > S.lower * 1.25) { S.foot = +(S.lower * 1.25).toFixed(2); rules.push(`${end} foot capped relative to the lower leg`); }
+  }
+  if (st.girth.lower >= st.girth.upper * 0.95) { st.girth.lower = +(st.girth.upper * 0.75).toFixed(2); rules.push('lower leg made slimmer than the upper'); }
+  // bipeds: arms shorter than legs, tail balances the body
+  const biped = st.posture > 0.6;
+  if (biped) {
+    if (st.front > st.hind * 0.85) { st.front = +(st.hind * 0.8).toFixed(2); rules.push('biped → arms shorter than legs'); }
+    if (arch !== 'waddler' && st.tailLen < 1.4) { st.tailLen = 1.5; rules.push('upright runner → long counterbalancing tail'); }
+    if (!['Chicken', 'Pinguin'].includes(st.ref)) { st.ref = st.fat > 0.5 ? 'Pinguin' : 'Chicken'; rules.push('biped → biped gait reference'); }
+  } else if (['Chicken', 'Pinguin'].includes(st.ref)) { st.ref = 'Dog'; rules.push('quadruped → four-legged gait reference'); }
+  if (st.fat > 0.65 && st.tailLen > 1) { st.tailLen = 0.8; rules.push('heavy body → short tail'); }
+  // tail bones follow tail length; many legs walk with a wave gait
+  st.tailSegs = Math.max(2, Math.min(8, Math.round(1.5 + st.tailLen * 2.6)));
+  st.gait = genome.pairs > 2 ? 'wave' : 'trot';
+  if (genome.pairs > 2) rules.push('many legs → wave gait');
+  // colour harmony: pattern = darker shade of the body colour, pale belly
+  const base = TINTS.body[recipe.body.indexOf(Math.max(...recipe.body))];
+  const k = 0.45 + Math.random() * 0.15;
+  st.patColor = '#' + base.map((c, i) => Math.round(c * k * (i === 0 ? 1 : 0.9)).toString(16).padStart(2, '0')).join('');
+  rules.push('pattern colour derived from the body colour');
+  return rules;
+}
+$('randomize').onclick = () => {
+  const v = +$('variation').value;
+  const sel = $('arch').value;
+  const keys = Object.keys(ARCHETYPES);
+  const arch = sel === 'any' ? keys[Math.floor(Math.random() * keys.length)] : sel;
+  const A = ARCHETYPES[arch];
+  // roll inside the archetype's range: centre ± (half-range × variation), occasionally a little beyond
+  const roll = ([lo, hi], step = 0.01) => { const c = (lo + hi) / 2, h = (hi - lo) / 2 * (0.25 + v); const x = c + (Math.random() * 2 - 1) * h * (1 + v * 0.3); return Math.round(x / step) * step; };
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  // lineage: head + body share a kit variant; legs share one; at most two variants per part
+  const lineage = (n, base) => { const w = new Array(n).fill(0), other = (base + 1 + Math.floor(Math.random() * (n - 1))) % n, t = Math.random() < v ? Math.round(Math.random() * 0.4 * v * 20) / 20 : 0; w[base] += 1 - t; w[other] += t; return w; };
+  const bodyLine = Math.floor(Math.random() * 4), legLine = Math.random() < 0.7 ? bodyLine : Math.floor(Math.random() * 4);
+  recipe.head = lineage(4, bodyLine); recipe.body = lineage(4, bodyLine);
+  recipe.thigh = lineage(4, legLine); recipe.shin = lineage(4, legLine); recipe.foot = lineage(4, legLine);
+  const tA = T(pick(A.tails)), tB = T(pick(A.tails));
+  recipe.tail = tailWeights(tA, tB, Math.random() < v ? Math.round(Math.random() * 10) / 20 : 0);
+  genome.pairs = pick(A.pairs);
+  const seg = () => ({ upper: roll(A.upper, 0.05), lower: roll(A.lower, 0.05), foot: roll(A.foot, 0.05) });
+  const st = {
+    posture: roll(A.posture), crouch: Math.max(0, roll(A.crouch)), fat: Math.max(0, Math.min(1, roll(A.fat, 0.05))), size: roll(A.size, 0.05),
+    front: roll(A.front), hind: roll(A.hind), shoulder: roll(A.shoulder, 0.05), rearFwd: roll([0.02, 0.15]), rake: 0,
+    legs: { front: seg(), hind: seg() }, girth: { upper: roll(A.gU, 0.05), lower: roll(A.gL, 0.05), foot: 1 },
+    tailLen: roll(A.tailLen, 0.05), tailHeight: roll([0.25, 0.4], 0.02),
+    pattern: pick(A.patterns), patAmount: roll([0.45, 0.75], 0.05), patScale: roll([0.8, 1.6], 0.05), counter: roll([0.25, 0.5], 0.05),
+    ref: pick(A.refs)
+  };
+  if (A.biped) st.legs.front = { upper: 0.8, lower: 0.75, foot: 0.8 };
+  const rules = enforceRules(st, arch);
+  Object.assign(settings, st);
+  syncUi();
+  const name = speciesName(arch, st);
+  $('species').hidden = false;
+  $('species').innerHTML = `<b>${name}</b> <i>· ${A.label}${genome.pairs > 2 ? `, ${genome.pairs * 2} legs` : ''}</i><ul>${rules.map(r => `<li>${r}</li>`).join('')}</ul>`;
+  rebuild(`generate: ${A.label} — ${name}`);
 };
 $('resetRecipe').onclick = () => { Object.assign(recipe, JSON.parse(JSON.stringify(RECIPE_DEFAULT))); renderParts(); rebuild('recipe: reset'); showManifest(); };
 function setPairs(n) { genome.pairs = pc.math.clamp(n, 1, 4); $('pairsOut').textContent = `${genome.pairs} pair${genome.pairs > 1 ? 's' : ''} · ${genome.pairs * 2} legs`; }
@@ -1785,6 +1889,7 @@ const bindSlider = (id, key, fmt, rebind) => {
   sync(); el.addEventListener('input', sync);
   if (rebind) el.addEventListener('change', () => rebuild(`rebind: ${key} = ${el.value}`));
 };
+bindSlider('variation', 'variation', v => v < 0.2 ? 'textbook' : v > 0.8 ? 'strange' : `${Math.round(v * 100)}%`, false);
 bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
 for (const end of ['front', 'hind']) for (const part of ['upper', 'lower', 'foot']) {
   const el = $(`seg-${end}-${part}`), out = $(`seg-${end}-${part}Out`);
