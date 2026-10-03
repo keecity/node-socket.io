@@ -53,6 +53,8 @@ section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppe
 .species b { font: 600 15px var(--f-display); }
 .species i { color: var(--muted); }
 .species ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.regions { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; }
+.regions label { margin: 0; }
 .pitch { font: 12px var(--f-mono); color: var(--ink); background: var(--chip); border-radius: 6px; padding: 6px 8px; margin: 2px 0 10px; }
 .part { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; }
 .part > span { font-weight: 600; }
@@ -146,8 +148,29 @@ details summary { cursor: pointer; font-weight: 600; }
     <section>
       <h2>Skin</h2>
       <div class="slider">
-        <label for="skin">Skin texture</label><span></span>
+        <label for="skin">Skin A</label><span></span>
         <select id="skin"><option value="-1">None (tint and pattern only)</option></select>
+      </div>
+      <div class="slider">
+        <label for="skinB">Skin B</label><span></span>
+        <select id="skinB"><option value="-1">None</option></select>
+        <small>Skin B covers the regions ticked below and blends into skin A at the edges.</small>
+      </div>
+      <div class="toggles regions" id="regions">
+        <label><input type="checkbox" data-region="back"> Back</label>
+        <label><input type="checkbox" data-region="belly" checked> Belly</label>
+        <label><input type="checkbox" data-region="legs"> Legs</label>
+        <label><input type="checkbox" data-region="head"> Head</label>
+        <label><input type="checkbox" data-region="tail"> Tail</label>
+      </div>
+      <div class="slider">
+        <label for="skinMix">Skin B everywhere</label><output id="skinMixOut"></output>
+        <input id="skinMix" type="range" min="0" max="1" step="0.05" value="0">
+      </div>
+      <div class="slider">
+        <label for="skinSoft">Transition</label><output id="skinSoftOut"></output>
+        <input id="skinSoft" type="range" min="0" max="1" step="0.05" value="0.5">
+        <small>How wide and broken-up the border between the two skins is.</small>
       </div>
       <div class="slider">
         <label for="texScale">Texture scale</label><output id="texScaleOut"></output>
@@ -399,7 +422,7 @@ const TAIL_NAMES = ['Pig curl', 'Pig hook', 'Pig sweep', 'Pig coil',
 const tailWeights = (a, b, t) => TAIL_NAMES.map((_, i) => (i === a ? 1 - t : 0) + (i === b ? t : 0));
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: tailWeights(0, 0, 0) };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, variation: 0.45, skin: -1, texScale: 1, texTint: 0.35, bump: 1, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, variation: 0.45, skin: -1, skinB: -1, skinMix: 0, skinSoft: 0.5, regions: { back: 0, belly: 1, legs: 0, head: 0, tail: 0 }, texScale: 1, texTint: 0.35, bump: 1, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -1213,6 +1236,7 @@ function projectOntoFused(fused, asm, src, r) {
   const n = fused.pos.length / 3, pos = fused.pos;
   const bi = new Uint8Array(n * 4), bw = new Float32Array(n * 4), colors = new Uint8Array(n * 4);
   const sigma = Math.max(settings.seam, 0.002);
+  const regionMask = new Float32Array(n), cyR = asm.bodyCenterY, bhR = asm.bodyH;
   const stamp = new Int32Array(I.length / 3).fill(-1);
   const cp = new Float64Array(6);
   for (let v = 0; v < n; v++) {
@@ -1230,7 +1254,7 @@ function projectOntoFused(fused, asm, src, r) {
         if (!cur || d < cur.d) best.set(s, { d, t, u: cp[3], v: cp[4], w: cp[5], x: cp[0], y: cp[1], z: cp[2] });
       }
     }
-    if (best.size === 0) { bi[v*4] = 0; bw[v*4] = 1; colors.set([...asm.buf.tint[0], 255], v*4); continue; }
+    if (best.size === 0) { bi[v*4] = 0; bw[v*4] = 1; colors.set([...asm.buf.tint[0], 255], v*4); regionMask[v] = regionB('body', py, cyR, bhR); continue; }
     let dmin = Infinity, nearest = null;
     for (const e of best.values()) if (e.d < dmin) { dmin = e.d; nearest = e; }
     // blend attributes of the nearest part and the parts JOINED to it (never e.g. a neighbouring leg),
@@ -1241,7 +1265,7 @@ function projectOntoFused(fused, asm, src, r) {
       if (sl !== nearSlot && !joined(sl, nearSlot)) continue;
       const a = Math.exp(-Math.pow((e.d - dmin) / sigma, 2));
       if (a < 0.01) continue;
-      tot += a;
+      tot += a; regionMask[v] += a * regionB(sl, py, cyR, bhR);
       const tv = [I[e.t], I[e.t+1], I[e.t+2]], bc = [e.u, e.v, e.w];
       for (let k = 0; k < 3; k++) {
         const sv = tv[k], wk = a * bc[k];
@@ -1252,7 +1276,7 @@ function projectOntoFused(fused, asm, src, r) {
     const top = [...acc.entries()].sort((p, q) => q[1] - p[1]).slice(0, 4);
     const sum = top.reduce((s, e) => s + e[1], 0) || 1;
     top.forEach(([bone, w], j) => { bi[v*4+j] = bone; bw[v*4+j] = w / sum; });
-    colors[v*4] = rgb[0] / tot; colors[v*4+1] = rgb[1] / tot; colors[v*4+2] = rgb[2] / tot; colors[v*4+3] = 255;
+    colors[v*4] = rgb[0] / tot; colors[v*4+1] = rgb[1] / tot; colors[v*4+2] = rgb[2] / tot; colors[v*4+3] = 255; regionMask[v] /= tot;
   }
   if (settings.showWeights) {
     for (let v = 0; v < n; v++) {
@@ -1261,17 +1285,19 @@ function projectOntoFused(fused, asm, src, r) {
       colors[v*4] = rgb[0]; colors[v*4+1] = rgb[1]; colors[v*4+2] = rgb[2];
     }
   }
-  return { bi, bw, colors };
+  return { bi, bw, colors, regionMask };
 }
 
 // ---------- Skin textures: 16 tiles (colour + normal) from the skin atlases ----------
 const SKIN_NAMES = ['Green scales', 'Brown scales', 'Elephant hide', 'Toad skin', 'Pig skin', 'Pebbled hide', 'Croc scutes', 'Mottled skin',
-  'Grey fur', 'Tan fur', 'Brown fur', 'White fur', 'Red fur', 'Black fur', 'Leopard', 'Tiger'];
+  'Grey fur', 'Tan fur', 'Brown fur', 'White fur', 'Red fur', 'Black fur', 'Leopard', 'Tiger',
+  'Moss beads', 'Sand beads', 'Slate beads', 'Teal beads', 'Python', 'Belly plates', 'Gator back', 'Pebble boss',
+  'Speckled sand', 'Charcoal scales', 'Red diamond', 'Lime spotted', 'Teal dragon', 'Violet beads', 'Pale scales', 'Rust shingle'];
 const skinAtlas = {};
 const skinCache = new Map();
 function loadImage(src) { return new Promise((ok, err) => { const im = new Image(); im.onload = () => ok(im); im.onerror = err; im.src = src; }); }
-const skinsReady = Promise.all([loadImage('skins_color.webp'), loadImage('skins_normal.webp')])
-  .then(([c, n]) => { skinAtlas.color = c; skinAtlas.normal = n; })
+const skinsReady = Promise.all(['skins_color.webp', 'skins_normal.webp', 'skins2_color.webp', 'skins2_normal.webp'].map(loadImage))
+  .then(([c, n, c2, n2]) => { skinAtlas.color = c; skinAtlas.normal = n; skinAtlas.color2 = c2; skinAtlas.normal2 = n2; })
   .catch(err => console.warn('skin textures not loaded', err));
 function tileTexture(img, i, srgb) {
   const T = img.width / 4, cv = document.createElement('canvas'); cv.width = cv.height = T;
@@ -1283,7 +1309,8 @@ function tileTexture(img, i, srgb) {
 }
 function skinTextures(i) {
   if (!skinAtlas.color) return null;
-  if (!skinCache.has(i)) skinCache.set(i, { color: tileTexture(skinAtlas.color, i, true), normal: tileTexture(skinAtlas.normal, i, false) });
+  const second = i >= 16, t = i % 16;
+  if (!skinCache.has(i)) skinCache.set(i, { color: tileTexture(second ? skinAtlas.color2 : skinAtlas.color, t, true), normal: tileTexture(second ? skinAtlas.normal2 : skinAtlas.normal, t, false) });
   return skinCache.get(i);
 }
 // box projection: each vertex takes its UVs from the plane its normal faces most (rest pose, so it sticks to the skin)
@@ -1296,12 +1323,82 @@ function skinUvs(P, N) {
   }
   return uv;
 }
+// Two-skin blend: the standard shader's detail slots carry skin B; these chunk overrides mix A and B by the
+// vertex colour's alpha (the region mask) instead of the stock detail modes.
+{
+  const ch = skinMat.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
+  ch.set('diffusePS', `
+uniform vec3 material_diffuse;
+void getAlbedo() {
+  dAlbedo = material_diffuse.rgb;
+  #ifdef STD_DIFFUSE_TEXTURE
+    vec3 skinA = {STD_DIFFUSE_TEXTURE_DECODE}(texture2DBias({STD_DIFFUSE_TEXTURE_NAME}, {STD_DIFFUSE_TEXTURE_UV}, {STD_TEXTURE_BIAS})).rgb;
+    #ifdef STD_DIFFUSEDETAIL_TEXTURE
+      vec3 skinB = {STD_DIFFUSEDETAIL_TEXTURE_DECODE}(texture2DBias({STD_DIFFUSEDETAIL_TEXTURE_NAME}, {STD_DIFFUSEDETAIL_TEXTURE_UV}, {STD_TEXTURE_BIAS})).rgb;
+      skinA = mix(skinA, skinB, saturate(vVertexColor.a));
+    #endif
+    dAlbedo *= skinA;
+  #endif
+  #ifdef STD_DIFFUSE_VERTEX
+    dAlbedo *= saturate(vVertexColor.rgb);
+  #endif
+}
+`);
+  ch.set('normalMapPS', `
+#ifdef STD_NORMAL_TEXTURE
+  uniform float material_bumpiness;
+#endif
+void getNormal() {
+#ifdef STD_NORMAL_TEXTURE
+  vec3 normalMap = {STD_NORMAL_TEXTURE_DECODE}(texture2DBias({STD_NORMAL_TEXTURE_NAME}, {STD_NORMAL_TEXTURE_UV}, {STD_TEXTURE_BIAS}));
+  #ifdef STD_NORMALDETAIL_TEXTURE
+    vec3 normalB = {STD_NORMALDETAIL_TEXTURE_DECODE}(texture2DBias({STD_NORMALDETAIL_TEXTURE_NAME}, {STD_NORMALDETAIL_TEXTURE_UV}, {STD_TEXTURE_BIAS}));
+    normalMap = normalize(mix(normalMap, normalB, saturate(vVertexColor.a)));
+  #endif
+  normalMap = mix(vec3(0.0, 0.0, 1.0), normalMap, material_bumpiness);
+  dNormalW = normalize(dTBN * normalMap);
+#else
+  dNormalW = dVertexNormalW;
+#endif
+}
+`);
+  skinMat.shaderChunksVersion = '2.8';
+}
 function applySkinMaterial(on) {
-  const t = on ? skinTextures(settings.skin) : null;
-  skinMat.diffuseMap = t ? t.color : null;
-  skinMat.normalMap = t ? t.normal : null;
+  const a = on ? skinTextures(settings.skin) : null;
+  const b = on && settings.skinB >= 0 && settings.skinB !== settings.skin ? skinTextures(settings.skinB) : null;
+  skinMat.diffuseMap = a ? a.color : null;
+  skinMat.normalMap = a ? a.normal : null;
+  skinMat.diffuseDetailMap = a && b ? b.color : null;
+  skinMat.normalDetailMap = a && b ? b.normal : null;
   skinMat.bumpiness = settings.bump;
   skinMat.update();
+}
+// how much of skin B a part gets: regions (back / belly / legs / head / tail) plus an everywhere amount
+function regionB(slot, y, cy, bh) {
+  const R = settings.regions;
+  let w;
+  if (slot === 'body') w = R.back + (R.belly - R.back) * (1 - pc.math.smoothstep(cy - bh * 0.3, cy + bh * 0.15, y))   /* 1 underneath, 0 on top (edges must ascend) */;
+  else if (slot === 'head') w = R.head;
+  else if (slot === 'tail') w = R.tail;
+  else w = R.legs;
+  return 1 - (1 - w) * (1 - settings.skinMix);
+}
+// soften the mask across the mesh (a few smoothing passes) and break the edge up with noise
+function finishSkinMask(mask, P, idx) {
+  const n = mask.length, nb = Array.from({ length: n }, () => []);
+  for (let i = 0; i < idx.length; i += 3) { const a = idx[i], b = idx[i+1], c = idx[i+2]; nb[a].push(b, c); nb[b].push(a, c); nb[c].push(a, b); }
+  const tmp = new Float32Array(n), passes = Math.round(2 + settings.skinSoft * 10);
+  for (let p = 0; p < passes; p++) {
+    for (let v = 0; v < n; v++) { let s2 = mask[v]; for (const u of nb[v]) s2 += mask[u]; tmp[v] = s2 / (nb[v].length + 1); }
+    mask.set(tmp);
+  }
+  const f = 14 / settings.size, amp = 0.15 + settings.skinSoft * 0.5;
+  for (let v = 0; v < n; v++) {
+    const m = mask[v]; if (m <= 0.001 || m >= 0.999) continue;
+    const noise = vnoise(P[v*3] * f, P[v*3+1] * f, P[v*3+2] * f) - 0.5;
+    mask[v] = pc.math.smoothstep(0.5 - amp * 0.5, 0.5 + amp * 0.5, m + noise * amp);
+  }
 }
 
 // ---------- Skin pattern: painted into the vertex colours from rest-pose positions ----------
@@ -1333,7 +1430,7 @@ function paintPattern(P, colors, asm) {
     else if (settings.pattern === 'patches') { const n = vnoise(x * f * 0.5, y * f * 0.5, z * f * 0.5) * 0.65 + vnoise(x * f * 1.3, y * f * 1.3, z * f * 1.3) * 0.35; m = pc.math.smoothstep(0.52, 0.58, n); }
     m *= amt;
     // countershading: lighter underneath, as on most animals
-    const belly = settings.counter * pc.math.smoothstep(cy + bh * 0.1, cy - bh * 0.7, y);
+    const belly = settings.counter * (1 - pc.math.smoothstep(cy - bh * 0.7, cy + bh * 0.1, y));
     for (let a = 0; a < 3; a++) {
       let c = colors[v*4+a] * (1 - m) + pcol[a] * m;
       c = c + (255 - c) * belly * 0.6;
@@ -1374,7 +1471,7 @@ function build(reason) {
     const t5 = performance.now();
     positions = fused.pos; indices = fused.idx;
     normals = new Float32Array(pc.calculateNormals(Array.from(positions), Array.from(indices)));
-    ({ bi, bw, colors } = proj);
+    ({ bi, bw, colors } = proj); var regionMask = proj.regionMask;
     const T = fused.T, g = fused.grid;
     steps.push(`fuse    ${fused.parts} part SDFs on ${g.join('×')} grid (${(settings.voxel * 1000).toFixed(0)} mm): exact ${T['exact distance'].toFixed(0)} ms · EDT ${T['distance field'].toFixed(0)} ms · sign ${T.sign.toFixed(0)} ms`);
     steps.push(`        smooth-union ${fused.pairs} joints (k=${(settings.fuseR * 1000).toFixed(0)} mm) ${T['smooth union'].toFixed(0)} ms`);
@@ -1383,6 +1480,7 @@ function build(reason) {
   } else {
     positions = new Float32Array(asm.buf.pos); normals = new Float32Array(asm.buf.nrm);
     indices = Uint32Array.from(asm.buf.idx); ({ bi, bw, colors } = src);
+    var regionMask = Float32Array.from(asm.buf.slot, (sl, v) => regionB(sl, asm.buf.pos[v*3+1], asm.bodyCenterY, asm.bodyH));
   }
   if (!settings.showWeights) paintPattern(positions, colors, asm);
   const textured = settings.skin >= 0 && !settings.showWeights && !!skinAtlas.color;
@@ -1392,6 +1490,8 @@ function build(reason) {
     // the texture leads; our tint, pattern and pale belly blend over it by "Tint over texture"
     const k = settings.texTint;
     for (let i = 0; i < colors.length; i += 4) for (let a = 0; a < 3; a++) colors[i+a] = 255 + (colors[i+a] - 255) * k;
+    // skin B mask rides in the vertex colour alpha
+    if (settings.skinB >= 0) { finishSkinMask(regionMask, positions, indices); for (let v = 0; v < regionMask.length; v++) colors[v*4+3] = Math.round(regionMask[v] * 255); }
   }
   const t2b = performance.now();
 
@@ -1846,25 +1946,25 @@ const T = n => TAIL_NAMES.indexOf(n);
 const ARCHETYPES = {
   grazer:  { label: 'Grazer',  pairs: [2], biped: false, fat: [0, 0.25], size: [0.95, 1.3], posture: [0, 0], crouch: [0, 0.05], front: [1.05, 1.4], hind: [1.1, 1.45],
              upper: [0.9, 1.1], lower: [1.15, 1.45], foot: [0.65, 0.85], gU: [1.05, 1.25], gL: [0.6, 0.75], shoulder: [0.35, 0.6], tailLen: [0.7, 1.2],
-             tails: ['Slender S', 'Whip', 'Tufted', 'Pig sweep'], patterns: ['spots', 'patches', 'none'], skins: ['Tan fur', 'Brown fur', 'Grey fur', 'White fur'], refs: ['Horse', 'Deer'] },
+             tails: ['Slender S', 'Whip', 'Tufted', 'Pig sweep'], patterns: ['spots', 'patches', 'none'], skins: ['Tan fur', 'Brown fur', 'Grey fur', 'White fur'], skinsB: ['White fur', 'Tan fur'], refs: ['Horse', 'Deer'] },
   stalker: { label: 'Stalker', pairs: [2], biped: false, fat: [0.05, 0.3], size: [0.9, 1.2], posture: [0, 0.05], crouch: [0.12, 0.3], front: [0.95, 1.1], hind: [1, 1.15],
              upper: [0.95, 1.15], lower: [0.85, 1.05], foot: [0.9, 1.1], gU: [1.15, 1.4], gL: [0.7, 0.85], shoulder: [0.3, 0.55], tailLen: [1.4, 2.1],
-             tails: ['Whip', 'Slender S', 'Ridged', 'Thick S'], patterns: ['stripes', 'spots'], skins: ['Tiger', 'Leopard', 'Tan fur', 'Black fur'], refs: ['Tiger', 'Kitty'] },
+             tails: ['Whip', 'Slender S', 'Ridged', 'Thick S'], patterns: ['stripes', 'spots'], skins: ['Tiger', 'Leopard', 'Tan fur', 'Black fur'], skinsB: ['White fur', 'Tan fur'], refs: ['Tiger', 'Kitty'] },
   bruiser: { label: 'Bruiser', pairs: [2], biped: false, fat: [0.6, 1], size: [1.05, 1.45], posture: [0, 0.15], crouch: [0, 0.15], front: [0.8, 1], hind: [0.8, 0.95],
              upper: [0.85, 1], lower: [0.7, 0.85], foot: [1, 1.2], gU: [1.35, 1.6], gL: [0.8, 0.95], shoulder: [0.45, 0.75], tailLen: [0.4, 0.7],
-             tails: ['Stub', 'Pig curl', 'Fat taper', 'Club'], patterns: ['patches', 'none'], skins: ['Elephant hide', 'Pig skin', 'Brown fur', 'Pebbled hide'], refs: ['Dog', 'procedural'] },
+             tails: ['Stub', 'Pig curl', 'Fat taper', 'Club'], patterns: ['patches', 'none'], skins: ['Elephant hide', 'Pig skin', 'Brown fur', 'Pebbled hide'], skinsB: ['Pig skin', 'Pebbled hide'], refs: ['Dog', 'procedural'] },
   hound:   { label: 'Hound',   pairs: [2], biped: false, fat: [0.15, 0.4], size: [0.85, 1.1], posture: [0, 0], crouch: [0, 0.1], front: [0.95, 1.1], hind: [0.95, 1.1],
              upper: [0.95, 1.1], lower: [0.95, 1.15], foot: [0.85, 1], gU: [1.1, 1.3], gL: [0.7, 0.85], shoulder: [0.3, 0.5], tailLen: [0.9, 1.4],
-             tails: ['Pig sweep', 'Thick S', 'Slender S', 'Bulb', 'Leaf'], patterns: ['patches', 'spots', 'none'], skins: ['Grey fur', 'Red fur', 'Brown fur', 'Black fur', 'White fur'], refs: ['Dog'] },
+             tails: ['Pig sweep', 'Thick S', 'Slender S', 'Bulb', 'Leaf'], patterns: ['patches', 'spots', 'none'], skins: ['Grey fur', 'Red fur', 'Brown fur', 'Black fur', 'White fur'], skinsB: ['White fur', 'Tan fur'], refs: ['Dog'] },
   runner:  { label: 'Runner',  pairs: [2], biped: true, fat: [0, 0.2], size: [0.95, 1.25], posture: [0.85, 1], crouch: [0.1, 0.3], front: [0.6, 0.8], hind: [1.2, 1.5],
              upper: [1.1, 1.35], lower: [0.85, 1.05], foot: [1.05, 1.3], gU: [1.2, 1.45], gL: [0.6, 0.75], shoulder: [0.15, 0.3], tailLen: [1.6, 2.4],
-             tails: ['Croc', 'Spiny', 'Ridged', 'Segmented', 'Spike'], patterns: ['stripes', 'spots'], skins: ['Green scales', 'Brown scales', 'Croc scutes'], refs: ['Chicken'] },
+             tails: ['Croc', 'Spiny', 'Ridged', 'Segmented', 'Spike'], patterns: ['stripes', 'spots'], skins: ['Green scales', 'Brown scales', 'Croc scutes', 'Moss beads', 'Charcoal scales', 'Red diamond', 'Teal dragon', 'Rust shingle', 'Python'], skinsB: ['Belly plates', 'Pale scales', 'Speckled sand'], refs: ['Chicken'] },
   waddler: { label: 'Waddler', pairs: [2], biped: true, fat: [0.6, 1], size: [0.85, 1.15], posture: [0.8, 1], crouch: [0.15, 0.35], front: [0.6, 0.8], hind: [0.75, 0.95],
              upper: [0.75, 0.9], lower: [0.65, 0.8], foot: [1.05, 1.3], gU: [1.3, 1.55], gL: [0.8, 0.95], shoulder: [0.4, 0.6], tailLen: [0.4, 0.75],
-             tails: ['Stub', 'Paddle', 'Leaf', 'Pig curl'], patterns: ['none', 'patches'], skins: ['Pig skin', 'Toad skin', 'Mottled skin', 'Black fur'], refs: ['Pinguin'] },
+             tails: ['Stub', 'Paddle', 'Leaf', 'Pig curl'], patterns: ['none', 'patches'], skins: ['Pig skin', 'Toad skin', 'Mottled skin', 'Black fur'], skinsB: ['White fur', 'Pale scales'], refs: ['Pinguin'] },
   crawler: { label: 'Crawler', pairs: [3, 4], biped: false, fat: [0.1, 0.4], size: [0.8, 1.05], posture: [0, 0], crouch: [0.15, 0.35], front: [0.75, 0.95], hind: [0.75, 0.95],
              upper: [0.75, 0.9], lower: [0.7, 0.85], foot: [0.85, 1], gU: [1.05, 1.25], gL: [0.7, 0.85], shoulder: [0.2, 0.4], tailLen: [1.2, 1.9],
-             tails: ['Segmented', 'Spiny', 'Croc', 'Club', 'Forked'], patterns: ['spots', 'stripes'], skins: ['Green scales', 'Brown scales', 'Croc scutes', 'Toad skin', 'Pebbled hide'], refs: ['procedural'] }
+             tails: ['Segmented', 'Spiny', 'Croc', 'Club', 'Forked'], patterns: ['spots', 'stripes'], skins: ['Green scales', 'Brown scales', 'Croc scutes', 'Toad skin', 'Pebbled hide', 'Slate beads', 'Teal beads', 'Violet beads', 'Gator back', 'Pebble boss', 'Lime spotted'], skinsB: ['Belly plates', 'Pale scales', 'Sand beads'], refs: ['procedural'] }
 };
 // Latin-ish species names from the body plan
 const NAME_ROOT = { grazer: ['Cervo', 'Equi', 'Grami', 'Prato'], stalker: ['Felo', 'Lyco', 'Umbra', 'Tigri'], bruiser: ['Ursa', 'Grossi', 'Taurо', 'Robu'],
@@ -1941,7 +2041,9 @@ $('randomize').onclick = () => {
     tailLen: roll(A.tailLen, 0.05), tailHeight: roll([0.25, 0.4], 0.02),
     pattern: pick(A.patterns), patAmount: roll([0.45, 0.75], 0.05), patScale: roll([0.8, 1.6], 0.05), counter: roll([0.25, 0.5], 0.05),
     ref: pick(A.refs),
-    skin: SKIN_NAMES.indexOf(pick(A.skins)), texTint: roll([0.15, 0.4], 0.05), texScale: roll([0.8, 1.4], 0.05)
+    skin: SKIN_NAMES.indexOf(pick(A.skins)), texTint: roll([0.15, 0.4], 0.05), texScale: roll([0.8, 1.4], 0.05),
+    skinB: A.skinsB ? SKIN_NAMES.indexOf(pick(A.skinsB)) : -1, skinMix: 0, skinSoft: roll([0.3, 0.7], 0.05),
+    regions: { back: 0, belly: 1, legs: Math.random() < 0.3 ? 1 : 0, head: 0, tail: Math.random() < 0.25 ? 1 : 0 }
   };
   if (A.biped) st.legs.front = { upper: 0.8, lower: 0.75, foot: 0.8 };
   const rules = enforceRules(st, arch);
@@ -2001,6 +2103,11 @@ $('elbow').onchange = e => { settings.elbow = e.target.checked; if (creature) { 
 bindSlider('terrain', 'terrain', v => v === 0 ? 'flat' : `${Math.round(v * 100)} cm`, false);
 $('terrain').addEventListener('input', () => { updateGround(loco.pos.x, loco.pos.z, true); if (creature) for (const l of creature.legs) l.needsPlant = true; });
 $('skin').insertAdjacentHTML('beforeend', SKIN_NAMES.map((n, i) => `<option value="${i}">${n}</option>`).join(''));
+$('skinB').insertAdjacentHTML('beforeend', SKIN_NAMES.map((n, i) => `<option value="${i}">${n}</option>`).join(''));
+$('skinB').onchange = e => { settings.skinB = +e.target.value; skinsReady.then(() => rebuild('skin B: ' + (settings.skinB < 0 ? 'none' : SKIN_NAMES[settings.skinB]))); };
+$('regions').addEventListener('change', e => { const r = e.target.dataset.region; if (!r) return; settings.regions[r] = e.target.checked ? 1 : 0; rebuild(`skin B region ${r} ${e.target.checked ? 'on' : 'off'}`); });
+bindSlider('skinMix', 'skinMix', v => `${Math.round(v * 100)}%`, true);
+bindSlider('skinSoft', 'skinSoft', v => v < 0.2 ? 'sharp' : v > 0.8 ? 'wide' : `${Math.round(v * 100)}%`, true);
 $('skin').onchange = e => { settings.skin = +e.target.value; skinsReady.then(() => rebuild('skin texture: ' + (settings.skin < 0 ? 'none' : SKIN_NAMES[settings.skin]))); };
 bindSlider('texScale', 'texScale', v => `×${v.toFixed(2)}`, true);
 bindSlider('texTint', 'texTint', v => `${Math.round(v * 100)}%`, true);
@@ -2015,7 +2122,7 @@ $('patSeg').addEventListener('click', e => { const b = e.target.closest('[data-p
 $('patColor').addEventListener('change', e => { settings.patColor = e.target.value; rebuild('skin colour ' + e.target.value); });
 
 // ---------- DNA: the whole creature as a portable code ----------
-const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs', 'girth', 'tailHeight', 'skin', 'texScale', 'texTint', 'bump'];
+const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs', 'girth', 'tailHeight', 'skin', 'skinB', 'skinMix', 'skinSoft', 'regions', 'texScale', 'texTint', 'bump'];
 function dnaEncode() {
   const d = { v: 1, pairs: genome.pairs, recipe, s: Object.fromEntries(DNA_KEYS.map(k => [k, settings[k]])) };
   return 'HOG1.' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
@@ -2023,7 +2130,9 @@ function dnaEncode() {
 function syncUi() {
   for (const end of ['front', 'hind']) for (const part of ['upper', 'lower', 'foot']) { const el = $(`seg-${end}-${part}`); el.value = settings.legs[end][part]; el.dispatchEvent(new Event('input')); }
   for (const part of ['upper', 'lower', 'foot']) { const el = $(`girth-${part}`); el.value = settings.girth[part]; el.dispatchEvent(new Event('input')); }
-  $('skin').value = settings.skin;
+  $('skin').value = settings.skin; $('skinB').value = settings.skinB;
+  document.querySelectorAll('#regions input').forEach(el => el.checked = !!settings.regions[el.dataset.region]);
+  for (const id of ['skinMix', 'skinSoft']) { $(id).value = settings[id]; $(id).dispatchEvent(new Event('input')); }
   for (const id of ['texScale', 'texTint', 'bump', 'tailHeight', 'tailLen', 'tailSegs', 'posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'patAmount', 'patScale', 'counter', 'terrain']) {
     const el = $(id); if (el) { el.value = settings[id]; el.dispatchEvent(new Event('input')); }
   }
