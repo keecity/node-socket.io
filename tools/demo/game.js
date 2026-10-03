@@ -106,7 +106,7 @@ function stepBall(dt) {
       const R = new pc.Vec3(C.x + hx / L * RIM_R, C.y, C.z + hz / L * RIM_R), dv = ball.pos.clone().sub(R), dl = dv.length();
       if (dl < BALL_R + TUBE) {
         const nn = dv.mulScalar(1 / dl); ball.pos.copy(R).add(nn.clone().mulScalar(BALL_R + TUBE));
-        const vn = ball.vel.dot(nn); if (vn < 0) { ball.vel.sub(nn.mulScalar(1.6 * vn)); ball.vel.mulScalar(0.86); sfx('rim'); }
+        const vn = ball.vel.dot(nn); if (vn < 0) { ball.vel.sub(nn.mulScalar(1.6 * vn)); ball.vel.mulScalar(0.86); sfx('rim', Math.min(1, 0.3 - vn * 0.15)); }
       }
       const s = H.side, past = s > 0 ? ball.pos.x + BALL_R > H.board.x : ball.pos.x - BALL_R < H.board.x;
       if (past && Math.abs(ball.pos.x - H.board.x) < 0.35 && Math.abs(ball.pos.z - H.board.z) < BOARD_HALF_W && ball.pos.y > BOARD_Y0 && ball.pos.y < BOARD_Y1 && ball.vel.x * s > 0) {
@@ -116,7 +116,7 @@ function stepBall(dt) {
       if (L < RIM_R && ball.pos.y < C.y && ball.pos.y > C.y - 0.55) { ball.vel.x *= 0.96; ball.vel.z *= 0.96; ball.vel.y = Math.max(ball.vel.y, -3.2); }
     }
     if (ball.pos.y < BALL_R) {
-      ball.pos.y = BALL_R; if (ball.vel.y < -0.8) sfx('bounce');
+      ball.pos.y = BALL_R; if (ball.vel.y < -0.8) sfx('bounce', Math.min(1, -ball.vel.y * 0.18));
       ball.vel.y = Math.abs(ball.vel.y) > 0.5 ? -ball.vel.y * 0.72 : 0; ball.vel.x *= 0.95; ball.vel.z *= 0.95;
     }
   }
@@ -154,7 +154,7 @@ function scored(H) {
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
-  sfx('swish'); game.phase = 'scored'; game.timer = 1.6; hud();
+  sfx('net'); setTimeout(() => sfx(t === HUMAN ? 'cheer' : 'boo', t === HUMAN ? 0.9 : 0.6), 150); game.phase = 'scored'; game.timer = 1.6; hud();
   if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; }
 }
 
@@ -542,20 +542,43 @@ app.on('update', dt => {
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
   bodies();
   for (const p of P) { if (!p.action || p.action.type !== 'dunk') { clamp(p.pos); place(p); } }
-  if (ball.free) stepBall(dt);
+  if (ball.free) stepBall(dt); else dribbleSound();
   updateCamera(dt); hud();
 });
 
 // ====================================================================== sound
-let actx = null;
-function sfx(kind) {
-  if (!actx || $('mute').classList.contains('on')) return;
-  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain(); o.connect(g); g.connect(actx.destination);
+let actx = null, master = null, crowdSrc = null; const SND = {}, lastPlay = {};
+function sfx(kind, vol = 1) {
+  if (!actx) return;
+  if (SND[kind]) {                                   // recorded samples
+    const now = actx.currentTime; if (now - (lastPlay[kind] || -9) < 0.1) return; lastPlay[kind] = now;
+    const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = SND[kind]; s.playbackRate.value = 0.94 + Math.random() * 0.12;
+    g.gain.value = vol; s.connect(g); g.connect(master); s.start(); return;
+  }
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain(); o.connect(g); g.connect(master);
   const env = (a, d, f0, f1, type) => { o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + d); g.gain.setValueAtTime(a, t); g.gain.exponentialRampToValueAtTime(0.001, t + d); o.start(t); o.stop(t + d); };
-  ({ bounce: () => env(0.22, 0.12, 140, 60, 'sine'), rim: () => env(0.12, 0.25, 900, 600, 'triangle'), board: () => env(0.18, 0.15, 220, 120, 'square'),
-     swish: () => env(0.08, 0.35, 2000, 600, 'sawtooth'), block: () => env(0.2, 0.12, 300, 90, 'square') }[kind] || (() => {}))();
+  ({ board: () => env(0.18, 0.15, 220, 120, 'square'), block: () => env(0.2, 0.12, 300, 90, 'square') }[kind] || (() => {}))();
 }
-document.addEventListener('pointerdown', () => { if (!actx) try { actx = new AudioContext(); } catch (e) {} }, { once: true });
+function startAudio() {
+  if (actx) { actx.resume(); return; }
+  try { actx = new AudioContext(); } catch (e) { return; }
+  master = actx.createGain(); master.gain.value = $('mute').classList.contains('on') ? 0 : 1; master.connect(actx.destination);
+  for (const k of ['bounce', 'net', 'cheer', 'crowd', 'boo', 'rim']) actx.decodeAudioData(bytes(ASSETS['snd_' + k]).buffer).then(buf => {
+    SND[k] = buf;
+    if (k === 'crowd') { crowdSrc = actx.createBufferSource(); crowdSrc.buffer = buf; crowdSrc.loop = true; const g = actx.createGain(); g.gain.value = 0.35; crowdSrc.connect(g); g.connect(master); crowdSrc.start(); }
+  }).catch(() => {});
+}
+document.addEventListener('pointerdown', startAudio);
+// dribble bounce: the held ball's lowest point in the bounce
+let dribY = 9, dribDown = false, dribP = null;
+function dribbleSound() {
+  const h = ball.holder; if (!h || h.action || ball.free) { dribP = null; return; }
+  const y = h.ballNode.getPosition().y;
+  if (h !== dribP) { dribP = h; dribY = y; dribDown = false; return; }
+  if (y < dribY - 0.002) dribDown = true;
+  else if (dribDown && y > dribY + 0.002) { if (dribY < 0.35) sfx('bounce', 0.55); dribDown = false; }
+  dribY = y;
+}
 
 // ====================================================================== controls
 let speed = 1;
@@ -564,7 +587,7 @@ $('speed').onclick = () => { speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1; ap
 const CAMS = ['arena', 'broadcast', 'follow'], CAMNAME = { arena: 'Arena cam', broadcast: 'Broadcast cam', follow: 'Follow cam' };
 $('cam').onclick = () => { camMode = CAMS[(CAMS.indexOf(camMode) + 1) % 3]; $('cam').textContent = CAMNAME[CAMS[(CAMS.indexOf(camMode) + 1) % 3]]; };
 $('restart').onclick = () => restart();
-$('mute').onclick = () => $('mute').classList.toggle('on');
+$('mute').onclick = () => { $('mute').classList.toggle('on'); if (master) master.gain.value = $('mute').classList.contains('on') ? 0 : 1; };
 // ====================================================================== player controls (Purple)
 // tap court = move ball handler there, tap teammate = pass, hold 1 s = timing meter, release = shoot
 const HUMAN = 0;
@@ -669,7 +692,7 @@ function humanAI(p, dt) {
 const ringEl = $('ring');
 function ring(g, sprint) { ringEl.style.borderColor = sprint ? '#ff6a3d' : '#ffd27a'; const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
 $('mode').onclick = () => { human.on = !human.on; $('mode').textContent = human.on ? 'Watch AI' : 'Play'; $('hint').hidden = !human.on; };
-window.game = { game, P, ball, HOOPS, S, inbound, give, human };
+window.game = { game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
 app.start(); $('loading').hidden = true;
 } catch (e) { $('loading').textContent = 'Unable to start: ' + (e && e.message || e); console.error(e); }

@@ -9,6 +9,7 @@ assets = json.loads(re.search(r'const ASSETS=(\{.*?\});', lines[end]).group(1))
 assets['player'] = base64.b64encode(open('player_rigged.glb', 'rb').read()).decode()
 assets['color'] = base64.b64encode(open('color.jpg', 'rb').read()).decode()
 assets['height'] = base64.b64encode(open('height.jpg', 'rb').read()).decode()
+for _s in ['bounce','net','cheer','crowd','boo','rim']: assets['snd_'+_s] = base64.b64encode(open('snd/'+_s+'.mp3','rb').read()).decode()
 assets['teal'] = base64.b64encode(open('tex_teal.jpg', 'rb').read()).decode()
 head = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Court Clash 3v3</title><style>
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:#080e17;font-family:system-ui,sans-serif;color:#eaf1f7;overflow:hidden}
