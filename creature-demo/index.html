@@ -29,6 +29,14 @@ body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-body); 
 .stat b { color: var(--ink); font-weight: 600; }
 .rail { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 16px; padding-inline: 16px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+.mixhead, .mix { display: grid; grid-template-columns: 52px repeat(4, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.mixhead span { font: 600 11px var(--f-mono); color: var(--muted); text-align: center; }
+.mix { margin-bottom: 4px; }
+.mix > span { font-weight: 600; }
+.mix label { display: grid; gap: 0; text-align: center; font: 11px var(--f-mono); color: var(--muted); }
+.mix input { width: 100%; accent-color: var(--accent); margin: 0; }
+.note { display: block; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.pitch { font: 12px var(--f-mono); color: var(--ink); background: var(--chip); border-radius: 6px; padding: 6px 8px; margin: 2px 0 10px; }
 .part { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; }
 .part > span { font-weight: 600; }
 .seg { display: flex; gap: 4px; }
@@ -68,8 +76,14 @@ details summary { cursor: pointer; font-weight: 600; }
   </div>
   <aside class="rail">
     <section>
-      <h2>Parts library · pick a variant</h2>
+      <h2>Recipe · blend the 4 kit variants per part</h2>
+      <div class="mixhead" aria-hidden="true"><span></span><span>1</span><span>2</span><span>3</span><span>4</span></div>
       <div id="parts"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn" id="randomize">Random recipe</button>
+        <button class="btn" id="resetRecipe">Reset</button>
+      </div>
+      <small class="note">Sliders set each variant's share; shapes morph in the fused mesh. Composite mode shows the dominant variant.</small>
     </section>
     <section>
       <h2>Grow</h2>
@@ -78,10 +92,28 @@ details summary { cursor: pointer; font-weight: 600; }
         <button class="btn primary" id="moreLegs">+ Leg pair</button>
         <span id="pairsOut" style="font:12px var(--f-mono);color:var(--muted)"></span>
       </div>
-      <div class="slider" style="margin-top:10px">
-        <label for="legLen">Leg length</label><output id="legLenOut"></output>
-        <input id="legLen" type="range" min="0.6" max="1.5" step="0.01" value="1">
-        <small>Scales the hip bones only. No rebind needed.</small>
+    </section>
+    <section>
+      <h2>Body plan</h2>
+      <div class="slider">
+        <label for="posture">Posture</label><output id="postureOut"></output>
+        <input id="posture" type="range" min="0" max="1" step="0.01" value="0">
+        <small>0 = on all legs, 1 = standing upright. Front legs that can't reach the ground become arms.</small>
+      </div>
+      <div class="slider">
+        <label for="front">Front legs</label><output id="frontOut"></output>
+        <input id="front" type="range" min="0.5" max="1.6" step="0.01" value="1">
+      </div>
+      <div class="slider">
+        <label for="hind">Hind legs</label><output id="hindOut"></output>
+        <input id="hind" type="range" min="0.5" max="1.6" step="0.01" value="1">
+        <small>Body pitch follows the height difference between front and hind hips. Live, no rebind.</small>
+      </div>
+      <div class="pitch" id="pitchOut"></div>
+      <div class="slider">
+        <label for="overlap">Joint overlap</label><output id="overlapOut"></output>
+        <input id="overlap" type="range" min="0" max="0.8" step="0.02" value="0.3">
+        <small>How far each part's end is pushed into its parent so joints fuse solid. Rebuilds.</small>
       </div>
     </section>
     <section>
@@ -188,8 +220,11 @@ const TINTS = {
 };
 const BONE_HUES = [[255,90,90],[90,170,255],[120,220,120],[255,200,60],[200,110,255],[60,220,220],[255,130,200],[160,160,60],[255,150,70],[110,120,255],[60,190,140],[230,90,170],[150,210,60]];
 
-const genome = { head: 0, body: 0, thigh: 0, shin: 0, foot: 0, tail: 0, pairs: 2 };
-const settings = { sharp: 4, seam: 0.012, legLen: 1, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true };
+const genome = { pairs: 2 };
+// the recipe: how much of each kit variant goes into every slot (normalised when used)
+const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
+const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -241,6 +276,20 @@ async function loadKit(url) {
   for (let t = 0; t < I.length; t += 3) {
     const part = kit[cellOfComp.get(comp[I[t]])];
     part.idx.push(remap.get(I[t]), remap.get(I[t+1]), remap.get(I[t+2]));
+  }
+  // straighten heads and bodies: rotate about y so each piece's long horizontal axis is +x
+  for (const k in kit) {
+    if (!/^(head|body)/.test(k)) continue;
+    const p = kit[k].pos, nr = kit[k].nrm, n3 = p.length / 3;
+    let cx = 0, cz = 0; for (let i = 0; i < p.length; i += 3) { cx += p[i]; cz += p[i+2]; } cx /= n3; cz /= n3;
+    let sxx = 0, szz = 0, sxz = 0;
+    for (let i = 0; i < p.length; i += 3) { const dx = p[i] - cx, dz = p[i+2] - cz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+    const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz), c = Math.cos(ang), sn = Math.sin(ang);
+    for (let i = 0; i < p.length; i += 3) {
+      const dx = p[i] - cx, dz = p[i+2] - cz; p[i] = cx + dx * c + dz * sn; p[i+2] = cz - dx * sn + dz * c;
+      const nx = nr[i], nz = nr[i+2]; nr[i] = nx * c + nz * sn; nr[i+2] = -nx * sn + nz * c;
+    }
+    kit[k].yawFix = ang * 180 / Math.PI;
   }
   for (const k in kit) {
     const p = kit[k].pos, mn = [1e9,1e9,1e9], mx = [-1e9,-1e9,-1e9];
@@ -309,21 +358,49 @@ function updateCamera() {
 const S = 1.6;          // kit → world scale
 let kit, creature = null;
 
-// copies a kit part into the creature buffers with scale, offset and optional z-mirror
-function addPart(buf, part, { scale = [S, S, S], offset, mirrorZ = false, slot, tint, socket }) {
-  const base = buf.pos.length / 3;
-  const p = part.pos, nr = part.nrm;
-  for (let i = 0; i < p.length; i += 3) {
-    const z = mirrorZ ? -p[i+2] : p[i+2];
-    buf.pos.push(p[i] * scale[0] + offset[0], p[i+1] * scale[1] + offset[1], z * scale[2] + offset[2]);
-    const nx = nr[i] / scale[0], ny = nr[i+1] / scale[1], nz = (mirrorZ ? -nr[i+2] : nr[i+2]) / scale[2];
-    const l = Math.hypot(nx, ny, nz) || 1;
-    buf.nrm.push(nx / l, ny / l, nz / l);
-    buf.slot.push(slot); buf.tint.push(tint); buf.socket.push(socket);
-  }
-  for (let t = 0; t < part.idx.length; t += 3) {
-    const a = part.idx[t] + base, b = part.idx[t+1] + base, c = part.idx[t+2] + base;
-    if (mirrorZ) buf.idx.push(a, c, b); else buf.idx.push(a, b, c);
+// Recipe blend: every variant of a slot is normalised into the same (weighted-average) bounding box,
+// so their shapes line up; in the fused mesh their distance fields are averaged → a true shape morph.
+// Composite mode can't morph mixed topology, so it shows the dominant variant.
+function blendPart(cat) {
+  let ws = recipe[cat].map(x => Math.max(0, x));
+  const dom = ws.indexOf(Math.max(...ws));
+  if (!settings.fuse) ws = ws.map((_, i) => i === dom ? 1 : 0);
+  let sum = ws.reduce((x, y) => x + y, 0); if (!sum) { ws = ws.map((_, i) => i === 0 ? 1 : 0); sum = 1; }
+  let used = ws.map((w, v) => ({ w: w / sum, v, part: kit[cat + v] })).filter(e => e.w > 0.02);
+  const us = used.reduce((x, e) => x + e.w, 0); used.forEach(e => e.w /= us);
+  const min = [0, 0, 0], max = [0, 0, 0], tint = [0, 0, 0];
+  for (const e of used) for (let a = 0; a < 3; a++) { min[a] += e.w * e.part.min[a]; max[a] += e.w * e.part.max[a]; tint[a] += e.w * TINTS[cat][e.v][a]; }
+  const variants = used.map(e => {
+    const pm = e.part.min, ps = e.part.max.map((v, a) => v - pm[a] || 1e-6), bs = max.map((v, a) => v - min[a]);
+    const k = bs.map((v, a) => v / ps[a]);
+    const pos = new Float32Array(e.part.pos.length), nrm = new Float32Array(e.part.nrm.length);
+    for (let i = 0; i < pos.length; i += 3) for (let a = 0; a < 3; a++) {
+      pos[i+a] = (e.part.pos[i+a] - pm[a]) * k[a] + min[a];
+      nrm[i+a] = e.part.nrm[i+a] / k[a];
+    }
+    return { pos, nrm, idx: e.part.idx, w: e.w, v: e.v };
+  });
+  return { cat, variants, min, max, tint, dominant: dom };
+}
+
+// copies a (blended) part into the creature buffers with scale, offset and optional z-mirror
+function addPart(buf, bp, { scale = [S, S, S], offset, mirrorZ = false, slot, socket }) {
+  const flip = mirrorZ !== (scale[0] * scale[1] * scale[2] < 0);   // mirrored → reverse winding
+  for (const vr of bp.variants) {
+    const base = buf.pos.length / 3;
+    const p = vr.pos, nr = vr.nrm;
+    for (let i = 0; i < p.length; i += 3) {
+      const z = mirrorZ ? -p[i+2] : p[i+2];
+      buf.pos.push(p[i] * scale[0] + offset[0], p[i+1] * scale[1] + offset[1], z * scale[2] + offset[2]);
+      const nx = nr[i] / scale[0], ny = nr[i+1] / scale[1], nz = (mirrorZ ? -nr[i+2] : nr[i+2]) / scale[2];
+      const l = Math.hypot(nx, ny, nz) || 1;
+      buf.nrm.push(nx / l, ny / l, nz / l);
+      buf.slot.push(slot); buf.tint.push(bp.tint); buf.socket.push(socket); buf.key.push(slot + '#' + vr.v); buf.kw.push(vr.w);
+    }
+    for (let t = 0; t < vr.idx.length; t += 3) {
+      const a = vr.idx[t] + base, b = vr.idx[t+1] + base, c = vr.idx[t+2] + base;
+      if (flip) buf.idx.push(a, c, b); else buf.idx.push(a, b, c);
+    }
   }
 }
 // world-space bbox of a kit part after scale (for placement)
@@ -331,37 +408,48 @@ const box = (part, sc) => ({ min: part.min.map((v, a) => v * sc[a]), max: part.m
 
 function assemble() {
   const g = genome;
-  const buf = { pos: [], nrm: [], idx: [], slot: [], tint: [], socket: [] };
+  const buf = { pos: [], nrm: [], idx: [], slot: [], tint: [], socket: [], key: [], kw: [] };
   const bones = [];   // { name, parent, pos(world rest), tip(world rest), own:[slot], color }
-  const P = k => kit[k];
+  const ov = settings.overlap;   // how far each child part's end is pushed into its parent
 
   // legs first, so we know the hip height above ground.
   // Parts are joined at their real contact points (centroid of the top / bottom band of
   // vertices), not their bounding boxes, so a bent shin's tip lands in the foot's ankle cuff.
-  const thigh = P('thigh' + g.thigh), shin = P('shin' + g.shin), foot = P('foot' + g.foot);
+  const thigh = blendPart('thigh'), shin = blendPart('shin'), foot = blendPart('foot');
   const legSc = [S * 0.8, S * 0.8, S * 0.8];
   const fb = box(foot, legSc);
-  const contact = (part, which, frac = 0.12) => {
-    const p = part.pos, y0 = part.min[1], y1 = part.max[1], hgt = y1 - y0;
+  // contact point = centroid of the top / bottom band of vertices, weighted over the recipe's variants
+  const contact = (bp, which, frac = 0.12) => {
+    const y0 = bp.min[1], y1 = bp.max[1], hgt = y1 - y0;
     const lim = which === 'top' ? y1 - hgt * frac : y0 + hgt * frac;
-    const c = [0, 0, 0]; let n = 0;
-    for (let i = 0; i < p.length; i += 3) {
-      if (which === 'top' ? p[i+1] >= lim : p[i+1] <= lim) { c[0] += p[i]; c[1] += p[i+1]; c[2] += p[i+2]; n++; }
+    const out = [0, 0, 0];
+    for (const vr of bp.variants) {
+      const p = vr.pos, c = [0, 0, 0]; let n = 0;
+      for (let i = 0; i < p.length; i += 3) if (which === 'top' ? p[i+1] >= lim : p[i+1] <= lim) { c[0] += p[i]; c[1] += p[i+1]; c[2] += p[i+2]; n++; }
+      for (let a = 0; a < 3; a++) out[a] += vr.w * c[a] / Math.max(n, 1) * legSc[a];
     }
-    return c.map((v, a) => v / n * legSc[a]);
+    return out;
   };
+  const len = v => Math.hypot(v[0], v[1], v[2]), unit = v => { const l = len(v) || 1; return v.map(x => x / l); }, mul = (v, k) => v.map(x => x * k);
   const sub = (a, b) => a.map((v, i) => v - b[i]), add = (a, b) => a.map((v, i) => v + b[i]);
-  // leg-local chain, origin at the hip
-  const thighOff = sub([0, 0, 0], contact(thigh, 'top'));
-  const kneeL = add(thighOff, contact(thigh, 'bottom'));
-  const shinOff = sub(kneeL, contact(shin, 'top'));
-  const ankleL = add(shinOff, contact(shin, 'bottom'));
-  const footOff = sub(ankleL, contact(foot, 'top', 0.2));
+  // leg-local chain, origin at the hip. Each child's top end is pushed up into its parent along the
+  // parent's axis (joint overlap), and the joint pivot sits in the middle of that overlap.
+  const tTop = contact(thigh, 'top'), tBot = contact(thigh, 'bottom'), sTop = contact(shin, 'top'), sBot = contact(shin, 'bottom');
+  const fTop = contact(foot, 'top', 0.2);
+  const thighAxis = unit(sub(tTop, tBot)), shinAxis = unit(sub(sTop, sBot));
+  const shinLen = len(sub(sTop, sBot)), footH = (foot.max[1] - foot.min[1]) * legSc[1];
+  const thighOff = sub([0, 0, 0], tTop);
+  const kneeEnd = add(thighOff, tBot);
+  const shinOff = add(sub(kneeEnd, sTop), mul(thighAxis, ov * shinLen * 0.5));
+  const kneeL = add(kneeEnd, mul(thighAxis, ov * shinLen * 0.25));
+  const ankleEnd = add(shinOff, sBot);
+  const footOff = add(sub(ankleEnd, fTop), mul(shinAxis, ov * footH * 0.6));
+  const ankleL = add(ankleEnd, mul(shinAxis, ov * footH * 0.3));
   const groundDrop = -(footOff[1] + fb.min[1]);
   // toe: front-most point of the foot near the ground
   const toeL = [footOff[0] + fb.max[0], footOff[1] + fb.min[1] + 0.01, ankleL[2]];
   // body, stretched along x as leg pairs grow
-  const body = P('body' + g.body);
+  const body = blendPart('body');
   // front-to-back footprint of one leg (thigh, shin, foot as placed) – neighbouring legs must not overlap,
   // or the fused surface would weld them together
   const xs = [[thigh, thighOff], [shin, shinOff], [foot, footOff]].flatMap(([pt, off]) => [pt.min[0] * legSc[0] + off[0], pt.max[0] * legSc[0] + off[0]]);
@@ -376,7 +464,7 @@ function assemble() {
   const bodyMinY = hipY - bodyH * 0.3;             // hips sink 30% into the belly
   const bodyOff = [-(bb.min[0] + bb.max[0]) / 2, bodyMinY - bb.min[1], -(bb.min[2] + bb.max[2]) / 2];
   const bodyCenter = [0, bodyMinY + bodyH / 2, 0];
-  addPart(buf, body, { scale: bodySc, offset: bodyOff, slot: 'body', tint: TINTS.body[g.body], socket: bodyCenter });
+  addPart(buf, body, { scale: bodySc, offset: bodyOff, slot: 'body', socket: bodyCenter });
   // spine: pelvis → spine → chest along the body's centre line, so the torso can bend and roll
   const cy = bodyCenter[1], sx = [-0.46, -0.16, 0.16, 0.46].map(f => f * bodyL);
   bones.push({ name: 'pelvis', parent: null, pos: [sx[0], cy, 0], tip: [sx[1], cy, 0], own: ['body'] });
@@ -385,23 +473,23 @@ function assemble() {
   const spineFor = x => x > 0.1 * bodyL ? 'chest' : x < -0.1 * bodyL ? 'pelvis' : 'spine';
 
   // head at the front socket
-  const head = P('head' + g.head), headSc = [S * 1.15, S * 1.15, S * 1.3];
+  const head = blendPart('head'), headSc = [S * 1.15, S * 1.15, S * 1.3];
   const hb = box(head, headSc), headL = hb.max[0] - hb.min[0];
   const neck = [bodyL * 0.5 - headL * 0.1, bodyCenter[1] + bodyH * 0.15, 0];
-  const headOff = [neck[0] - hb.min[0] - headL * 0.15, neck[1] - (hb.min[1] + hb.max[1]) / 2 + bodyH * 0.12, -(hb.min[2] + hb.max[2]) / 2];
-  addPart(buf, head, { scale: headSc, offset: headOff, slot: 'head', tint: TINTS.head[g.head], socket: neck });
+  const headOff = [neck[0] - hb.min[0] - headL * (0.1 + ov * 0.3), neck[1] - (hb.min[1] + hb.max[1]) / 2 + bodyH * 0.12, -(hb.min[2] + hb.max[2]) / 2];
+  addPart(buf, head, { scale: headSc, offset: headOff, slot: 'head', socket: neck });
   const headMid = [(hb.min[0] + hb.max[0]) / 2 + headOff[0] - headL * 0.12, (hb.min[1] + hb.max[1]) / 2 + headOff[1], 0];
   bones.push({ name: 'neck', parent: 'chest', pos: neck, tip: headMid, own: ['head'] });
   bones.push({ name: 'head', parent: 'neck', pos: headMid, tip: [hb.max[0] + headOff[0], headMid[1], 0], own: ['head'] });
 
   // tail at the rump socket, mirrored in x so the curl points backwards
-  const tail = P('tail' + g.tail), tailSc = [-S, S, S];
+  const tail = blendPart('tail'), tailSc = [-S, S, S];
   const tlb = { min: [-tail.max[0] * S, tail.min[1] * S, tail.min[2] * S], max: [-tail.min[0] * S, tail.max[1] * S, tail.max[2] * S] };
   const tailL = tlb.max[0] - tlb.min[0];
   const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * 0.2, 0];
-  const tailOff = [rump[0] - tlb.max[0] + tailL * 0.15, rump[1] - tlb.max[1] + (tlb.max[1] - tlb.min[1]) * 0.2, -(tlb.min[2] + tlb.max[2]) / 2];
+  const tailOff = [rump[0] - tlb.max[0] + tailL * (0.1 + ov * 0.3), rump[1] - tlb.max[1] + (tlb.max[1] - tlb.min[1]) * 0.2, -(tlb.min[2] + tlb.max[2]) / 2];
   const tailBase = buf.pos.length / 3;
-  addPart(buf, tail, { scale: tailSc, offset: tailOff, slot: 'tail', tint: TINTS.tail[g.tail], socket: rump });
+  addPart(buf, tail, { scale: tailSc, offset: tailOff, slot: 'tail', socket: rump });
   // tail chain follows the actual curl: joints at the centroids of distance bands from the rump
   {
     const tv = [];
@@ -424,9 +512,9 @@ function assemble() {
       const mirror = side < 0;
       const W = l => [fx + l[0], hipY + l[1], hz + (mirror ? -l[2] : l[2])];   // leg-local → world
       const knee = W(kneeL), ankle = W(ankleL), toe = W(toeL);
-      addPart(buf, thigh, { scale: legSc, offset: W(thighOff), mirrorZ: mirror, slot: id + 'a', tint: TINTS.thigh[g.thigh], socket: hip });
-      addPart(buf, shin,  { scale: legSc, offset: W(shinOff), mirrorZ: mirror, slot: id + 'b', tint: TINTS.shin[g.shin], socket: knee });
-      addPart(buf, foot,  { scale: legSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', tint: TINTS.foot[g.foot], socket: ankle });
+      addPart(buf, thigh, { scale: legSc, offset: W(thighOff), mirrorZ: mirror, slot: id + 'a', socket: hip });
+      addPart(buf, shin,  { scale: legSc, offset: W(shinOff), mirrorZ: mirror, slot: id + 'b', socket: knee });
+      addPart(buf, foot,  { scale: legSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', socket: ankle });
       const ball = W([ankleL[0] + (toeL[0] - ankleL[0]) * 0.55, toeL[1] + 0.008, ankleL[2]]);
       bones.push({ name: id + '_hip', parent: spineFor(fx), pos: hip, tip: knee, own: [id + 'a'], leg: { pair: p, side } });
       bones.push({ name: id + '_knee', parent: id + '_hip', pos: knee, tip: ankle, own: [id + 'b'] });
@@ -547,32 +635,34 @@ function fuseMesh(asm, h, k) {
   const T = {};
   let t = performance.now();
   const lap = name => { const n = performance.now(); T[name] = (T[name] || 0) + n - t; t = n; };
-  const P = asm.buf.pos, I = asm.buf.idx, slot = asm.buf.slot;
+  const P = asm.buf.pos, I = asm.buf.idx, slot = asm.buf.slot, keyOf = asm.buf.key, wOf = asm.buf.kw;
   const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
   for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], P[i+a]); mx[a] = Math.max(mx[a], P[i+a]); }
+  const zr = Math.max(-mn[2], mx[2]); mn[2] = -zr; mx[2] = zr;   // grid symmetric about the centreline
   const pad = k + 4 * h;
   const o = mn.map(v => v - pad);
   const nx = Math.ceil((mx[0] - mn[0] + 2 * pad) / h) + 1, ny = Math.ceil((mx[1] - mn[1] + 2 * pad) / h) + 1, nz = Math.ceil((mx[2] - mn[2] + 2 * pad) / h) + 1;
   const N = nx * ny * nz, at = (x, y, z) => x + nx * (y + ny * z);
 
-  // group triangles by part
-  const tris = new Map();
-  for (let t3 = 0; t3 < I.length; t3 += 3) { const s = slot[I[t3]]; if (!tris.has(s)) tris.set(s, []); tris.get(s).push(t3); }
+  // group triangles by slot, then by recipe variant
+  const groups = new Map();
+  for (let t3 = 0; t3 < I.length; t3 += 3) {
+    const sl = slot[I[t3]], key = keyOf[I[t3]];
+    if (!groups.has(sl)) groups.set(sl, new Map());
+    const g = groups.get(sl); if (!g.has(key)) g.set(key, { w: wOf[I[t3]], list: [] }); g.get(key).list.push(t3);
+  }
   const margin = Math.ceil(k / h) + 3;
   const parts = new Map();
   const cp = new Float64Array(6);
-  for (const [name, list] of tris) {
-    // sub-box of the global grid around this part
-    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
-    for (const t3 of list) for (let c = 0; c < 3; c++) { const v = I[t3 + c] * 3; for (let a = 0; a < 3; a++) { const g = (P[v+a] - o[a]) / h; lo[a] = Math.min(lo[a], g); hi[a] = Math.max(hi[a], g); } }
-    const bmin = [0, 1, 2].map(a => Math.max(0, Math.floor(lo[a]) - margin));
-    const dims = [nx, ny, nz];
-    const bmax = [0, 1, 2].map(a => Math.min(dims[a] - 1, Math.ceil(hi[a]) + margin));
-    const [lx, ly, lz] = [0, 1, 2].map(a => bmax[a] - bmin[a] + 1);
+  const dims = [nx, ny, nz];
+  const centreline = sl => sl === 'body' || sl === 'head';
+
+  // signed distance of one triangle list over a sub-box: exact near the surface, EDT further out,
+  // sign from flood-filling the outside (+ closest-triangle side within 1.5 voxels)
+  function partSdf(list, bmin, lx, ly, lz) {
     const L = lx * ly * lz, li = (x, y, z) => x + lx * (y + ly * z);
-    // exact squared distance (in voxels²) for voxels within 2 voxels of a triangle
     const f = new Float64Array(L).fill(BIG);
-    const near = new Int32Array(L).fill(-1);   // closest triangle, for the near-surface sign
+    const near = new Int32Array(L).fill(-1);
     const nearSign = new Int8Array(L);
     for (const t3 of list) {
       const a = I[t3]*3, b = I[t3+1]*3, c = I[t3+2]*3;
@@ -585,7 +675,6 @@ function fuseMesh(asm, h, k) {
         const i = li(x, y, z);
         if (d2 < f[i]) {
           f[i] = d2; near[i] = t3;
-          // which side of this triangle the voxel is on (face normal from winding)
           const e1x = P[b]-P[a], e1y = P[b+1]-P[a+1], e1z = P[b+2]-P[a+2], e2x = P[c]-P[a], e2y = P[c+1]-P[a+1], e2z = P[c+2]-P[a+2];
           const fnx = e1y*e2z - e1z*e2y, fny = e1z*e2x - e1x*e2z, fnz = e1x*e2y - e1y*e2x;
           nearSign[i] = ((px-cp[0])*fnx + (py-cp[1])*fny + (pz-cp[2])*fnz) >= 0 ? 1 : -1;
@@ -594,9 +683,8 @@ function fuseMesh(asm, h, k) {
     }
     for (let i = 0; i < L; i++) if (f[i] > 4) f[i] = BIG;
     lap('exact distance');
-    const d = edt3dInit(f, lx, ly, lz);   // propagate outwards
+    const d = edt3d(f, lx, ly, lz);
     lap('distance field');
-    // sign: flood the outside from the box boundary through voxels clear of the surface
     const out = new Uint8Array(L), q = new Int32Array(L); let qh = 0, qt = 0;
     for (let z = 0; z < lz; z++) for (let y = 0; y < ly; y++) for (let x = 0; x < lx; x++) {
       if (x && y && z && x < lx - 1 && y < ly - 1 && z < lz - 1) continue;
@@ -605,10 +693,38 @@ function fuseMesh(asm, h, k) {
     const nb = [1, -1, lx, -lx, lx * ly, -lx * ly];
     while (qh < qt) { const i = q[qh++]; for (const dn of nb) { const j = i + dn; if (j >= 0 && j < L && !out[j] && d[j] > 1.5) { out[j] = 1; q[qt++] = j; } } }
     const sdf = new Float32Array(L);
-    // far voxels: flood result; voxels within 1.5 of the surface: side of the closest triangle
     for (let i = 0; i < L; i++) sdf[i] = (out[i] || (d[i] <= 1.5 && near[i] >= 0 && nearSign[i] > 0) ? d[i] : -d[i]) * h;
     lap('sign');
-    parts.set(name, { sdf, bmin, lx, ly, lz });
+    return sdf;
+  }
+
+  for (const [name, vars] of groups) {
+    // one shared sub-box for all variants of the slot (symmetric for centreline parts)
+    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    for (const { list } of vars.values()) for (const t3 of list) for (let c = 0; c < 3; c++) { const v = I[t3 + c] * 3; for (let a = 0; a < 3; a++) { const g = (P[v+a] - o[a]) / h; lo[a] = Math.min(lo[a], g); hi[a] = Math.max(hi[a], g); } }
+    const bmin = [0, 1, 2].map(a => Math.max(0, Math.floor(lo[a]) - margin));
+    const bmax = [0, 1, 2].map(a => Math.min(dims[a] - 1, Math.ceil(hi[a]) + margin));
+    if (centreline(name)) { const z0 = Math.min(bmin[2], nz - 1 - bmax[2]); bmin[2] = z0; bmax[2] = nz - 1 - z0; }
+    const [lx, ly, lz] = [0, 1, 2].map(a => bmax[a] - bmin[a] + 1);
+    const L = lx * ly * lz;
+    // recipe morph: weighted average of each variant's signed distance
+    const sdf = new Float32Array(L);
+    let wsum = 0;
+    for (const { w, list } of vars.values()) {
+      const one = partSdf(list, bmin, lx, ly, lz);
+      for (let i = 0; i < L; i++) sdf[i] += w * one[i];
+      wsum += w;
+    }
+    for (let i = 0; i < L; i++) sdf[i] /= wsum;
+    // centreline parts are made exactly left/right symmetric
+    if (centreline(name)) {
+      for (let z = 0; z < lz >> 1; z++) for (let y = 0; y < ly; y++) for (let x = 0; x < lx; x++) {
+        const i = x + lx * (y + ly * z), j = x + lx * (y + ly * (lz - 1 - z));
+        const m = 0.5 * (sdf[i] + sdf[j]); sdf[i] = m; sdf[j] = m;
+      }
+    }
+    lap('morph');
+    parts.set(name, { sdf, bmin, lx, ly, lz, variants: vars.size });
   }
 
   // connections: body–head, body–tail, body–thigh, thigh–shin, shin–foot
@@ -707,7 +823,6 @@ function fuseMesh(asm, h, k) {
   return { pos, idx: Uint32Array.from(idx), grid: [nx, ny, nz], T, parts: parts.size, pairs: pairs.length };
 }
 // EDT over a grid that already holds squared seed distances (voxels²)
-function edt3dInit(grid, nx, ny, nz) { return edt3d(grid, nx, ny, nz); }
 
 // closest point on triangle (Ericson, Real-Time Collision Detection 5.1.5) → [x,y,z,u,v,w] (barycentric of a,b,c)
 function closestOnTri(px, py, pz, P, a, b, c, out) {
@@ -918,23 +1033,25 @@ function initLegs() {
     const l = { id, pair: b.leg.pair, side: b.leg.side,
       hip: bones[id + '_hip'], knee: bones[id + '_knee'], ankle: bones[id + '_ankle'], toe: bones[id + '_toe'],
       hipRoot: hipB.pos, ankleRoot: ankleB.pos,
-      plant: new V3(), lift: new V3(), target: new V3(), foot: new V3(), inSwing: false, skip: true };
+      plant: new V3(), lift: new V3(), target: new V3(), foot: new V3(), inSwing: false, skip: true, needsPlant: true, L: 1, arm: 0 };
     const v1 = l.knee.restPos, v2 = l.ankle.restPos;     // rest bone vectors (hip and knee space)
     l.l1 = Math.hypot(v1.x, v1.y); l.l2 = Math.hypot(v2.x, v2.y);
     l.a1 = Math.atan2(v1.y, v1.x); l.a2 = Math.atan2(v2.y, v2.x);
     l.bend = Math.sign(v1.x * v2.y - v1.y * v2.x) || 1;
     l.ankleZ = v1.z + v2.z;
-    homeOf(l, l.plant); l.foot.copy(l.plant);
     return l;
   });
 }
 // where a leg's ankle rests on the ground right now (follows the body's position and heading)
+// (from the hip's current world position, so a pitched or upright body moves the footholds too)
 function homeOf(l, out) {
-  const L = settings.legLen, h = l.hipRoot, a = l.ankleRoot;
-  const lx = h[0] + (a[0] - h[0]) * L, lz = a[2];
+  const L = l.L, h = l.hipRoot, a = l.ankleRoot, hw = l.hip.getPosition();
+  const ox = (a[0] - h[0]) * L, oz = a[2] - h[2];
   const c = Math.cos(loco.yaw), s = Math.sin(loco.yaw);
-  return out.set(loco.pos.x + lx * c + lz * s, a[1] * L, loco.pos.z - lx * s + lz * c);
+  return out.set(hw.x + ox * c + oz * s, a[1] * L, hw.z - ox * s + oz * c);
 }
+// leg length scale for a leg: front pair → hind pair interpolated
+const legScale = (l, pairs) => pairs > 1 ? settings.front + (settings.hind - settings.front) * l.pair / (pairs - 1) : settings.hind;
 const gaitOffset = (l, pairs) => settings.gait === 'wave'
   ? fract(-l.pair / pairs * 0.5 + (l.side < 0 ? 0.5 : 0))
   : fract((l.pair + (l.side < 0 ? 1 : 0)) * 0.5);
@@ -942,7 +1059,7 @@ const swingFrac = pairs => settings.gait === 'wave' ? 0.9 / (2 * pairs) : 0.38;
 
 // analytic two-bone IK: hip + knee reach the ankle target, hip rolls sideways for off-plane targets
 function solveLeg(l, footWorld, footPitch, toeCurl) {
-  const L = settings.legLen;
+  const L = l.L;
   l.hip.setLocalScale(L, L, L);
   m4.copy(l.hip.parent.getWorldTransform()).invert();
   m4.transformPoint(footWorld, tv);
@@ -990,8 +1107,20 @@ function animate(dt) {
   time += dt;
   const { bones, asm, legs } = creature;
   creature.oneShots = creature.oneShots.filter(o => time - o.start < o.dur);
-  const L = settings.legLen, hipY = asm.hipY * L, pairs = genome.pairs;
+  const pairs = genome.pairs;
+  for (const l of legs) l.L = legScale(l, pairs);
+  // stance height comes from the hind legs; the walk scales with it
+  const hipY = asm.hipY * settings.hind, L = settings.hind;
 
+  // --- body orientation: pitch fitted to front vs hind hip heights, then blended toward upright by posture
+  const hips = asm.bones.filter(b => b.leg);
+  const frontX = Math.max(...hips.map(b => b.pos[0])), rearX = Math.min(...hips.map(b => b.pos[0]));
+  const pelvisX = asm.bones[0].pos[0];
+  const hF = asm.hipY * settings.front, hR = hipY;
+  const legPitch = pairs > 1 ? Math.asin(clamp((hF - hR) / Math.max(frontX - rearX, 1e-3), -0.8, 0.8)) : 0;
+  const upright = 1.33;   // ~76° when fully standing
+  const bodyPitch = legPitch + settings.posture * (upright - legPitch);
+  creature.bodyPitch = bodyPitch;
   // --- steering and speed
   const busy = loco.stomp || (loco.jump && loco.jump.t < 0.3);
   const target = moving && !busy ? settings.speed : 0;
@@ -1018,7 +1147,7 @@ function animate(dt) {
     else loco.jump = null;
     if (j.t >= 0.78 && !j.landed) { j.landed = true; for (const l of legs) { homeOf(l, l.plant); l.inSwing = false; } }
   }
-  creature.root.setPosition(loco.pos.x, asm.hipY * (L - 1) + jumpY, loco.pos.z);
+  creature.root.setPosition(loco.pos.x, hR - asm.hipY + jumpY, loco.pos.z);
   creature.root.setEulerAngles(0, loco.yaw * R2D, 0);
 
   // --- gait clock: runs with speed, keeps running while feet still need to settle
@@ -1026,9 +1155,6 @@ function animate(dt) {
   const strideLen = 0.55 * hipY / (1 - sw);
   let f = loco.speed / strideLen;
   const home = new V3();
-  const settling = legs.some(l => l.inSwing && !l.skip) || legs.some(l => l.plant.distance(homeOf(l, home)) > 0.012 * L);
-  if (settling && f < 1.3) f = 1.3;
-  if (!loco.jump && !loco.stomp) loco.cycle += f * dt;
 
   // --- stomp: both front feet rise, then slam
   let stompLean = 0;
@@ -1041,16 +1167,44 @@ function animate(dt) {
   const pelvis = bones.pelvis;
   pelvis.setLocalPosition(pelvis.restPos.x, pelvis.restPos.y - bob - 0.004 * L * (1 - Math.min(amt, 1)) * (breathe * 0.5 + 0.5), pelvis.restPos.z);
   const bend = 4 * Math.min(amt, 1) * Math.sin(cyc) + loco.yawRate * 9;
-  pelvis.setLocalEulerAngles(2.5 * Math.min(amt, 1) * Math.sin(cyc), -bend * 0.4, jumpPitch * 0.5 + stompLean * 4);
+  pelvis.setLocalEulerAngles(2.5 * Math.min(amt, 1) * Math.sin(cyc), -bend * 0.4, bodyPitch * R2D + jumpPitch * 0.5 + stompLean * 4);
   bones.spine.setLocalEulerAngles(0, bend * 0.5, jumpPitch * 0.3 + stompLean * 4);
+  // exact stance height for this pose: lift/lower the whole body so the hind hips sit at hind stance height
+  {
+    const hind = legs.filter(l => l.pair === pairs - 1);
+    const avgY = hind.reduce((sum, l) => sum + l.hip.getPosition().y, 0) / hind.length;
+    creature.root.translate(0, hR + jumpY - avgY, 0);
+  }
   bones.chest.setLocalEulerAngles(-1.5 * Math.min(amt, 1) * Math.sin(cyc), bend * 0.6, 0.8 * breathe * (1 - Math.min(amt, 1)) + jumpPitch * 0.2 + stompLean * 6);
+
+  // --- which legs still reach the ground; the rest become arms
+  const armPose = new V3();
+  for (const l of legs) {
+    homeOf(l, home);
+    if (l.needsPlant) { l.plant.copy(home); l.needsPlant = false; }
+    const reach = (l.l1 + l.l2) * l.L;
+    const need = l.hip.getPosition().distance(home) / reach;   // can this hip reach its foothold at all?
+    l.arm += (pc.math.smoothstep(0.93, 1.08, need) - l.arm) * Math.min(1, dt * 4);
+    if (settings.posture > 0.55 && l.pair === 0 && pairs > 1) l.arm += (1 - l.arm) * Math.min(1, dt * 4);
+  }
+  const groundLegs = legs.filter(l => l.arm < 0.5);
+  const settling = groundLegs.some(l => l.inSwing && !l.skip) || groundLegs.some(l => l.plant.distance(homeOf(l, home)) > 0.012 * l.L);
+  if (settling && f < 1.3) f = 1.3;
+  if (!loco.jump && !loco.stomp) loco.cycle += f * dt;
 
   // --- legs
   const liftH = 0.15 * hipY * clamp(0.6 + amt * 0.5, 0.6, 1.2);
   for (const l of legs) {
     homeOf(l, home);
     let pitch = 0, curl = 0;
-    if (loco.jump) {
+    if (l.arm > 0.5) { l.plant.copy(home); l.inSwing = false; }
+    if (l.arm > 0.5 && !loco.jump) {
+      // held in front of the chest, swinging a little against the stride
+      const reach = (l.l1 + l.l2) * l.L, hp = l.hip.restPos;
+      armPose.set(hp.x + 0.32 * reach + 0.05 * reach * Math.sin(cyc + (l.side > 0 ? 0 : Math.PI)) * Math.min(amt, 1), hp.y - 0.5 * reach, hp.z * 1.15);
+      l.hip.parent.getWorldTransform().transformPoint(armPose, armPose);
+      l.foot.lerp(home, armPose, l.arm); pitch = -50; curl = 20;
+    } else if (loco.jump) {
       if (airborne) {
         l.foot.copy(home); l.foot.y += Math.max(0, jumpY) + 0.12 * hipY * tuck;
         pitch = -20 * tuck; curl = 25 * tuck;
@@ -1082,7 +1236,7 @@ function animate(dt) {
 
   // --- neck + head: look into turns, idle glances, nod on oink; head stays level
   const nod = activeShot(o => o.clip === 'nod');
-  let hPitch = -jumpPitch * 0.6 - stompLean * 8, hYaw = loco.yawRate * 14 + (1 - Math.min(amt, 1)) * 16 * Math.sin(time * 0.5) * Math.sin(time * 0.17 + 2);
+  let hPitch = -jumpPitch * 0.6 - stompLean * 8, hYaw = loco.yawRate * 6 + (1 - Math.min(amt, 1)) * 8 * Math.sin(time * 0.5) * Math.sin(time * 0.17 + 2);
   if (nod) { const u = (time - nod.start) / nod.dur; hPitch += -Math.sin(u * Math.PI * 4) * 16 * (1 - u); }
   bones.neck.setLocalEulerAngles(0, hYaw * 0.4, hPitch * 0.4 + 2 * Math.min(amt, 1) * Math.sin(2 * cyc));
   qA.setFromAxisAngle(AY, loco.yaw * R2D + hYaw); qB.setFromAxisAngle(AZ, hPitch);
@@ -1095,13 +1249,15 @@ function animate(dt) {
     const b = bones['tail' + i]; if (!b) continue;
     const yaw = wag ? 30 * Math.sin(time * 18 - i * 0.8) * (1 - wu * 0.6)
       : 9 * Math.min(amt, 1) * Math.sin(cyc - i * 0.9) + 6 * Math.sin(time * 2.1 - i * 0.9) - loco.yawRate * 10;
-    const pitch = (i === 0 ? 6 * Math.min(amt, 1) + (wag ? 12 : 0) : 0) + 3 * Math.sin(time * 1.3 - i);
+    const pitch = (i === 0 ? 6 * Math.min(amt, 1) + (wag ? 12 : 0) - bodyPitch * R2D * 0.55 : 0) + 3 * Math.sin(time * 1.3 - i);
     b.setLocalEulerAngles(0, yaw, pitch - jumpPitch * 0.8);
   }
 
   // camera follows the creature
   orbit.target.x += (loco.pos.x - orbit.target.x) * Math.min(1, dt * 3);
   orbit.target.z += (loco.pos.z - orbit.target.z) * Math.min(1, dt * 3);
+  orbit.target.y += (hR * 0.8 + Math.sin(bodyPitch) * (frontX - rearX) * 0.5 - orbit.target.y) * Math.min(1, dt * 2);
+  if (time - (creature.lastPitchUi || 0) > 0.25) { creature.lastPitchUi = time; $('pitchOut').textContent = `body pitch ${(bodyPitch * R2D).toFixed(0)}° · ${groundLegs.length} legs on the ground, ${legs.length - groundLegs.length} arms`; }
 }
 
 const tmpA = new V3(), tmpB = new V3();
@@ -1138,13 +1294,27 @@ function rebuild(reason) {
 }
 const CATS = [['head', 'Head'], ['body', 'Body'], ['thigh', 'Thigh'], ['shin', 'Shin'], ['foot', 'Foot'], ['tail', 'Tail']];
 function renderParts() {
-  $('parts').innerHTML = CATS.map(([k, label]) => `<div class="part"><span>${label}</span><div class="seg" role="group" aria-label="${label} variant">${
-    [0, 1, 2, 3].map(i => `<button data-cat="${k}" data-i="${i}" aria-pressed="${genome[k] === i}">${i + 1}</button>`).join('')}</div></div>`).join('');
+  $('parts').innerHTML = CATS.map(([k, label]) => {
+    const sum = recipe[k].reduce((x, y) => x + y, 0) || 1;
+    return `<div class="mix"><span>${label}</span>${recipe[k].map((w, i) =>
+      `<label><input type="range" id="mix-${k}-${i}" data-cat="${k}" data-i="${i}" min="0" max="1" step="0.05" value="${w}" aria-label="${label} variant ${i + 1}"><span id="mixo-${k}-${i}">${Math.round(w / sum * 100)}%</span></label>`).join('')}</div>`;
+  }).join('');
 }
-$('parts').addEventListener('click', e => {
-  const b = e.target.closest('button[data-cat]'); if (!b) return;
-  genome[b.dataset.cat] = +b.dataset.i; renderParts(); rebuild(`swap ${b.dataset.cat} → variant ${+b.dataset.i + 1}`); showManifest();
+function syncMixLabels(k) {
+  const sum = recipe[k].reduce((x, y) => x + y, 0) || 1;
+  recipe[k].forEach((w, i) => $(`mixo-${k}-${i}`).textContent = Math.round(w / sum * 100) + '%');
+}
+$('parts').addEventListener('input', e => { const t = e.target; if (!t.dataset.cat) return; recipe[t.dataset.cat][+t.dataset.i] = +t.value; syncMixLabels(t.dataset.cat); });
+$('parts').addEventListener('change', e => {
+  const t = e.target; if (!t.dataset.cat) return;
+  if (recipe[t.dataset.cat].every(w => w === 0)) { recipe[t.dataset.cat][+t.dataset.i] = 0.05; t.value = 0.05; syncMixLabels(t.dataset.cat); }
+  rebuild(`recipe: ${t.dataset.cat} = [${recipe[t.dataset.cat].map(w => w.toFixed(2)).join(', ')}]`); showManifest();
 });
+$('randomize').onclick = () => {
+  for (const [k] of CATS) { const a = Math.floor(Math.random() * 4), b = Math.floor(Math.random() * 4), t = Math.round(Math.random() * 20) / 20; recipe[k] = [0, 0, 0, 0]; recipe[k][a] += 1 - t; recipe[k][b] += t; }
+  renderParts(); rebuild('recipe: random blend'); showManifest();
+};
+$('resetRecipe').onclick = () => { Object.assign(recipe, JSON.parse(JSON.stringify(RECIPE_DEFAULT))); renderParts(); rebuild('recipe: reset'); showManifest(); };
 function setPairs(n) { genome.pairs = pc.math.clamp(n, 1, 4); $('pairsOut').textContent = `${genome.pairs} pair${genome.pairs > 1 ? 's' : ''} · ${genome.pairs * 2} legs`; }
 $('moreLegs').onclick = () => { if (genome.pairs < 4) { setPairs(genome.pairs + 1); rebuild(`grow: add leg pair #${genome.pairs}`); } };
 $('lessLegs').onclick = () => { if (genome.pairs > 1) { setPairs(genome.pairs - 1); rebuild(`shrink: remove leg pair`); } };
@@ -1154,7 +1324,10 @@ const bindSlider = (id, key, fmt, rebind) => {
   sync(); el.addEventListener('input', sync);
   if (rebind) el.addEventListener('change', () => rebuild(`rebind: ${key} = ${el.value}`));
 };
-bindSlider('legLen', 'legLen', v => `×${v.toFixed(2)}`, false);
+bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
+bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
+bindSlider('hind', 'hind', v => `×${v.toFixed(2)}`, false);
+bindSlider('overlap', 'overlap', v => `${Math.round(v * 100)}%`, true);
 bindSlider('sharp', 'sharp', v => `k = ${v}`, true);
 bindSlider('seam', 'seam', v => `${(v * 1000).toFixed(0)} mm`, true);
 bindSlider('fuseR', 'fuseR', v => `${(v * 1000).toFixed(0)} mm`, true);
@@ -1194,7 +1367,8 @@ addEventListener('blur', () => loco.held.clear());
 let logText = '';
 function log(s) { logText = s + '\n' + logText; $('log').textContent = logText; }
 function showManifest() {
-  const m = { id: `pig_leg_t${genome.thigh + 1}s${genome.shin + 1}f${genome.foot + 1}`, ...MANIFESTS.leg,
+  const mixOf = k => recipe[k].map((w, i) => w > 0 ? `${i + 1}:${w}` : '').filter(Boolean).join('+');
+  const m = { id: `pig_leg_[${mixOf('thigh')}]_[${mixOf('shin')}]_[${mixOf('foot')}]`, recipe: { thigh: recipe.thigh, shin: recipe.shin, foot: recipe.foot }, ...MANIFESTS.leg,
     bind: { weightExponent: settings.sharp, seamRadius: settings.seam, blendBone: 'hip parent (pelvis / spine / chest)' } };
   $('manifest').textContent = JSON.stringify(m, null, 2);
 }
@@ -1211,6 +1385,6 @@ loadKit('pig3dmodel.glb').then(k => {
   $('err').textContent = 'Could not load pig3dmodel.glb. Serve this folder over http so the model file sits next to the page. (' + err.message + ')';
   $('stat').textContent = '';
 });
-window.__hog = { trigger, genome, build, orbit, settings, loco, setMoving: m => moving = m, get creature() { return creature; } };
+window.__hog = { trigger, genome, recipe, build, renderParts, orbit, settings, loco, setMoving: m => moving = m, get creature() { return creature; } };
 })();
 </script>
