@@ -2942,7 +2942,7 @@ function updateHeli(h, dt) {
   if (!G) for (const e of helis) if (e !== h && e.alive && e.mode !== 'landed' && wdist3(e.pos, h.pos) < 0.55) want.add(new THREE.Vector3(-wd(e.pos.x - h.pos.x), 0, -wd(e.pos.z - h.pos.z)).normalize().multiplyScalar(0.6));
   h.acc.subVectors(want, h.pos).multiplyScalar(0.7).addScaledVector(h.vel, -1.0); if (h.acc.length() > aMax) h.acc.setLength(aMax);
   h.vel.addScaledVector(h.acc, dt); if (h.vel.length() > vMax) h.vel.setLength(vMax); h.pos.addScaledVector(h.vel, dt); h.pos.x = wm(h.pos.x); h.pos.z = wm(h.pos.z);
-  const floor = G && G.land ? G.y : Math.max(Hd(h.pos.x, h.pos.z), 0) + 0.85; if (h.pos.y < floor) { h.pos.y = floor; h.vel.y = Math.max(0, h.vel.y); }
+  const floor = G && G.land ? G.y : Math.max(Hd(h.pos.x, h.pos.z), 0) + 0.85; if (h.pos.y < floor) { const gyH = Math.max(Hd(h.pos.x, h.pos.z), 0) + h.skid; if (h.pos.y < gyH) h.pos.y = gyH; h.pos.y = Math.min(floor, h.pos.y + 0.45 * dt); h.vel.y = Math.max(0, h.vel.y); h.vel.x *= 1 - Math.min(1, dt * 2); h.vel.z *= 1 - Math.min(1, dt * 2); }   /* below cruise height (just lifted off): climb up, never snap */
   const tp = T ? near(tgtPos(T, tmpC), h.pos, tmpC) : tmpC.set(cx, h.pos.y, cz);
   const ty = Math.atan2(tp.x - h.pos.x, tp.z - h.pos.z); let dy = Math.atan2(Math.sin(ty - h.yaw), Math.cos(ty - h.yaw)); if (!(G && G.land) && (T || h.vel.length() > 0.15)) h.yaw += clamp(dy, -1.2 * dt, 1.2 * dt);
   const fw = new THREE.Vector3(Math.sin(h.yaw), 0, Math.cos(h.yaw)), sd = new THREE.Vector3(Math.cos(h.yaw), 0, -Math.sin(h.yaw));
