@@ -120,6 +120,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   #abpanel .st { font-size: 11px; color: var(--dim); width: 64px; text-align: right; } #abpanel h6 { margin: 4px 0 0; font-size: 11px; letter-spacing: .12em; color: var(--dim); }
   #abpanel .abtn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; background: rgba(18,34,52,.9); border: 1px solid var(--line); color: var(--text); font: 600 13px 'Rajdhani', sans-serif; cursor: pointer; text-align: left; position: relative; overflow: hidden; }
   #hgpanel .abtn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; background: rgba(18,34,52,.9); border: 1px solid var(--line); color: var(--text); font: 600 13px 'Rajdhani', sans-serif; cursor: pointer; text-align: left; position: relative; overflow: hidden; } #hgpanel .abtn span { flex: 1; } #hgpanel .abtn small { color: var(--gold); font-size: 11px; } #hgpanel .abtn .pg { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--cyan); } #hgpanel .abtn .ico { width: 18px; height: 18px; } #hgpanel .abtn.dis { opacity: .45; cursor: default; } #hgpanel .lv { display: inline-flex; gap: 2px; margin-left: 6px; } #hgpanel .lv b { width: 7px; height: 7px; border: 1px solid var(--cyan); } #hgpanel .lv b.f { background: var(--cyan); }
+  .cmd.poor { opacity: .55; } .cmd.poor small { color: #ff7a6a !important; }
   #abpanel .abtn:hover { border-color: var(--cyan); } #abpanel .abtn.dis { opacity: .45; cursor: default; } #abpanel .abtn .ico { width: 18px; height: 18px; }
   #abpanel .abtn span { flex: 1; } #abpanel .abtn small { color: var(--gold); font-size: 11px; } #abpanel .abtn .pg { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--cyan); }
   #abpanel .lv { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; } #abpanel .lv b { width: 7px; height: 7px; border: 1px solid var(--cyan); } #abpanel .lv b.f { background: var(--cyan); }
@@ -1780,7 +1781,11 @@ function drawMini() {
 
 // ================= command interface =================
 let PAUSED = false, missionT = 0, cmdMode = 'move', focusUnit = null;
-const RES = { power: 1250, credits: 8430, alloy: 620 }, RATE = { power: 220, credits: 540, alloy: 80 };
+const RES = { power: 1250, alloy: 620 }, RATE = { power: 220, alloy: 80 };
+// prices: credits plus gathered resources, e.g. "3500 CR · 900 ore · 400 oil · 200 food"
+const costTxt = c => Object.entries(c).map(([k, v]) => k === 'cr' ? v + ' CR' : v + ' ' + k).join(' · ');
+let costsDone = false; function refreshCosts() { for (const [k, B] of Object.entries(BUILDS)) { const b = $(B.btn); if (!b) continue; const sm = b.querySelector('small'); if (!costsDone) { sm.textContent = costTxt(B.cost()); b.title = b.title.split(' — ')[0] + ' — ' + costTxt(B.cost()); sm.textContent = B.cost().cr + ' CR'; }
+    b.classList.toggle('poor', !!Battle.canAfford(0, B.cost())); } costsDone = true; }
 const $ = id => document.getElementById(id);
 $('mapslot').appendChild(mini);
 const fmtT = t => [t / 3600, t / 60 % 60, t % 60].map(v => String(Math.floor(v)).padStart(2, '0')).join(':');
@@ -1798,25 +1803,25 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 // ---- outpost placement: ghost follows the cursor, green where allowed (inside territory, clear ground), left-click builds
 let placing = null;
 const BUILDS = {
-  wh: { btn: 'bWh', cost: () => Battle.WH_COST, ghost: () => Battle.warehouseGhost(), err: () => Battle.warehouseError, name: 'Warehouse',
+  wh: { btn: 'bWh', cost: () => Battle.PRICE.wh, ghost: () => Battle.warehouseGhost(), err: () => Battle.warehouseError, name: 'Warehouse',
     check: (x, z, r) => Battle.canPlaceWarehouse(0, x, z, r), build: (x, z, r) => Battle.buildWarehouse(x, z, r), tip: 'Warehouse with a truck lot: place on flat ground inside your territory, the bay faces the lot. R rotates.' },
-  farm: { btn: 'bFarm', cost: () => Battle.FM_COST, ghost: () => Battle.farmGhost(), err: () => Battle.farmError, name: 'Farm',
+  farm: { btn: 'bFarm', cost: () => Battle.PRICE.farm, ghost: () => Battle.farmGhost(), err: () => Battle.farmError, name: 'Farm',
     check: (x, z, r) => Battle.canPlaceFarm(0, x, z, r), build: (x, z, r) => Battle.buildFarm(x, z, r), tip: 'Place on flat ground inside your territory. Wheel / Q / E / R rotate, right-click cancels.' },
-  mine: { btn: 'bMine', cost: () => Battle.MN_COST, ghost: () => Battle.mineGhost(), err: () => Battle.mineError, name: 'Mine', snap: (x, z) => Battle.mineSnap(x, z),
+  mine: { btn: 'bMine', cost: () => Battle.PRICE.mine, ghost: () => Battle.mineGhost(), err: () => Battle.mineError, name: 'Mine', snap: (x, z) => Battle.mineSnap(x, z),
     check: (x, z, r) => Battle.canPlaceMine(0, x, z, r), build: (x, z, r) => Battle.buildMine(x, z, r), tip: 'Place at the foot of a slope inside your territory: the tunnel faces into the hill. Right-click cancels.' },
-  camp: { btn: 'bCamp', cost: () => Battle.WC_COST, ghost: () => Battle.campGhost(), err: () => Battle.campError, name: 'Woodcutter camp', ringR: () => Battle.WC_REACH * 12,
+  camp: { btn: 'bCamp', cost: () => Battle.PRICE.camp, ghost: () => Battle.campGhost(), err: () => Battle.campError, name: 'Woodcutter camp', ringR: () => Battle.WC_REACH * 12,
     check: (x, z, r) => Battle.canPlaceCamp(0, x, z, r), build: (x, z, r) => Battle.buildCamp(x, z, r),
-    ok: (x, z, r) => 'Left-click to build (' + Battle.WC_COST + ' credits): ' + Battle.campTreeCount(x, z, r) + ' trees in reach', tip: 'Place next to a forest inside your territory. The ring shows its reach. Wheel / Q / E / R rotate, right-click cancels.' },
-  pump: { btn: 'bPump', cost: () => Battle.PJ_COST, ghost: () => Battle.pumpGhost(), err: () => Battle.pumpError, name: 'Oil pump',
+    ok: (x, z, r) => 'Left-click to build (' + costTxt(Battle.PRICE.camp) + '): ' + Battle.campTreeCount(x, z, r) + ' trees in reach', tip: 'Place next to a forest inside your territory. The ring shows its reach. Wheel / Q / E / R rotate, right-click cancels.' },
+  pump: { btn: 'bPump', cost: () => Battle.PRICE.pump, ghost: () => Battle.pumpGhost(), err: () => Battle.pumpError, name: 'Oil pump',
     check: (x, z, r) => Battle.canPlacePump(0, x, z, r), build: (x, z, r) => Battle.buildPump(x, z, r), snap: (x, z) => Battle.oilSnap(x, z), tip: 'Place on an oil field inside your territory (fields show on the minimap). The pump lines up with the field; R flips it, right-click cancels.' },
-  outpost: { btn: 'bOutpost', cost: () => Battle.OUTPOST_COST, ghost: () => Battle.outpostGhost(), err: () => Battle.outpostError, name: 'Outpost', ring: true,
+  outpost: { btn: 'bOutpost', cost: () => Battle.PRICE.outpost, ghost: () => Battle.outpostGhost(), err: () => Battle.outpostError, name: 'Outpost', ring: true,
     check: (x, z) => Battle.canPlaceOutpost(0, x, z), build: (x, z, r) => Battle.buildOutpost(x, z, r), tip: 'Place inside your territory, near the border to extend it. Wheel / Q / E / R rotate, right-click cancels.' },
-  hangar: { btn: 'bHangar', cost: () => Battle.HG_COST, ghost: () => Battle.hangarGhost(), err: () => Battle.hangarError, name: 'Mech hangar',
+  hangar: { btn: 'bHangar', cost: () => Battle.PRICE.hangar, ghost: () => Battle.hangarGhost(), err: () => Battle.hangarError, name: 'Mech hangar',
     check: (x, z, r) => Battle.canPlaceHangar(0, x, z, r), build: (x, z, r) => Battle.buildHangar(x, z, r), tip: 'Place on flat ground inside your territory; the doors open onto the apron. Wheel / Q / E / R rotate, right-click cancels.' },
-  airbase: { btn: 'bAirbase', cost: () => Battle.AB_COST, ghost: () => Battle.airbaseGhost(), err: () => Battle.airbaseError, name: 'Air base',
+  airbase: { btn: 'bAirbase', cost: () => Battle.PRICE.airbase, ghost: () => Battle.airbaseGhost(), err: () => Battle.airbaseError, name: 'Air base',
     check: (x, z, r) => Battle.canPlaceAirbase(0, x, z, r), build: (x, z, r) => Battle.buildAirbase(x, z, r), tip: 'Place fully inside your territory on flat, clear ground. Wheel / Q / E / R rotate, right-click cancels.' } };
 function startPlacing(kind) { const B = BUILDS[kind]; if (placing) { const was = placing.kind; stopPlacing(); if (was === kind) return; }
-  if (RES.credits < B.cost()) return hint('Not enough credits');
+  { const why = Battle.canAfford(0, B.cost()); if (why) return hint(why); }
   const g = B.ghost(); if (!g) return hint(B.err() ? B.name + ' model failed to load: ' + B.err() : B.name + ' model still loading');
   const rr = B.ringR ? B.ringR() : Battle.OUTPOST_SENSE * 12, ring = new THREE.Mesh(new THREE.RingGeometry(rr - 3, rr, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5fd0ff, transparent: true, opacity: .35, depthWrite: false }));
   ring.visible = !!(B.ring || B.ringR); g.scale.setScalar(12); scene.add(g); scene.add(ring); placing = { kind, B, g, ring, rot: 0, ok: false }; $(B.btn).classList.add('on'); hint(B.tip); }
@@ -1836,7 +1841,7 @@ el.addEventListener('mousemove', e => { if (!placing) return; const tip = $('pla
   placing.g.position.set(x, heightAt(t.x, t.z), z); placing.g.rotation.y = placing.rot; placing.ring.position.set(x, heightAt(t.x, t.z) + 2, z); });
 el.addEventListener('mousedown', e => { if (!placing) return; e.stopImmediatePropagation();
   if (e.button === 2) { stopPlacing(); return; }
-  if (e.button === 0 && placing.ok && RES.credits >= placing.B.cost()) { const B = placing.B; if (B.check(placing.at.x, placing.at.z, placing.rot)) return; RES.credits -= B.cost(); const o = B.build(placing.at.x, placing.at.z, placing.rot); stopPlacing(); if (placing === null && o && o.kind === 'airbase') openAB(o); } }, true);
+  if (e.button === 0 && placing.ok) { const B = placing.B, poor = Battle.canAfford(0, B.cost()); if (poor) { hint(poor); return; } if (B.check(placing.at.x, placing.at.z, placing.rot)) return; Battle.spend(0, B.cost()); const o = B.build(placing.at.x, placing.at.z, placing.rot); stopPlacing(); if (placing === null && o && o.kind === 'airbase') openAB(o); } }, true);
 // rotate while placing: mouse wheel (15° steps) or Q / E; R still turns 90°
 function rotatePlacing(d) { if (!placing) return; placing.rot += d; placing.ok = false; placing.g.rotation.y = placing.rot; if (placing.at) { const why = placing.B.check(placing.at.x, placing.at.z, placing.rot); placing.ok = !why; Battle.ghostMat.color.set(why ? 0xff4040 : 0x40ff80); hint(why || (placing.B.ok ? placing.B.ok(placing.at.x, placing.at.z, placing.rot) : 'Left-click to build (' + placing.B.cost() + ' credits)')); } }
 el.addEventListener('wheel', e => { if (!placing || placing.B.snap) return; e.preventDefault(); e.stopImmediatePropagation(); rotatePlacing(Math.sign(e.deltaY) * Math.PI / 12); }, { capture: true, passive: false });
@@ -1871,22 +1876,22 @@ function hgRender(full) { const h = hgSel; if (!h) return; if (!h.alive) { hgSel
   $('hgBay').innerHTML = bay + (h.queue.length ? `<br><span style="color:var(--dim)">${h.queue.length} mech${h.queue.length > 1 ? 's' : ''} waiting in line</span>` : '') + (h.buildQ.length > (h.building ? 1 : 0) ? `<br><span style="color:var(--dim)">Build queue: ${h.buildQ.length}</span>` : '');
   const sig = [h.buildQ.join(), h.building, Battle.mechResearch[0] && Battle.mechResearch[0].key, JSON.stringify(Battle.MECH_UP[0])].join('|');
   if (full || sig !== h.uiSig) { h.uiSig = sig;
-    $('hgBuilds').innerHTML = Object.keys(Battle.MECH_COST).map(r => `<button class="abtn" data-r="${r}"><img class="ico" src="assets/ui/supply.png" alt=""><span>Build ${r}</span><small>${Battle.MECH_COST[r]} CR</small><i class="pg"></i></button>`).join('');
-    $('hgBuilds').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const r = b.dataset.r; if (RES.credits < Battle.MECH_COST[r]) return feedMsg('Not enough credits'); const why = Battle.queueMech(hgSel, r); if (why) return feedMsg(why); RES.credits -= Battle.MECH_COST[r]; hgRender(); }));
+    $('hgBuilds').innerHTML = Object.keys(Battle.MECH_COST).map(r => `<button class="abtn" data-r="${r}"><img class="ico" src="assets/ui/supply.png" alt=""><span>Build ${r}</span><small>${costTxt(Battle.PRICE[r])}</small><i class="pg"></i></button>`).join('');
+    $('hgBuilds').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const r = b.dataset.r; const poor = Battle.canAfford(0, Battle.PRICE[r]); if (poor) return feedMsg(poor); const why = Battle.queueMech(hgSel, r); if (why) return feedMsg(why); Battle.spend(0, Battle.PRICE[r]); hgRender(); }));
     $('hgRes').innerHTML = Object.entries(Battle.MECH_UPGRADES).map(([k, U]) => { const lv = Battle.MECH_UP[0][k], max = lv >= U.cost.length;
-      return `<button class="abtn${max ? ' dis' : ''}" data-k="${k}" title="${U.desc}"><img class="ico" src="assets/ui/power.png" alt=""><span>${U.name}${LVL(lv)}</span><small>${max ? 'MAX' : U.cost[lv] + ' CR'}</small><i class="pg"></i></button>`; }).join('');
+      return `<button class="abtn${max ? ' dis' : ''}" data-k="${k}" title="${U.desc}"><img class="ico" src="assets/ui/power.png" alt=""><span>${U.name}${LVL(lv)}</span><small>${max ? 'MAX' : costTxt(Battle.researchPrice(U.cost[lv]))}</small><i class="pg"></i></button>`; }).join('');
     $('hgRes').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const k = b.dataset.k, U = Battle.MECH_UPGRADES[k], lv = Battle.MECH_UP[0][k];
-      if (lv >= U.cost.length) return; if (RES.credits < U.cost[lv]) return feedMsg('Not enough credits'); const why = Battle.startMechResearch(0, k); if (why) return feedMsg(why); RES.credits -= U.cost[lv]; hgRender(); })); }
+      if (lv >= U.cost.length) return; const c = Battle.researchPrice(U.cost[lv]), poor = Battle.canAfford(0, c); if (poor) return feedMsg(poor); const why = Battle.startMechResearch(0, k); if (why) return feedMsg(why); Battle.spend(0, c); hgRender(); })); }
   const bb = $('hgBuilds').querySelectorAll('.pg'); bb.forEach(p => { p.style.width = '0%'; }); if (h.building) { const i = Object.keys(Battle.MECH_COST).indexOf(h.buildQ[0]); if (bb[i]) bb[i].style.width = (h.buildT / Battle.MECH_BUILD * 100) + '%'; }
   const r = Battle.mechResearch[0]; $('hgRes').querySelectorAll('button').forEach(b => { b.querySelector('.pg').style.width = r && r.key === b.dataset.k ? (r.t / r.total * 100) + '%' : '0%'; }); }
 // ---- air base panel: pads, gunship production, research
 let abSel = null;
 function openAB(b) { if (!b.done) return feedMsg('Air base under construction: ' + Math.ceil(Battle.siteLeft(b)) + ' s left'); abSel = b; $('abpanel').classList.remove('uihidden'); abRender(true); }
 $('abClose').addEventListener('click', () => { abSel = null; $('abpanel').classList.add('uihidden'); });
-$('abBuild').addEventListener('click', () => { if (!abSel) return; if (RES.credits < Battle.HELI_COST) return feedMsg('Not enough credits');
-  const why = Battle.queueHeli(abSel); if (why) return feedMsg(why); RES.credits -= Battle.HELI_COST; abRender(); });
-const sendSvc = mode => { const R = sel.filter(u => u.kind === 'robot' && u.team === 0 && u.state !== 'ko'); if (!R.length) return; let msg = null;
-  for (const u of R) { if (mode === 'upgrade' && !Battle.needsUpgrade(u)) { msg = msg || 'Already fully upgraded'; continue; } const why = Battle.requestService(u, mode); if (why && why !== 'busy') msg = why; } if (msg) feedMsg(msg); };
+$('abBuild').addEventListener('click', () => { if (!abSel) return; { const poor = Battle.canAfford(0, Battle.PRICE.heli); if (poor) return feedMsg(poor); }
+  const why = Battle.queueHeli(abSel); if (why) return feedMsg(why); Battle.spend(0, Battle.PRICE.heli); abRender(); });
+const sendSvc = mode => { const R = Battle.selectables().filter(u => u.sel).filter(u => u.kind === 'robot' && u.team === 0 && u.state !== 'ko'); if (!R.length) return; let msg = null;
+  for (const u of R) { if (mode === 'upgrade' && !Battle.needsUpgrade(u)) { msg = msg || (Object.values(Battle.MECH_UP[0]).some(v => v) ? 'Already has every researched upgrade' : 'Research an upgrade at a mech hangar first'); continue; } const why = Battle.requestService(u, mode); if (why && why !== 'busy') msg = why; else if (!why) msg = msg || (mode === 'upgrade' ? 'Heading to the hangar for upgrades' : 'Heading to the hangar for repair'); } if (msg) feedMsg(msg); };
 $('uRepair').addEventListener('click', () => sendSvc('repair')); $('uUpgrade').addEventListener('click', () => sendSvc('upgrade'));
 function feedMsg(msg) { const f = $('feed'); const d = document.createElement('div'); d.textContent = msg; f.append(d); setTimeout(() => d.remove(), 3000); }
 const pctBar = (v, col) => `<div class="mini"><i style="width:${Math.max(0, Math.min(100, v * 100)).toFixed(0)}%;background:${col}"></i></div>`;
@@ -1898,16 +1903,16 @@ function abRender(full) { const b = abSel; if (!b) return; if (!b.alive) { abSel
     return `<div class="pad"><img class="pt" src="assets/ui/portrait_heli.png" alt=""><div class="bars">${pctBar(h.hp / h.maxHp, 'var(--green)')}${pctBar(h.fuel / h.fuelMax, 'var(--gold)')}</div><span class="st">${st}</span></div>`; }).join('');
   const used = Battle.baseHelis(b) + b.queue;
   $('abBuildT').textContent = b.queue ? `Building gunship${b.queue > 1 ? ' (' + b.queue + ' queued)' : ''}` : 'Build gunship';
-  $('abBuildC').textContent = Battle.HELI_COST + ' CR'; $('abBuildP').style.width = b.queue ? (b.buildT / Battle.HELI_BUILD * 100) + '%' : '0';
-  $('abBuild').classList.toggle('dis', used >= Battle.AB_CAP || RES.credits < Battle.HELI_COST);
+  $('abBuildC').textContent = costTxt(Battle.PRICE.heli); $('abBuildP').style.width = b.queue ? (b.buildT / Battle.HELI_BUILD * 100) + '%' : '0';
+  $('abBuild').classList.toggle('dis', used >= Battle.AB_CAP || !!Battle.canAfford(0, Battle.PRICE.heli));
   const R = Battle.research[0], icons = { armor: 'shield', guns: 'missile', fuel: 'power', engine: 'mov' };
   if (full || !$('abRes').childElementCount) { $('abRes').innerHTML = Object.keys(Battle.UPGRADES).map(k => `<button class="abtn" data-k="${k}"><img class="ico" src="assets/ui/${icons[k]}.png" alt=""><span></span><small></small><i class="pg"></i></button>`).join('');
     $('abRes').querySelectorAll('.abtn').forEach(btn => btn.addEventListener('click', () => { const k = btn.dataset.k, U = Battle.UPGRADES[k], lv = Battle.HELI_UP[0][k];
-      if (lv >= U.cost.length) return; if (RES.credits < U.cost[lv]) return feedMsg('Not enough credits'); const why = Battle.startResearch(0, k); if (why) return feedMsg(why); RES.credits -= U.cost[lv]; abRender(); })); }
+      if (lv >= U.cost.length) return; const c = Battle.researchPrice(U.cost[lv]), poor = Battle.canAfford(0, c); if (poor) return feedMsg(poor); const why = Battle.startResearch(0, k); if (why) return feedMsg(why); Battle.spend(0, c); abRender(); })); }
   $('abRes').querySelectorAll('.abtn').forEach(btn => { const k = btn.dataset.k, U = Battle.UPGRADES[k], lv = Battle.HELI_UP[0][k], maxed = lv >= U.cost.length, on = R && R.key === k;
     btn.querySelector('span').innerHTML = `${U.name}<i class="lv">${U.cost.map((_, i) => `<b class="${i < lv ? 'f' : ''}"></b>`).join('')}</i>`; btn.title = U.desc;
-    btn.querySelector(':scope > small').textContent = maxed ? 'MAX' : on ? Math.ceil(R.total - R.t) + 's' : U.cost[lv] + ' CR';
-    btn.querySelector('.pg').style.width = on ? (R.t / R.total * 100) + '%' : '0'; btn.classList.toggle('dis', maxed || (!!R && !on) || (!R && RES.credits < U.cost[lv])); }); }
+    btn.querySelector(':scope > small').textContent = maxed ? 'MAX' : on ? Math.ceil(R.total - R.t) + 's' : costTxt(Battle.researchPrice(U.cost[lv]));
+    btn.querySelector('.pg').style.width = on ? (R.t / R.total * 100) + '%' : '0'; btn.classList.toggle('dis', maxed || (!!R && !on) || (!R && !!Battle.canAfford(0, Battle.researchPrice(U.cost[lv])))); }); }
 $('uDeploy').addEventListener('click', () => { if (focusUnit && focusUnit.kind === 'heli') Battle.command('deploy', [focusUnit]); });
 let uiT = 0;
 let terrToggle = false;
@@ -1918,7 +1923,7 @@ function updateUI(dt) {
   uiT -= dt; if (uiT > 0) return; uiT = 0.15; abRender(); hgRender();
   $('mclock').textContent = fmtT(missionT);
   $('rPower').innerHTML = Math.floor(RES.power).toLocaleString() + `<i>+${RATE.power}/min</i>`;
-  $('rCredits').innerHTML = Math.floor(RES.credits).toLocaleString() + `<i>+${RATE.credits}/min</i>`;
+  $('rCredits').innerHTML = Math.floor(Battle.CR[0]).toLocaleString() + `<i>+${Battle.CR_RATE}/min</i>`; refreshCosts();
   $('rAlloy').innerHTML = Math.floor(RES.alloy).toLocaleString() + `<i>+${RATE.alloy}/min</i>`;
   $('rOil').innerHTML = Math.floor(Battle.OIL[0]).toLocaleString() + `<i>+${Battle.oilRate(0)}/min</i>`;
   $('rFood').innerHTML = Math.floor(Battle.FOOD[0]).toLocaleString() + `<i>+${Battle.foodRate(0)}/min</i>`;
