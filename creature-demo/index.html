@@ -111,6 +111,16 @@ details summary { cursor: pointer; font-weight: 600; }
         <small>Body pitch follows the height difference between front and hind hips. Live, no rebind.</small>
       </div>
       <div class="slider">
+        <label for="shoulder">Shoulder raise</label><output id="shoulderOut"></output>
+        <input id="shoulder" type="range" min="0" max="0.8" step="0.05" value="0.35">
+        <small>How far the front upper legs reach up into the shoulder-blade area. Rebuilds.</small>
+      </div>
+      <div class="slider">
+        <label for="rearFwd">Rear hips forward</label><output id="rearFwdOut"></output>
+        <input id="rearFwd" type="range" min="0" max="0.3" step="0.01" value="0.08">
+        <small>Moves the hind leg sockets toward the middle of the body. Rebuilds.</small>
+      </div>
+      <div class="slider">
         <label for="rake">Leg rake</label><output id="rakeOut"></output>
         <input id="rake" type="range" min="-30" max="30" step="1" value="0">
         <small>0° puts each ankle straight under its hip. Positive sweeps the feet forward. Rebuilds.</small>
@@ -247,7 +257,7 @@ const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -538,7 +548,8 @@ function assemble() {
   // leg pairs along the belly
   const legs = [];
   for (let p = 0; p < g.pairs; p++) {
-    const fx = g.pairs === 1 ? 0 : bodyL * 0.36 - p * (bodyL * 0.72) / (g.pairs - 1);
+    let fx = g.pairs === 1 ? 0 : bodyL * 0.36 - p * (bodyL * 0.72) / (g.pairs - 1);
+    if (p === g.pairs - 1 && g.pairs > 1) fx += settings.rearFwd * bodyL;   // hind sockets moved toward the middle
     for (const side of [1, -1]) {
       const id = `leg${p}${side > 0 ? 'L' : 'R'}`;
       const hz = side * bodyW * 0.34;
@@ -546,7 +557,11 @@ function assemble() {
       const mirror = side < 0;
       const W = l => [fx + l[0], hipY + l[1], hz + (mirror ? -l[2] : l[2])];   // leg-local → world
       const knee = W(kneeL), ankle = W(ankleL), toe = W(toeL);
-      addPart(buf, thigh, { scale: legSc, offset: W(thighOff), rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'a', socket: hip });
+      // front thighs reach up into the shoulder-blade area: stretched upward from the knee, hip joint unchanged
+      const raise = p === 0 && g.pairs > 1 ? settings.shoulder * bodyH : 0;
+      const tH = (thigh.max[1] - thigh.min[1]) * legSc[1], sy = (tH + raise) / tH;
+      const tOff = W(thighOff); tOff[1] += thigh.min[1] * legSc[1] * (1 - sy) + (tBot[1] - thigh.min[1] * legSc[1]) * (1 - sy);
+      addPart(buf, thigh, { scale: [legSc[0], legSc[1] * sy, legSc[2]], offset: tOff, rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'a', socket: hip });
       addPart(buf, shin,  { scale: legSc, offset: W(shinOff), rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'b', socket: knee });
       addPart(buf, foot,  { scale: legSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', socket: ankle });
       const ball = W([ankleL[0] + (toeL[0] - ankleL[0]) * 0.55, toeL[1] + 0.008, ankleL[2]]);
@@ -1434,6 +1449,8 @@ const bindSlider = (id, key, fmt, rebind) => {
 bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
 bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
 bindSlider('hind', 'hind', v => `×${v.toFixed(2)}`, false);
+bindSlider('shoulder', 'shoulder', v => `${Math.round(v * 100)}% of body height`, true);
+bindSlider('rearFwd', 'rearFwd', v => `${Math.round(v * 100)}% of body length`, true);
 bindSlider('rake', 'rake', v => `${v}°`, true);
 bindSlider('overlap', 'overlap', v => `${Math.round(v * 100)}%`, true);
 bindSlider('sharp', 'sharp', v => `k = ${v}`, true);
