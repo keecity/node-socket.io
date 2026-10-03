@@ -29,6 +29,10 @@ body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-body); 
 .stat b { color: var(--ink); font-weight: 600; }
 .rail { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 16px; padding-inline: 16px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+.tailmix { display: grid; grid-template-columns: 52px minmax(0, 1fr) 56px minmax(0, 1fr); gap: 6px; align-items: center; margin-top: 4px; }
+.tailmix > span { font-weight: 600; }
+.tailmix select { min-width: 0; font: 12px var(--f-body); padding: 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); }
+.tailmix input { width: 100%; accent-color: var(--accent); }
 .mixhead, .mix { display: grid; grid-template-columns: 52px repeat(4, minmax(0, 1fr)); gap: 6px; align-items: center; }
 .mixhead span { font: 600 11px var(--f-mono); color: var(--muted); text-align: center; }
 .mix { margin-bottom: 4px; }
@@ -352,7 +356,10 @@ const BONE_HUES = [[255,90,90],[90,170,255],[120,220,120],[255,200,60],[200,110,
 
 const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
-const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
+const TAIL_NAMES = ['Pig curl', 'Pig hook', 'Pig sweep', 'Pig coil',
+  'Slender S', 'Thick S', 'Stub', 'Whip', 'Fat taper', 'Paddle', 'Leaf', 'Tufted', 'Club', 'Spike', 'Forked', 'Bulb', 'Segmented', 'Spiny', 'Croc', 'Ridged'];
+const tailWeights = (a, b, t) => TAIL_NAMES.map((_, i) => (i === a ? 1 - t : 0) + (i === b ? t : 0));
+const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: tailWeights(0, 0, 0) };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
 const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
@@ -426,6 +433,24 @@ async function loadKit(url) {
     for (let i = 0; i < p.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], p[i+a]); mx[a] = Math.max(mx[a], p[i+a]); }
     kit[k].min = mn; kit[k].max = mx;
   }
+  // extra tails from the tail pack: pre-split and re-oriented by tools/prep_tails.py, quantised for size
+  try {
+    let tb;
+    try { const r = await fetch('tails16.bin'); if (!r.ok) throw 0; tb = await r.arrayBuffer(); }
+    catch { const t = (await (await fetch('tails16.b64.txt')).text()).trim(); tb = Uint8Array.from(atob(t), c => c.charCodeAt(0)).buffer; }
+    const hl = new DataView(tb).getUint32(0, true);
+    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(tb, 4, hl)));
+    const base = 4 + hl;
+    meta.forEach((m, i) => {
+      const q = new Uint16Array(tb, base + m.off, m.n * 3), nq = new Int8Array(tb, base + m.noff, m.n * 3), ix = new Uint16Array(tb, base + m.ioff, m.t);
+      const pos = [], nrm = [], mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+      for (let v = 0; v < m.n; v++) for (let a = 0; a < 3; a++) {
+        const p = m.min[a] + q[v*3+a] * m.scale[a]; pos.push(p); nrm.push(nq[v*3+a] / 127);
+        mn[a] = Math.min(mn[a], p); mx[a] = Math.max(mx[a], p);
+      }
+      kit['tail' + (4 + i)] = { pos, nrm, idx: Array.from(ix), min: mn, max: mx };
+    });
+  } catch (err) { console.warn('tail pack not loaded', err); }
   return kit;
 }
 
@@ -525,7 +550,7 @@ function blendPart(cat) {
   let used = ws.map((w, v) => ({ w: w / sum, v, part: kit[cat + v] })).filter(e => e.w > 0.02);
   const us = used.reduce((x, e) => x + e.w, 0); used.forEach(e => e.w /= us);
   const min = [0, 0, 0], max = [0, 0, 0], tint = [0, 0, 0];
-  for (const e of used) for (let a = 0; a < 3; a++) { min[a] += e.w * e.part.min[a]; max[a] += e.w * e.part.max[a]; tint[a] += e.w * TINTS[cat][e.v][a]; }
+  for (const e of used) for (let a = 0; a < 3; a++) { min[a] += e.w * e.part.min[a]; max[a] += e.w * e.part.max[a]; tint[a] += e.w * TINTS[cat][e.v % TINTS[cat].length][a]; }
   const variants = used.map(e => {
     const pm = e.part.min, ps = e.part.max.map((v, a) => v - pm[a] || 1e-6), bs = max.map((v, a) => v - min[a]);
     const k = bs.map((v, a) => v / ps[a]);
@@ -713,9 +738,12 @@ function assemble() {
   const nearC = (() => { const all = [];
     for (const vr of tail.variants) for (let i = 0; i < vr.pos.length; i += 3) all.push([vr.pos[i] * tailSc[0], vr.pos[i+1] * tailSc[1], vr.pos[i+2] * tailSc[2]]);
     const d = all.map(p => Math.hypot(p[0] - rootC[0], p[1] - rootC[1])), dm = Math.max(...d);
-    const c = [0, 0]; let n = 0; all.forEach((p, i) => { if (d[i] > dm * 0.18 && d[i] < dm * 0.32) { c[0] += p[0]; c[1] += p[1]; n++; } });
-    return [c[0] / Math.max(n, 1), c[1] / Math.max(n, 1)]; })();
-  const tailRot = (Math.PI - 0.2) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~11° up
+    const band = (lo, hi) => { const c = [0, 0]; let n = 0; all.forEach((p, i) => { if (d[i] > dm * lo && d[i] < dm * hi) { c[0] += p[0]; c[1] += p[1]; n++; } }); return [c[0] / Math.max(n, 1), c[1] / Math.max(n, 1)]; };
+    // aim = average of the first stretch and the whole root→tip line, so any style trails backward as a whole
+    const a1 = band(0.18, 0.32), a2 = band(0.85, 1.0);
+    const u1 = Math.hypot(a1[0] - rootC[0], a1[1] - rootC[1]) || 1, u2 = Math.hypot(a2[0] - rootC[0], a2[1] - rootC[1]) || 1;
+    return [rootC[0] + (a1[0] - rootC[0]) / u1 + (a2[0] - rootC[0]) / u2, rootC[1] + (a1[1] - rootC[1]) / u1 + (a2[1] - rootC[1]) / u2]; })();
+  const tailRot = (Math.PI - 0.12) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~7° up
   const sinkIn = tailL * (0.16 + ov * 0.3 + 0.95 * short);                                                  // root cap buried in the rump
   const tailOff = [rump[0] - rootC[0] + sinkIn, rump[1] - rootC[1], -rootC[2]];
   const tailPivot = [rump[0] + sinkIn, rump[1], 0];
@@ -1684,8 +1712,19 @@ function rebuild(reason) {
   setTimeout(() => { try { build(reason); } catch (err) { $('err').hidden = false; $('err').textContent = 'Rebuild failed: ' + err.message; console.error(err); } }, 30);
 }
 const CATS = [['head', 'Head'], ['body', 'Body'], ['thigh', 'Thigh'], ['shin', 'Shin'], ['foot', 'Foot'], ['tail', 'Tail']];
+function tailPick() {   // the two strongest tails in the recipe and the blend between them
+  const order = recipe.tail.map((w, i) => [w, i]).sort((x, y) => y[0] - x[0]);
+  const a = order[0][1], b = order[1][0] > 0 ? order[1][1] : a, wa = order[0][0], wb = order[1][0];
+  return { a, b, t: wa + wb > 0 ? wb / (wa + wb) : 0 };
+}
 function renderParts() {
+  const opts = sel => TAIL_NAMES.map((n, i) => `<option value="${i}"${i === sel ? ' selected' : ''}>${i + 1}. ${n}</option>`).join('');
+  const tp = tailPick();
   $('parts').innerHTML = CATS.map(([k, label]) => {
+    if (k === 'tail') return `<div class="tailmix"><span>${label}</span>
+      <select id="tailA" aria-label="Tail style A">${opts(tp.a)}</select>
+      <input type="range" id="tailT" min="0" max="1" step="0.05" value="${tp.t}" aria-label="Blend between tail A and B">
+      <select id="tailB" aria-label="Tail style B">${opts(tp.b)}</select></div>`;
     const sum = recipe[k].reduce((x, y) => x + y, 0) || 1;
     return `<div class="mix"><span>${label}</span>${recipe[k].map((w, i) =>
       `<label><input type="range" id="mix-${k}-${i}" data-cat="${k}" data-i="${i}" min="0" max="1" step="0.05" value="${w}" aria-label="${label} variant ${i + 1}"><span id="mixo-${k}-${i}">${Math.round(w / sum * 100)}%</span></label>`).join('')}</div>`;
@@ -1695,6 +1734,14 @@ function syncMixLabels(k) {
   const sum = recipe[k].reduce((x, y) => x + y, 0) || 1;
   recipe[k].forEach((w, i) => $(`mixo-${k}-${i}`).textContent = Math.round(w / sum * 100) + '%');
 }
+function setTailFromUi(reason) {
+  recipe.tail = tailWeights(+$('tailA').value, +$('tailB').value, +$('tailT').value);
+  rebuild(reason); showManifest();
+}
+$('parts').addEventListener('change', e => {
+  if (e.target.id === 'tailA' || e.target.id === 'tailB') setTailFromUi(`tail: ${TAIL_NAMES[+$('tailA').value]} ↔ ${TAIL_NAMES[+$('tailB').value]}`);
+  if (e.target.id === 'tailT') setTailFromUi(`tail blend ${Math.round(+e.target.value * 100)}% toward ${TAIL_NAMES[+$('tailB').value]}`);
+});
 $('parts').addEventListener('input', e => { const t = e.target; if (!t.dataset.cat) return; recipe[t.dataset.cat][+t.dataset.i] = +t.value; syncMixLabels(t.dataset.cat); });
 $('parts').addEventListener('change', e => {
   const t = e.target; if (!t.dataset.cat) return;
@@ -1702,7 +1749,10 @@ $('parts').addEventListener('change', e => {
   rebuild(`recipe: ${t.dataset.cat} = [${recipe[t.dataset.cat].map(w => w.toFixed(2)).join(', ')}]`); showManifest();
 });
 $('randomize').onclick = () => {
-  for (const [k] of CATS) { const a = Math.floor(Math.random() * 4), b = Math.floor(Math.random() * 4), t = Math.round(Math.random() * 20) / 20; recipe[k] = [0, 0, 0, 0]; recipe[k][a] += 1 - t; recipe[k][b] += t; }
+  for (const [k] of CATS) {
+    const n = k === 'tail' ? TAIL_NAMES.length : 4, a = Math.floor(Math.random() * n), b = Math.floor(Math.random() * n), t = Math.round(Math.random() * 20) / 20;
+    recipe[k] = new Array(n).fill(0); recipe[k][a] += 1 - t; recipe[k][b] += t;
+  }
   renderParts(); rebuild('recipe: random blend'); showManifest();
 };
 $('resetRecipe').onclick = () => { Object.assign(recipe, JSON.parse(JSON.stringify(RECIPE_DEFAULT))); renderParts(); rebuild('recipe: reset'); showManifest(); };
@@ -1855,6 +1905,6 @@ loadKit('pig3dmodel.glb').then(k => {
   $('err').textContent = 'Could not load pig3dmodel.glb. Serve this folder over http so the model file sits next to the page. (' + err.message + ')';
   $('stat').textContent = '';
 });
-window.__hog = { trigger, genome, recipe, build, renderParts, orbit, settings, loco, setMoving: m => moving = m, get creature() { return creature; } };
+window.__hog = { trigger, genome, recipe, build, renderParts, get kit() { return kit; }, orbit, settings, loco, setMoving: m => moving = m, get creature() { return creature; } };
 })();
 </script>
