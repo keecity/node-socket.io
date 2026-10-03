@@ -3213,7 +3213,7 @@ const Battle = {
         if (!blocked) TOWN_TREES.push([wm(wx) * S, wm(wz) * S, r()]); } });
     if (soldierKinds) for (const team of [0, 1]) spawnSquad(team, 6);
     placeBridges(); buildRoadMeshes(); placeOilFields(); spawnCars(40); spawnPeds(140); rebuildTerritory();
-    const roles = ['striker', 'gunner'];   // mechs are precious: two to start, the rest are built at a hangar
+    const roles = [];   // mechs are precious: none to start, every one is built at a hangar
     for (const team of [0, 1]) roles.forEach((r, k) => spawnRobot(team, r, k));
     for (const team of [0, 1]) { const t = towns[team]; makeHeli(team, t.x + 1.5, t.z); }
     log(null, 'Destroy the <b>Cobalt</b> forces and their HQ tower. Build a mech hangar to field more mechs.');
