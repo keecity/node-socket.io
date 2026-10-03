@@ -164,7 +164,12 @@ const settings = { sharp: 4, seam: 0.035, legLen: 1, showBones: true, showWeight
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
-  const buf = await (await fetch(url)).arrayBuffer();
+  let buf;
+  try { const r = await fetch(url); if (!r.ok) throw 0; buf = await r.arrayBuffer(); }
+  catch { // fallback: base64 copy for hosts that don't serve .glb
+    const b64 = (await (await fetch(url.replace(/\.glb$/, '.b64.txt'))).text()).trim();
+    buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+  }
   const dv = new DataView(buf);
   const jsonLen = dv.getUint32(12, true);
   const gltf = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)));
