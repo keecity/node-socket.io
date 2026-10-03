@@ -3125,12 +3125,12 @@ function spend(team, c) { for (const [k, v] of Object.entries(c)) { if (k === 'c
 // enemy units only show while in sight and enemy buildings once their ground has been explored.
 const FOG_N = 256, FOG_C = W / FOG_N, fogVis = new Float32Array(FOG_N * FOG_N), fogExp = new Uint8Array(FOG_N * FOG_N), fogData = new Uint8Array(FOG_N * FOG_N * 4);
 const fogTex = new THREE.DataTexture(fogData, FOG_N, FOG_N, THREE.RGBAFormat); fogTex.wrapS = fogTex.wrapT = THREE.RepeatWrapping; fogTex.magFilter = fogTex.minFilter = THREE.LinearFilter;
-let fogT = 0, FOG_ON = true;
+let fogT = 0, FOG_ON = true, fogDirty = true; const fogDist = new Float32Array(FOG_N * FOG_N), FOG_FADE = 16;   // cells over which the undiscovered dark deepens
 const fogIdx = (x, z) => (Math.floor(wm(z) / FOG_C) % FOG_N) * FOG_N + (Math.floor(wm(x) / FOG_C) % FOG_N);
 const fogVisible = (x, z) => !FOG_ON || fogVis[fogIdx(x, z)] > 0.3, fogExplored = (x, z) => !FOG_ON || fogExp[fogIdx(x, z)] > 0;
 function fogStamp(x, z, R) { const ci = Math.floor(wm(x) / FOG_C), cj = Math.floor(wm(z) / FOG_C), rc = Math.ceil(R / FOG_C) + 1;
   for (let dj = -rc; dj <= rc; dj++) for (let di = -rc; di <= rc; di++) { const d = Math.hypot((ci + di + 0.5) * FOG_C - wm(x), (cj + dj + 0.5) * FOG_C - wm(z)), v = clamp((R - d) / 1.2 + 0.5, 0, 1); if (v <= 0) continue;
-    const k = (((cj + dj) % FOG_N + FOG_N) % FOG_N) * FOG_N + (((ci + di) % FOG_N + FOG_N) % FOG_N); if (v > fogVis[k]) fogVis[k] = v; if (v > 0.3) fogExp[k] = 1; } }
+    const k = (((cj + dj) % FOG_N + FOG_N) % FOG_N) * FOG_N + (((ci + di) % FOG_N + FOG_N) % FOG_N); if (v > fogVis[k]) fogVis[k] = v; if (v > 0.3 && !fogExp[k]) { fogExp[k] = 1; fogDirty = true; } } }
 const FOG_SIGHT = { robot: 7, heli: 8, soldier: 4.5, truck: 3, building: 3.5 };
 function updateFog(dt) { fogT -= dt; if (fogT > 0) return; fogT = 0.2; fogVis.fill(0);
   const t = towns[0]; if (!t.hqDown) fogStamp(t.x, t.z, TOWN + 4);
@@ -3140,7 +3140,18 @@ function updateFog(dt) { fogT -= dt; if (fogT > 0) return; fogT = 0.2; fogVis.fi
   for (const h of helis) if (h.team === 0 && h.alive) fogStamp(h.pos.x, h.pos.z, FOG_SIGHT.heli);
   for (const s of soldiers) if (s.team === 0 && s.alive && !s.inHeli) fogStamp(s.pos.x, s.pos.z, FOG_SIGHT.soldier);
   for (const k of trucks) if (k.team === 0 && !k.dead) fogStamp(k.x, k.z, FOG_SIGHT.truck);
-  for (let i = 0; i < FOG_N * FOG_N; i++) { fogData[i * 4] = FOG_ON ? fogVis[i] * 255 : 255; fogData[i * 4 + 1] = FOG_ON ? fogExp[i] * 255 : 255; fogData[i * 4 + 3] = 255; }
+  // distance (in cells) from the nearest explored cell: two chamfer passes, run twice so it wraps around the map edges
+  if (fogDirty) { fogDirty = false; const N = FOG_N, D = fogDist, a = 1, d2 = 1.414; for (let i = 0; i < N * N; i++) D[i] = fogExp[i] ? 0 : 1e4;
+    for (let rep = 0; rep < 2; rep++) {
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = j * N + i; if (!D[k]) continue; const im = (i + N - 1) % N, jm = (j + N - 1) % N, ip = (i + 1) % N;
+        D[k] = Math.min(D[k], D[j * N + im] + a, D[jm * N + i] + a, D[jm * N + im] + d2, D[jm * N + ip] + d2); }
+      for (let j = N - 1; j >= 0; j--) for (let i = N - 1; i >= 0; i--) { const k = j * N + i; if (!D[k]) continue; const ip = (i + 1) % N, jp = (j + 1) % N, im = (i + N - 1) % N;
+        D[k] = Math.min(D[k], D[j * N + ip] + a, D[jp * N + i] + a, D[jp * N + ip] + d2, D[jp * N + im] + d2); } }
+    for (let i = 0; i < N * N; i++) fogData[i * 4 + 2] = Math.min(255, D[i] / FOG_FADE * 255); }
+  for (let i = 0; i < FOG_N * FOG_N; i++) { fogData[i * 4] = FOG_ON ? fogVis[i] * 255 : 255; fogData[i * 4 + 1] = FOG_ON ? fogExp[i] * 255 : 255; if (!FOG_ON) fogData[i * 4 + 2] = 0; fogData[i * 4 + 3] = 255; }
+  // settlements stay hidden until something of yours has seen part of them
+  for (const t of towns) if (!t.found) { if (t.idx === 0) { t.found = true; continue; } for (let k = 0; k < 9 && !t.found; k++) { const a = k / 8 * 6.283, r = k ? TOWN * 0.8 : 0; if (fogExplored(t.x + Math.cos(a) * r, t.z + Math.sin(a) * r)) t.found = true; }
+    if (t.found && t.idx !== 0) log(0, t.idx === 1 ? 'Enemy HQ discovered' : 'Settlement discovered'); }
   fogTex.needsUpdate = true; }
 // hide what the player cannot see: enemy units out of sight, enemy buildings on unexplored ground
 function applyFog() { if (!FOG_ON) return;
@@ -3148,6 +3159,7 @@ function applyFog() { if (!FOG_ON) return;
   for (const h of helis) if (h.team === 1) { const v = fogVisible(h.pos.x, h.pos.z); if (!v) { h.root.visible = false; h.fogHid = true; if (h.bar) h.bar.g.visible = false; } else if (h.fogHid) { h.root.visible = true; h.fogHid = false; } }
   for (const s of soldiers) if (s.team === 1 && !s.inHeli) { const v = fogVisible(s.pos.x, s.pos.z); s.root.visible = v; if (!v && s.bar) s.bar.g.visible = false; }
   for (const k of trucks) if (k.team === 1 && !k.dead) { const v = fogVisible(k.x, k.z); k.obj.visible = v; if (!v) { if (k.trailer.visible) { k.trailer.visible = false; k.fogTr = k.trailer; } } else if (k.fogTr) { if (k.fogTr === k.trailer) k.trailer.visible = true; k.fogTr = null; } }
+  for (const t of towns) if (!t.found) t.root.visible = false;
   for (const L of [outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
 const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
 // ---- enemy AI helpers
@@ -3316,7 +3328,7 @@ const Battle = {
   shakeCamera() { const s = trauma * trauma; if (s < 0.0005) return; const t = performance.now() / 1000, amp = 0.012 * cam.dist * s;
     camera.position.x += amp * (Math.sin(t * 91) + Math.sin(t * 57)) * 0.5; camera.position.y += amp * (Math.sin(t * 73) + Math.sin(t * 41)) * 0.5; camera.position.z += amp * (Math.sin(t * 67) + Math.sin(t * 83)) * 0.5; },
   drawMini(ctx, s) {
-    for (const t of towns) { ctx.strokeStyle = t.idx === 0 ? '#ff5aa8' : t.idx === 1 ? '#46b8ff' : '#e8e0d0'; ctx.lineWidth = 1.5; ctx.strokeRect(t.x * S * s - 5, t.z * S * s - 5, 10, 10); }
+    for (const t of towns) { if (FOG_ON && !t.found) continue; ctx.strokeStyle = t.idx === 0 ? '#ff5aa8' : t.idx === 1 ? '#46b8ff' : '#e8e0d0'; ctx.lineWidth = 1.5; ctx.strokeRect(t.x * S * s - 5, t.z * S * s - 5, 10, 10); }
     for (const r of robots) { if (r.state === 'ko' || !fogSeen(r)) continue; ctx.fillStyle = r.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(r.pos.x * S * s - 2, r.pos.z * S * s - 2, 4, 4); }
     for (const h of helis) { if (!h.alive || !fogSeen(h)) continue; ctx.fillStyle = h.team ? '#9fe0ff' : '#ffb0d8'; ctx.beginPath(); ctx.arc(h.pos.x * S * s, h.pos.z * S * s, 3, 0, 7); ctx.fill(); }
   },
@@ -3329,7 +3341,7 @@ const Battle = {
     el.innerHTML = `<b class="t0">Violet</b> ${my.length} robots · ${heliTxt(0)}${towns[0]?.hqDown ? ' · HQ down' : ''}<br><b class="t1">Cobalt</b> ${en.length} robots · ${heliTxt(1)}${towns[1]?.hqDown ? ' · HQ down' : ''}`
       + (sel.length ? `<br>Selected: ${sel.length} · ${sel.map(u => Math.ceil(u.hp / u.maxHp * 100) + '%').slice(0, 8).join(' ')}` : '');
   },
-  fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; },
+  fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },

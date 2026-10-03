@@ -847,7 +847,7 @@ const BAKED = { tex: { value: null }, on: { value: 0 }, size: { value: 1 } };
 // fog of war: one map-wide texture (r = in sight, g = explored) from the battle module; black where never explored, dim and greyed
 // where explored but out of sight. Shared by the terrain, the water and (through the lit-material chunks) every lit object.
 const WARFOG = { tex: { value: new THREE.DataTexture(new Uint8Array([255, 255, 0, 255]), 1, 1) }, on: { value: 0 } };
-const WAR_GLSL = 'uniform sampler2D uWarFog; uniform float uWarOn;\nvec3 warShade(vec3 c, vec2 xz){ if (uWarOn < .5) return c; vec2 f = texture2D(uWarFog, xz / ' + SIZE.toFixed(1) + ').rg; vec3 k = c / (1. + c); float g = dot(k, vec3(.3, .59, .11));\n  vec3 seen = mix(vec3(g), k, .4) * .55, dark = k * .05 + vec3(.004, .006, .01); return mix(mix(dark, seen, f.g), c, f.r); }\n';
+const WAR_GLSL = 'uniform sampler2D uWarFog; uniform float uWarOn;\nvec3 warShade(vec3 c, vec2 xz){ if (uWarOn < .5) return c; vec3 f = texture2D(uWarFog, xz / ' + SIZE.toFixed(1) + ').rgb; vec3 k = c / (1. + c); float g = dot(k, vec3(.3, .59, .11));\n  vec3 seen = mix(vec3(g), k, .4) * .55, dark = mix(vec3(g) * .16, vec3(0.), smoothstep(0., 1., f.b)); return mix(mix(dark, seen, f.g), c, f.r); }\n';
 THREE.ShaderChunk.lights_pars_begin = WAR_GLSL + 'uniform sampler2D uBakedSh; uniform float uBakedOn, uBakedSize;\n#ifndef BAKED_DECL\n#define BAKED_DECL\nvarying vec3 vBakedW;\n#endif\nfloat bakedLight(vec3 w){ return uBakedOn > .5 ? texture2D(uBakedSh, w.xz / uBakedSize).r : 1.; }\n' + THREE.ShaderChunk.lights_pars_begin;
 THREE.ShaderChunk.worldpos_vertex = THREE.ShaderChunk.worldpos_vertex + '\n#if defined( USE_SHADOWMAP ) && defined( BAKED_DECL )\n vBakedW = worldPosition.xyz;\n#endif\n';
 THREE.ShaderChunk.shadowmap_pars_vertex = '#ifndef BAKED_DECL\n#define BAKED_DECL\nvarying vec3 vBakedW;\n#endif\n' + THREE.ShaderChunk.shadowmap_pars_vertex;
@@ -1775,7 +1775,7 @@ function drawMini() {
   const s = mini.width / SIZE;
   mctx.drawImage(miniBase, 0, 0, mini.width, mini.height);
   if (Battle.fogOn) { const N = Battle.FOG_N, D = Battle.fogData; if (!drawMini.fc) { drawMini.fc = document.createElement('canvas'); drawMini.fc.width = drawMini.fc.height = N; drawMini.fi = drawMini.fc.getContext('2d').createImageData(N, N); }
-    const px = drawMini.fi.data; for (let i = 0; i < N * N; i++) { px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = 4; px[i * 4 + 3] = 235 - D[i * 4 + 1] * 0.55 - D[i * 4] * 0.37; }
+    const px = drawMini.fi.data; for (let i = 0; i < N * N; i++) { px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = 4; px[i * 4 + 3] = D[i * 4 + 1] > 128 ? 130 * (1 - D[i * 4] / 255) : 170 + D[i * 4 + 2] * 0.34; }
     drawMini.fc.getContext('2d').putImageData(drawMini.fi, 0, 0); mctx.imageSmoothingEnabled = true; mctx.drawImage(drawMini.fc, 0, 0, mini.width, mini.height); }
   if (terrToggle || placing) for (const [team, col] of [[0, 'rgba(95,208,255,.35)'], [1, 'rgba(255,80,70,.3)']]) { mctx.fillStyle = col;
     for (const [cx, cz, fn] of Battle.terrDiscs(team)) { mctx.beginPath(); for (let i = 0; i <= 64; i++) { const a = i / 64 * 6.283, r = fn(a) * 12 * s; mctx[i ? 'lineTo' : 'moveTo'](cx * 12 * s + Math.cos(a) * r, cz * 12 * s + Math.sin(a) * r); } mctx.fill(); } }
