@@ -664,20 +664,35 @@ function assemble() {
   // tail length: stretch along the tail's own axis (base → tip) only, so its thickness never changes
   const tailSc = [-S, S, S];
   const tail = blendPart('tail');
-  if (settings.tailLen !== 1) {
+  if (settings.tailLen > 1) {
+    // Lengthen: re-map the tail along its own centreline (follows the curl): every vertex keeps its offset from
+    // the centreline, so thickness never changes and a shortened curl doesn't fold into a second prong.
     const all = tail.variants.flatMap(vr => Array.from(vr.pos));
-    const xmin = Math.min(...all.filter((_, i) => i % 3 === 0)), ext = tail.max[0] - tail.min[0];
-    const cen = (pred) => { const c = [0, 0, 0]; let n = 0; for (let i = 0; i < all.length; i += 3) if (pred(all[i], all[i+1], all[i+2])) { c[0] += all[i]; c[1] += all[i+1]; c[2] += all[i+2]; n++; } return c.map(v => v / Math.max(n, 1)); };
-    const base = cen(x => x < xmin + ext * 0.12);                        // where it joins the body
-    const dist = i => Math.hypot(all[i] - base[0], all[i+1] - base[1], all[i+2] - base[2]);
-    let dmax = 0; for (let i = 0; i < all.length; i += 3) dmax = Math.max(dmax, dist(i));
-    const tip = cen((x, y, z) => Math.hypot(x - base[0], y - base[1], z - base[2]) > dmax * 0.9);
-    const ax = [tip[0] - base[0], tip[1] - base[1], tip[2] - base[2]], al = Math.hypot(...ax) || 1;
-    const u = ax.map(v => v / al), k = settings.tailLen - 1;
-    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    const ext = tail.max[0] - tail.min[0];
+    const cen = pred => { const c = [0, 0, 0]; let n = 0; for (let i = 0; i < all.length; i += 3) if (pred(i)) { c[0] += all[i]; c[1] += all[i+1]; c[2] += all[i+2]; n++; } return n ? c.map(v => v / n) : null; };
+    const root = cen(i => all[i] < tail.min[0] + ext * 0.12);
+    const dOf = (x, y, z) => Math.hypot(x - root[0], y - root[1], z - root[2]);
+    let dmax = 0; for (let i = 0; i < all.length; i += 3) dmax = Math.max(dmax, dOf(all[i], all[i+1], all[i+2]));
+    const M = 14, line = [{ s: 0, p: root }];
+    for (let m = 0; m < M; m++) {
+      const a0 = m / M, a1 = (m + 1) / M;
+      const c = cen(i => { const t = dOf(all[i], all[i+1], all[i+2]) / dmax; return t >= a0 && t < a1; });
+      if (c) line.push({ s: dOf(...c) / dmax, p: c });
+    }
+    line.sort((x, y) => x.s - y.s);
+    const last = line[line.length - 1], prev = line[line.length - 2];
+    const tan = last.p.map((v, a) => v - prev.p[a]), tl = Math.hypot(...tan) || 1, T = tan.map(v => v / tl);
+    const at = s => {   // centreline point at normalised distance s (extrapolated straight past the tip)
+      if (s >= last.s) return last.p.map((v, a) => v + T[a] * (s - last.s) * dmax);
+      let i = 1; while (i < line.length - 1 && line[i].s < s) i++;
+      const A = line[i - 1], B = line[i], u = (s - A.s) / Math.max(B.s - A.s, 1e-6);
+      return A.p.map((v, a) => v + (B.p[a] - v) * clamp(u, 0, 1));
+    };
+    const k = settings.tailLen, mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
     for (const vr of tail.variants) for (let i = 0; i < vr.pos.length; i += 3) {
-      const t = Math.max(0, (vr.pos[i] - base[0]) * u[0] + (vr.pos[i+1] - base[1]) * u[1] + (vr.pos[i+2] - base[2]) * u[2]);
-      for (let a = 0; a < 3; a++) { vr.pos[i+a] += u[a] * t * k; mn[a] = Math.min(mn[a], vr.pos[i+a]); mx[a] = Math.max(mx[a], vr.pos[i+a]); }
+      const sv = dOf(vr.pos[i], vr.pos[i+1], vr.pos[i+2]) / dmax;
+      const c0 = at(sv), c1 = at(sv * k);
+      for (let a = 0; a < 3; a++) { vr.pos[i+a] = c1[a] + (vr.pos[i+a] - c0[a]); mn[a] = Math.min(mn[a], vr.pos[i+a]); mx[a] = Math.max(mx[a], vr.pos[i+a]); }
     }
     tail.min = mn; tail.max = mx;
   }
@@ -685,9 +700,10 @@ function assemble() {
   const tailSegs = Math.round(settings.tailSegs);
   const tailL = tlb.max[0] - tlb.min[0];
   // socket high on the rump, continuing the spine line (Tail height moves it up or down)
-  // short tails sit higher on the rump, angle further up and are buried deeper, so they don't read as a lump
-  const short = clamp((1 - settings.tailLen) / 0.6, 0, 1);
-  const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * (settings.tailHeight + 0.18 * short), 0];
+  // Shorten: keep the tail's own shape and orientation, and sink more of it into the rump so only the
+  // tapered tip end shows (no squashing, so no folds or prongs)
+  const short = clamp(1 - settings.tailLen, 0, 0.75);
+  const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * (settings.tailHeight + 0.06 * short), 0];
   // attach by the tail's real root: centroid of its body-side end (kit min-x end; mirrored to max-x here)
   const rootC = (() => { const c = [0, 0, 0]; let n = 0, ext = tail.max[0] - tail.min[0];
     for (const vr of tail.variants) for (let i = 0; i < vr.pos.length; i += 3) if (vr.pos[i] < tail.min[0] + ext * 0.12) { c[0] += vr.pos[i] * tailSc[0]; c[1] += vr.pos[i+1] * tailSc[1]; c[2] += vr.pos[i+2] * tailSc[2]; n++; }
@@ -699,8 +715,8 @@ function assemble() {
     const d = all.map(p => Math.hypot(p[0] - rootC[0], p[1] - rootC[1])), dm = Math.max(...d);
     const c = [0, 0]; let n = 0; all.forEach((p, i) => { if (d[i] > dm * 0.18 && d[i] < dm * 0.32) { c[0] += p[0]; c[1] += p[1]; n++; } });
     return [c[0] / Math.max(n, 1), c[1] / Math.max(n, 1)]; })();
-  const tailRot = (Math.PI - 0.2 - 0.67 * short) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~11° up
-  const sinkIn = tailL * (0.16 + ov * 0.3 + 0.15 * short);                                                  // root cap buried in the rump
+  const tailRot = (Math.PI - 0.2) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~11° up
+  const sinkIn = tailL * (0.16 + ov * 0.3 + 0.95 * short);                                                  // root cap buried in the rump
   const tailOff = [rump[0] - rootC[0] + sinkIn, rump[1] - rootC[1], -rootC[2]];
   const tailPivot = [rump[0] + sinkIn, rump[1], 0];
   const tailBase = buf.pos.length / 3;
