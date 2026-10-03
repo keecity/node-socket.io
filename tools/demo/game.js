@@ -37,6 +37,48 @@ for (const side of [-1, 1]) {
   app.root.syncHierarchy();
   const M = model.getWorldTransform();
   HOOPS.push({ side, rim: M.transformPoint(new pc.Vec3(0.006, 0.625, 0.43)), board: M.transformPoint(new pc.Vec3(0, 0.70, 0.352)) });
+  splitHoop(model, HOOPS[HOOPS.length - 1]);
+}
+// The hoop model is one mesh. Split its triangles into rim+net (always solid), backboard glass (always see-through)
+// and the stand (fades when play is near the camera-side basket), so the hoop never hides the players.
+function splitHoop(model, H) {
+  H.fade = []; H.op = 1;
+  for (const r of model.findComponents('render')) {
+    const mis = r.meshInstances.slice(), keep = [];
+    for (const mi of mis) {
+      const mesh = mi.mesh, pos = [], nrm = [], uv = [], idx = [];
+      mesh.getPositions(pos); mesh.getNormals(nrm); mesh.getUvs(0, uv); mesh.getIndices(idx);
+      const W = mi.node.getWorldTransform(), v = new pc.Vec3(), w = new pc.Vec3();
+      const n = new pc.Vec3(H.rim.x - H.board.x, 0, H.rim.z - H.board.z).normalize(), perp = new pc.Vec3(-n.z, 0, n.x);
+      const cls = [];
+      for (let i = 0; i < pos.length / 3; i++) {
+        W.transformPoint(v.set(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]), w);
+        const dx = w.x - H.rim.x, dz = w.z - H.rim.z, hr = Math.hypot(dx, dz);
+        const bx = w.x - H.board.x, bz = w.z - H.board.z, along = bx * n.x + bz * n.z, lat = bx * perp.x + bz * perp.z;
+        cls.push(hr < 0.34 && w.y > H.rim.y - 0.55 && w.y < H.rim.y + 0.08 ? 0 : Math.abs(along) < 0.09 && Math.abs(lat) < 1.0 && w.y > H.rim.y - 0.2 ? 1 : 2);
+      }
+      const groups = [[], [], []];
+      for (let t = 0; t < idx.length; t += 3) { const c = Math.min(cls[idx[t]], cls[idx[t + 1]], cls[idx[t + 2]]); groups[c].push(idx[t], idx[t + 1], idx[t + 2]); }
+      groups.forEach((ix, c) => {
+        if (!ix.length) return;
+        const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); if (uv.length) m.setUvs(0, uv); m.setIndices(ix); m.update();
+        const mat = mi.material.clone();
+        if (c > 0) { mat.blendType = pc.BLEND_NORMAL; mat.depthWrite = c === 2; mat.opacity = c === 1 ? 0.28 : 1; }
+        mat.update(); const nm = new pc.MeshInstance(m, mat, mi.node); nm.castShadow = mi.castShadow;
+        keep.push(nm); if (c === 2) H.fade.push(mat);
+      });
+    }
+    r.meshInstances = keep;
+  }
+}
+function fadeHoops(dt) {   // the basket on the camera's side turns see-through while players are near it
+  const side = HUMAN === 1 ? -1 : 1;
+  for (const H of HOOPS) {
+    const near = camMode === 'arena' && Math.sign(H.rim.x) === -side && P.some(p => Math.abs(p.pos.x - H.rim.x) < 7.5);
+    const want = near ? 0.25 : 1; if (Math.abs(H.op - want) < 0.01) continue;
+    H.op += (want - H.op) * Math.min(1, dt * 6);
+    for (const m of H.fade) { m.opacity = H.op; m.depthWrite = H.op > 0.95; m.update(); }
+  }
 }
 // HOOPS[0] = west, HOOPS[1] = east. Purple (team 0) attacks east, Teal (team 1) attacks west.
 const attackHoop = team => HOOPS[team === 0 ? 1 : 0], defendHoop = team => HOOPS[team === 0 ? 0 : 1];
@@ -146,14 +188,22 @@ function inbound(t, spot) {
   const D = defendHoop(t), A = attackHoop(t), dir = Math.sign(A.rim.x - D.rim.x);
   const o = team(t), d = team(1 - t);
   const h = o[Math.floor(Math.random() * 3)];
-  const base = spot ? spot.clone() : flat(D.rim.x + dir * 1.2, (Math.random() - .5) * 3);
-  const places = [base, flat(base.x + dir * 4.5, 4.2), flat(base.x + dir * 5.5, -4.2)];
-  o.filter(p => p !== h).forEach((p, i) => { p.pos.copy(places[i + 1]); });
-  h.pos.copy(places[0]);
-  for (const p of o) { p.vel.set(0, 0, 0); p.action = null; delete p.pendingBlock; clamp(p.pos); faceTo(p, A.rim.x, 0); p.cut = 0; p.goal = null; }
+  // the inbounder stands out of bounds: behind the baseline after a basket, on the sideline otherwise
+  let out, a1, a2; const side = spot && Math.abs(spot.z) > 0.01 ? Math.sign(spot.z) : (Math.random() < .5 ? 1 : -1);
+  if (!spot) { const bz = side * 1.9; out = flat(Math.sign(D.rim.x) * 14.8, bz); a1 = flat(D.rim.x + dir * 3.2, bz * 1.4); a2 = flat(D.rim.x + dir * 6.5, -bz * 2); }
+  else { const sx = Math.max(-12.5, Math.min(12.5, spot.x)); out = flat(sx, side * 7.8); a1 = flat(sx + dir * 1.2, side * 4.6); a2 = flat(sx + dir * 4.5, -side * 1.5); }
+  const rest = o.filter(p => p !== h); rest[0].pos.copy(a1); rest[1].pos.copy(a2);
+  h.pos.copy(out); h.oob = true;
+  for (const p of o) { p.vel.set(0, 0, 0); p.action = null; delete p.pendingBlock; if (p !== h) clamp(p.pos); faceTo(p, A.rim.x, 0); p.cut = 0; p.goal = null; }
+  faceTo(h, a1.x, a1.z); game.inbounder = h; game.timer = 1.2;
+  if (human.on && t === HUMAN && !TUT) setTimeout(() => { if (myInbound()) toastL('Tap a teammate to inbound', false); }, 1300);
   for (const p of d) { const m = man(p); p.vel.set(0, 0, 0); p.action = null; delete p.pendingBlock; p.pos.copy(flat(m.pos.x + dir * 2.5, m.pos.z * 0.8)); clamp(p.pos); faceTo(p, m.pos.x, m.pos.z); }
   for (const p of P) { p.rootBone.setLocalPosition(0, 0, 0); setAnim(p, p === h ? 'Idle' : p.team === t ? 'Ready' : 'Defend', 0.1); place(p); }
   give(h); hud();
+}
+function inboundPass(h, r) {   // throw it in; the clock and play start with the pass
+  if (!r) { let bd = 1e9; for (const q of team(h.team)) { if (q === h) continue; const c = closestDefender(q), sc = d2(q.pos, h.pos) - (c ? Math.min(2, d2(c.pos, q.pos)) : 2) * 1.5; if (sc < bd) { bd = sc; r = q; } } }
+  if (!r) return; r.lastPasser = null; game.phase = 'live'; game.inbounder = null; toast((h.team ? 'Teal' : 'Purple') + ' ball'); startPass(h, r);
 }
 function restart() { game.score = [0, 0]; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
 function scored(H) {
@@ -472,7 +522,7 @@ function chase(p, dt) {
 }
 
 // ====================================================================== solid bodies (a set defender outweighs the dribbler)
-function bodies() { for (let it = 0; it < 3; it++) { bodies1(); for (const p of P) clamp(p.pos); } }
+function bodies() { for (let it = 0; it < 3; it++) { bodies1(); for (const p of P) if (!p.oob) clamp(p.pos); } }
 function bodies1() {
   for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
     const a = P[i], b = P[j], pa = bodyPos(a), pb = bodyPos(b);
@@ -490,7 +540,14 @@ function bodies1() {
 // ====================================================================== camera + name tags
 let camMode = 'arena'; const camPos = new pc.Vec3(-24, 30, 0), camLook = new pc.Vec3(0, 1, 0);
 function updateCamera(dt) {
-  const aspect = app.graphicsDevice.width / app.graphicsDevice.height, portrait = aspect < 0.9;
+  // arena cam renders only into the gap between the scoreboard and the hint/meter, so the HUD never covers the court
+  let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
+  if (camMode === 'arena') {
+    const H = window.innerHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
+    const bot = $('hint').getBoundingClientRect().top - 4, h = Math.max(0.3, (bot - top) / H);
+    camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
+  } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
+  const portrait = aspect < 0.9;
   const f = ball.holder ? bodyPos(ball.holder) : ball.pos, att = attackHoop(game.offense).rim.x > 0 ? 1 : -1;
   const fx = pc.math.clamp(f.x + att * 2, -10.5, 10.5), fz = pc.math.clamp(f.z, -4, 4);
   let pos, look, fov;
@@ -499,7 +556,7 @@ function updateCamera(dt) {
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
     const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
     pos = new pc.Vec3(side * -34 + drift, 19, 0); look = new pc.Vec3(side * 0.8 + drift, -1.5, 0); fov = 40;
-    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 12.6);
+    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 9.8);
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
@@ -525,7 +582,11 @@ app.on('update', dt => {
   game.time += dt; game.timer -= dt;
   const live = game.phase === 'live' || game.phase === 'air' || game.phase === 'loose';
   if (game.phase === 'intro') { if (game.timer <= 0) { if (!tutSeen() && !NET.role) startTutorial(); else restart(); } }
-  else if (game.phase === 'inbound') { if (game.timer <= 0) { game.phase = 'live'; toast((game.offense ? 'Teal' : 'Purple') + ' ball'); } }
+  else if (game.phase === 'inbound') {
+    const h = game.inbounder;
+    for (const p of P) if (!p.action) { p.vel.mulScalar(Math.pow(0.05, dt)); if (p === h) setAnim(p, 'Idle', 0.2); else animMove(p, dt, p.team === game.offense ? 'offball' : 'stance'); if (p !== h && p.team === game.offense) faceTo(p, h.pos.x, h.pos.z, 5, dt); }
+    if (h && ball.holder === h && !h.action && (game.timer <= 0 && !ctl(h.team) || game.timer < -5)) inboundPass(h);
+  }
   else if (game.phase === 'scored') {
     for (const p of P) if (!p.action) { p.vel.mulScalar(Math.pow(0.1, dt)); animMove(p, dt, p.team === game.lastScoreTeam ? 'offball' : 'stance'); }
     if (game.timer <= 0 && !P.some(p => p.action && p.action.type === 'dunk')) { const a = game.andOne; game.andOne = null; if (a) callFoul(a.def, a.shooter, 1, 'And one! Foul'); else inbound(1 - game.lastScoreTeam); }
@@ -576,9 +637,12 @@ app.on('update', dt => {
   updateActions(dt);
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
   bodies();
-  for (const p of P) { if (!p.action || p.action.type !== 'dunk') { clamp(p.pos); place(p); } }
+  for (const p of P) {
+    if (p.oob) { if (ball.holder !== p && !p.action) { const tgt = clamp(p.pos.clone()); const d = d2(tgt, p.pos); if (d < 0.05) p.oob = false; else { p.pos.lerp(p.pos, tgt, Math.min(1, dt * 3 / d)); animMove(p, dt, 'offball'); } } place(p); continue; }
+    if (!p.action || p.action.type !== 'dunk') { clamp(p.pos); place(p); }
+  }
   if (ball.free) stepBall(dt);
-  updateCamera(dt); hud(); netSend();
+  updateCamera(dt); fadeHoops(dt); hud(); netSend();
 });
 // HUD pieces every screen runs (host or guest): meters, stamina bars, ball ring, dribble sound
 function viewFrame(dt) {
@@ -596,7 +660,9 @@ function viewFrame(dt) {
   if (human.meter && !human.auto && !myBall() && !human.down && !(human.freeze > 0)) { human.meter = false; meterEl.className = ''; }
   if (!human.meter && !(human.freeze > 0)) $('mlabel').textContent = defMode() ? 'STEAL TIMING' : 'SHOT TIMING';
   for (const q of P) { const f = q.label.querySelector('.sbar b'); if (f) { f.style.width = (q.stamina * 100).toFixed(0) + '%'; f.parentNode.classList.toggle('low', q.stamina < 0.25); f.parentNode.hidden = !(human.on && q.team === HUMAN); } }
-  const bh = ball.holder; ballRing.enabled = !!bh; if (bh) { const bp = bodyPos(bh); ballRing.setPosition(bp.x, 0.03, bp.z); }   // green ring under the ball handler
+  const bh = ball.holder; ballRing.enabled = !!bh; if (bh) { const bp = bodyPos(bh); ballRing.setPosition(bp.x, 0.03, bp.z); }   // ring under the ball handler
+  const mine = !bh || bh.team === HUMAN || !human.on;   // green: your team has it, red: the other team does
+  if (ringMat.mine !== mine) { ringMat.mine = mine; ringMat.emissive = mine ? new pc.Color(0.25, 1.6, 0.45) : new pc.Color(1.7, 0.18, 0.15); ringMat.update(); }
   if (!ball.free) dribbleSound();
 }
 
@@ -669,8 +735,9 @@ function groundAt(sx, sy) {
 }
 function screenOf(p) { const s = new pc.Vec3(); const bp = bodyPos(p); camera.camera.worldToScreen(new pc.Vec3(bp.x, 1.0, bp.z), s); return s; }
 const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
+function myInbound() { return human.on && game.phase === 'inbound' && game.inbounder && ball.holder === game.inbounder && ball.holder.team === HUMAN && !ball.holder.action && game.timer <= 0; }
 function myFT() { return human.on && game.phase === 'ftwait' && game.timer <= 0 && game.ft && ball.holder === game.ft.shooter && ball.holder.team === HUMAN; }
-function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live' || myFT()); }
+function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live' || myFT() || myInbound()); }
 canEl.addEventListener('pointerdown', e => {
   if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
   if (defMode()) {
@@ -697,10 +764,12 @@ function onRelease(e) {
     const am = Math.abs(m); act({ t: 'shoot', p: h.id, q: am <= human.zone ? 1 : Math.max(0, 0.9 * (1 - am) / (1 - human.zone)) }); return;
   }
   if (myFT()) return;   // at the line only the shot counts
+  if (myInbound()) { human.meter = false; meterEl.className = ''; }
   // tap: teammate under the finger = pass, else move there
   let best = null, bd = 48;
   for (const q of team(HUMAN)) { if (q === h) continue; const s = screenOf(q), d = Math.hypot(s.x - human.x, s.y - human.y); if (d < bd) { bd = d; best = q; } }
   if (best) { act({ t: 'pass', p: h.id, to: best.id }); return; }
+  if (myInbound()) return;   // out of bounds: only a pass
   const g = groundAt(human.x, human.y); if (g) act({ t: 'move', p: h.id, x: g.x, z: g.z });
 }
 window.addEventListener('pointerup', onRelease); canEl.addEventListener('contextmenu', e => e.preventDefault());
@@ -750,7 +819,7 @@ function humanAI(p, dt) {
   if (!p.moveTarget && p.vel.length() < 0.5) { const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 5, dt); }
 }
 function meterTick() {   // a 0.25 s hold brings up the shot meter
-  const p = ball.holder; if (!myBall() || !human.down || performance.now() - human.t0 <= 250) return;
+  const p = ball.holder; if (!myBall() || myInbound() || !human.down || performance.now() - human.t0 <= 250) return;
     if (!human.meter && performance.now() - human.t0 > 250) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
     // the more open the shooter, the wider the perfect (green) window
     const op = openness(p), dr = d2(p.pos, attackHoop(p.team).rim);
@@ -781,6 +850,7 @@ function act(c) {               // a command from this screen's player
 function apply(c, t) {          // runs on the host only; t = the team the command came from
   const p = P[c.p]; if (!p || p.team !== t) return;
   if (game.phase === 'ftwait' && c.t === 'shoot' && game.ft && game.ft.shooter === p && game.timer <= 0) return ftShoot(Math.max(0, Math.min(1, +c.q || 0)));
+  if (game.phase === 'inbound' && c.t === 'pass' && game.inbounder === p && game.timer <= 0) { const r = P[c.to]; if (r && r.team === t && r !== p) inboundPass(p, r); return; }
   if (game.phase !== 'live' && c.t !== 'move') return;
   const q = Math.max(0, Math.min(1, +c.q || 0));
   if (c.t === 'move') { if (Number.isFinite(c.x) && Number.isFinite(c.z)) moveOrder(p, flat(c.x, c.z)); }
@@ -795,7 +865,7 @@ function netSend() {            // host: stream the state to the guest (presence
   const now = performance.now(); if (now - NET.sent < 40) return; NET.sent = now;
   const s = {
     ph: game.phase, sc: game.score, sk: Math.max(0, Math.ceil(game.shotClock)), of: game.offense,
-    bh: ball.holder ? ball.holder.id : -1, ft: game.ft ? game.ft.shooter.id : -1, tm: r2(game.timer), b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
+    bh: ball.holder ? ball.holder.id : -1, ft: game.ft ? game.ft.shooter.id : -1, ib: game.inbounder ? game.inbounder.id : -1, tm: r2(game.timer), b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
     p: P.map(p => [r2(p.pos.x), r2(p.pos.z), r2(p.yaw), STATES.indexOf(p.state), r2(p.model.anim.speed), ACTS.indexOf(p.action ? p.action.type : ''), r2(p.stamina)])
   };
   NET.room.presence({ host: 1, s, ev: NET.ev }).catch(() => {});
@@ -813,7 +883,7 @@ function onHostState(pr) {      // guest: take in the host's latest state
 function guestFrame(dt) {
   const s = NET.snap;
   if (s) {
-    game.phase = s.ph; game.score = s.sc; game.ft = s.ft >= 0 ? { shooter: P[s.ft] } : null; game.timer = s.tm; game.shotClock = s.sk; game.offense = s.of;
+    game.phase = s.ph; game.score = s.sc; game.ft = s.ft >= 0 ? { shooter: P[s.ft] } : null; game.inbounder = s.ib >= 0 ? P[s.ib] : null; game.timer = s.tm; game.shotClock = s.sk; game.offense = s.of;
     const k = Math.min(1, dt * 14);
     P.forEach((p, i) => {
       const v = s.p[i]; if (!v) return;
@@ -836,7 +906,7 @@ function guestFrame(dt) {
     }
   }
   if (NET.room) NET.room.presence({ down: !!(human.down && defMode()) }).catch(() => {});
-  viewFrame(dt); updateCamera(dt); hud();
+  viewFrame(dt); updateCamera(dt); fadeHoops(dt); hud();
 }
 
 // ---- lobby: "Online" opens a panel; hosts advertise a game in the lobby, guests pick one to join

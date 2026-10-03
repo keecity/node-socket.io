@@ -77,7 +77,7 @@ body{font-family:'Rajdhani',system-ui,sans-serif}
 .tag{font-family:'Russo One',system-ui,sans-serif;font-weight:400;font-size:13px;padding:5px 15px 14px;border:0;border-radius:0;opacity:1;color:#fff;text-shadow:0 1px 2px #000;box-shadow:none!important;
   background:var(--i-tagp) no-repeat center/100% 100%!important;min-width:58px;text-align:center}
 .tag.t1{background-image:var(--i-tagt)!important}
-.tag.ball{background-image:var(--i-tagg)!important;font-size:15px;padding:6px 17px 18px}
+.tag.ball{z-index:3;background-image:var(--i-tagg)!important;font-size:15px;padding:6px 17px 18px}
 .tag::after{display:none}
 .tag.near{filter:drop-shadow(0 0 6px #22d3cb)}
 .tag .sbar{margin:2px 0 0;height:3px}
