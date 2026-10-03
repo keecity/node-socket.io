@@ -131,9 +131,13 @@ function stepBall(dt) {
 // ====================================================================== game flow
 function toast(text, big) { netEv('toast', text, big ? 1 : 0); toastL(text, big); }
 function toastL(text, big) { const t = $('toast'); t.textContent = text; t.className = big ? 'show big' : 'show'; clearTimeout(toast.h); toast.h = setTimeout(() => t.className = '', big ? 2400 : 1400); }
+function digits(el, v, set) {   // numbers drawn with the sprite-sheet digits
+  const s = String(v); if (el.dataset.v === s) return; el.dataset.v = s;
+  el.innerHTML = [...s].map(c => '<i class="' + set + c + '"></i>').join('');
+}
 function hud() {
-  $('s0').textContent = game.score[0]; $('s1').textContent = game.score[1];
-  $('clock').textContent = game.phase === 'live' || game.phase === 'air' || game.phase === 'loose' ? Math.max(0, Math.ceil(game.shotClock)) : '';
+  digits($('s0'), game.score[0], 'w'); digits($('s1'), game.score[1], 'w');
+  digits($('clock'), game.phase === 'live' || game.phase === 'air' || game.phase === 'loose' ? Math.max(0, Math.ceil(game.shotClock)) : '', 'g');
   $('poss0').classList.toggle('on', game.offense === 0); $('poss1').classList.toggle('on', game.offense === 1);
 }
 function inbound(t, spot) {
