@@ -685,7 +685,9 @@ function assemble() {
   const tailSegs = Math.round(settings.tailSegs);
   const tailL = tlb.max[0] - tlb.min[0];
   // socket high on the rump, continuing the spine line (Tail height moves it up or down)
-  const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * settings.tailHeight, 0];
+  // short tails sit higher on the rump, angle further up and are buried deeper, so they don't read as a lump
+  const short = clamp((1 - settings.tailLen) / 0.6, 0, 1);
+  const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * (settings.tailHeight + 0.18 * short), 0];
   // attach by the tail's real root: centroid of its body-side end (kit min-x end; mirrored to max-x here)
   const rootC = (() => { const c = [0, 0, 0]; let n = 0, ext = tail.max[0] - tail.min[0];
     for (const vr of tail.variants) for (let i = 0; i < vr.pos.length; i += 3) if (vr.pos[i] < tail.min[0] + ext * 0.12) { c[0] += vr.pos[i] * tailSc[0]; c[1] += vr.pos[i+1] * tailSc[1]; c[2] += vr.pos[i+2] * tailSc[2]; n++; }
@@ -697,8 +699,8 @@ function assemble() {
     const d = all.map(p => Math.hypot(p[0] - rootC[0], p[1] - rootC[1])), dm = Math.max(...d);
     const c = [0, 0]; let n = 0; all.forEach((p, i) => { if (d[i] > dm * 0.18 && d[i] < dm * 0.32) { c[0] += p[0]; c[1] += p[1]; n++; } });
     return [c[0] / Math.max(n, 1), c[1] / Math.max(n, 1)]; })();
-  const tailRot = (Math.PI - 0.2) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~11° up
-  const sinkIn = tailL * (0.16 + ov * 0.3);                                                  // root cap buried in the rump
+  const tailRot = (Math.PI - 0.2 - 0.67 * short) - Math.atan2(nearC[1] - rootC[1], nearC[0] - rootC[0]);   // target: backward, ~11° up
+  const sinkIn = tailL * (0.16 + ov * 0.3 + 0.15 * short);                                                  // root cap buried in the rump
   const tailOff = [rump[0] - rootC[0] + sinkIn, rump[1] - rootC[1], -rootC[2]];
   const tailPivot = [rump[0] + sinkIn, rump[1], 0];
   const tailBase = buf.pos.length / 3;
