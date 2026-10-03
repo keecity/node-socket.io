@@ -145,6 +145,23 @@ details summary { cursor: pointer; font-weight: 600; }
     </section>
     <section>
       <h2>Skin</h2>
+      <div class="slider">
+        <label for="skin">Skin texture</label><span></span>
+        <select id="skin"><option value="-1">None (tint and pattern only)</option></select>
+      </div>
+      <div class="slider">
+        <label for="texScale">Texture scale</label><output id="texScaleOut"></output>
+        <input id="texScale" type="range" min="0.3" max="3" step="0.05" value="1">
+      </div>
+      <div class="slider">
+        <label for="texTint">Tint over texture</label><output id="texTintOut"></output>
+        <input id="texTint" type="range" min="0" max="1" step="0.05" value="0.35">
+        <small>0 = the texture's own colours; higher blends in the tint, pattern and pale belly below.</small>
+      </div>
+      <div class="slider">
+        <label for="bump">Surface relief</label><output id="bumpOut"></output>
+        <input id="bump" type="range" min="0" max="2.5" step="0.05" value="1">
+      </div>
       <div class="part"><span>Pattern</span><div class="seg" role="group" aria-label="Pattern" id="patSeg">
         <button data-pat="none">None</button><button data-pat="spots">Spots</button><button data-pat="stripes">Stripes</button><button data-pat="patches">Patches</button></div></div>
       <div class="row" style="margin-bottom:8px"><label for="patColor">Pattern colour</label><input type="color" id="patColor" value="#8a4f5a"></div>
@@ -382,7 +399,7 @@ const TAIL_NAMES = ['Pig curl', 'Pig hook', 'Pig sweep', 'Pig coil',
 const tailWeights = (a, b, t) => TAIL_NAMES.map((_, i) => (i === a ? 1 - t : 0) + (i === b ? t : 0));
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: tailWeights(0, 0, 0) };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, variation: 0.45, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, variation: 0.45, skin: -1, texScale: 1, texTint: 0.35, bump: 1, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, girth: { upper: 1.2, lower: 0.75, foot: 1 }, tailHeight: 0.32, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -1247,6 +1264,46 @@ function projectOntoFused(fused, asm, src, r) {
   return { bi, bw, colors };
 }
 
+// ---------- Skin textures: 16 tiles (colour + normal) from the skin atlases ----------
+const SKIN_NAMES = ['Green scales', 'Brown scales', 'Elephant hide', 'Toad skin', 'Pig skin', 'Pebbled hide', 'Croc scutes', 'Mottled skin',
+  'Grey fur', 'Tan fur', 'Brown fur', 'White fur', 'Red fur', 'Black fur', 'Leopard', 'Tiger'];
+const skinAtlas = {};
+const skinCache = new Map();
+function loadImage(src) { return new Promise((ok, err) => { const im = new Image(); im.onload = () => ok(im); im.onerror = err; im.src = src; }); }
+const skinsReady = Promise.all([loadImage('skins_color.webp'), loadImage('skins_normal.webp')])
+  .then(([c, n]) => { skinAtlas.color = c; skinAtlas.normal = n; })
+  .catch(err => console.warn('skin textures not loaded', err));
+function tileTexture(img, i, srgb) {
+  const T = img.width / 4, cv = document.createElement('canvas'); cv.width = cv.height = T;
+  cv.getContext('2d').drawImage(img, (i % 4) * T, Math.floor(i / 4) * T, T, T, 0, 0, T, T);
+  const tex = new pc.Texture(app.graphicsDevice, { width: T, height: T, format: srgb ? pc.PIXELFORMAT_SRGBA8 : pc.PIXELFORMAT_RGBA8, mipmaps: true,
+    addressU: pc.ADDRESS_MIRRORED_REPEAT, addressV: pc.ADDRESS_MIRRORED_REPEAT, anisotropy: 8 });   // mirrored repeat hides tile edges
+  tex.setSource(cv);
+  return tex;
+}
+function skinTextures(i) {
+  if (!skinAtlas.color) return null;
+  if (!skinCache.has(i)) skinCache.set(i, { color: tileTexture(skinAtlas.color, i, true), normal: tileTexture(skinAtlas.normal, i, false) });
+  return skinCache.get(i);
+}
+// box projection: each vertex takes its UVs from the plane its normal faces most (rest pose, so it sticks to the skin)
+function skinUvs(P, N) {
+  const n = P.length / 3, uv = new Float32Array(n * 2), f = 6 / (settings.texScale * settings.size);
+  for (let v = 0; v < n; v++) {
+    const ax = Math.abs(N[v*3]), ay = Math.abs(N[v*3+1]), az = Math.abs(N[v*3+2]);
+    const x = P[v*3] * f, y = P[v*3+1] * f, z = P[v*3+2] * f;
+    if (ax >= ay && ax >= az) { uv[v*2] = z; uv[v*2+1] = y; } else if (ay >= az) { uv[v*2] = x; uv[v*2+1] = z; } else { uv[v*2] = x; uv[v*2+1] = y; }
+  }
+  return uv;
+}
+function applySkinMaterial(on) {
+  const t = on ? skinTextures(settings.skin) : null;
+  skinMat.diffuseMap = t ? t.color : null;
+  skinMat.normalMap = t ? t.normal : null;
+  skinMat.bumpiness = settings.bump;
+  skinMat.update();
+}
+
 // ---------- Skin pattern: painted into the vertex colours from rest-pose positions ----------
 function hash3(x, y, z) { let h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return h - Math.floor(h); }
 function vnoise(x, y, z) {
@@ -1328,6 +1385,14 @@ function build(reason) {
     indices = Uint32Array.from(asm.buf.idx); ({ bi, bw, colors } = src);
   }
   if (!settings.showWeights) paintPattern(positions, colors, asm);
+  const textured = settings.skin >= 0 && !settings.showWeights && !!skinAtlas.color;
+  let uvs = null;
+  if (textured) {
+    uvs = skinUvs(positions, normals);
+    // the texture leads; our tint, pattern and pale belly blend over it by "Tint over texture"
+    const k = settings.texTint;
+    for (let i = 0; i < colors.length; i += 4) for (let a = 0; a < 3; a++) colors[i+a] = 255 + (colors[i+a] - 255) * k;
+  }
   const t2b = performance.now();
 
   const device = app.graphicsDevice, n = positions.length / 3;
@@ -1335,6 +1400,11 @@ function build(reason) {
   mesh.setPositions(positions);
   mesh.setNormals(normals);
   mesh.setColors32(colors);
+  if (uvs) {
+    mesh.setUvs(0, uvs);
+    mesh.setVertexStream(pc.SEMANTIC_TANGENT, new Float32Array(pc.calculateTangents(positions, normals, uvs, indices)), 4);
+  }
+  applySkinMaterial(!!uvs);
   mesh.setIndices(n > 65535 ? indices : Uint16Array.from(indices));
   mesh.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, n, pc.TYPE_UINT8);
   mesh.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
@@ -1776,25 +1846,25 @@ const T = n => TAIL_NAMES.indexOf(n);
 const ARCHETYPES = {
   grazer:  { label: 'Grazer',  pairs: [2], biped: false, fat: [0, 0.25], size: [0.95, 1.3], posture: [0, 0], crouch: [0, 0.05], front: [1.05, 1.4], hind: [1.1, 1.45],
              upper: [0.9, 1.1], lower: [1.15, 1.45], foot: [0.65, 0.85], gU: [1.05, 1.25], gL: [0.6, 0.75], shoulder: [0.35, 0.6], tailLen: [0.7, 1.2],
-             tails: ['Slender S', 'Whip', 'Tufted', 'Pig sweep'], patterns: ['spots', 'patches', 'none'], refs: ['Horse', 'Deer'] },
+             tails: ['Slender S', 'Whip', 'Tufted', 'Pig sweep'], patterns: ['spots', 'patches', 'none'], skins: ['Tan fur', 'Brown fur', 'Grey fur', 'White fur'], refs: ['Horse', 'Deer'] },
   stalker: { label: 'Stalker', pairs: [2], biped: false, fat: [0.05, 0.3], size: [0.9, 1.2], posture: [0, 0.05], crouch: [0.12, 0.3], front: [0.95, 1.1], hind: [1, 1.15],
              upper: [0.95, 1.15], lower: [0.85, 1.05], foot: [0.9, 1.1], gU: [1.15, 1.4], gL: [0.7, 0.85], shoulder: [0.3, 0.55], tailLen: [1.4, 2.1],
-             tails: ['Whip', 'Slender S', 'Ridged', 'Thick S'], patterns: ['stripes', 'spots'], refs: ['Tiger', 'Kitty'] },
+             tails: ['Whip', 'Slender S', 'Ridged', 'Thick S'], patterns: ['stripes', 'spots'], skins: ['Tiger', 'Leopard', 'Tan fur', 'Black fur'], refs: ['Tiger', 'Kitty'] },
   bruiser: { label: 'Bruiser', pairs: [2], biped: false, fat: [0.6, 1], size: [1.05, 1.45], posture: [0, 0.15], crouch: [0, 0.15], front: [0.8, 1], hind: [0.8, 0.95],
              upper: [0.85, 1], lower: [0.7, 0.85], foot: [1, 1.2], gU: [1.35, 1.6], gL: [0.8, 0.95], shoulder: [0.45, 0.75], tailLen: [0.4, 0.7],
-             tails: ['Stub', 'Pig curl', 'Fat taper', 'Club'], patterns: ['patches', 'none'], refs: ['Dog', 'procedural'] },
+             tails: ['Stub', 'Pig curl', 'Fat taper', 'Club'], patterns: ['patches', 'none'], skins: ['Elephant hide', 'Pig skin', 'Brown fur', 'Pebbled hide'], refs: ['Dog', 'procedural'] },
   hound:   { label: 'Hound',   pairs: [2], biped: false, fat: [0.15, 0.4], size: [0.85, 1.1], posture: [0, 0], crouch: [0, 0.1], front: [0.95, 1.1], hind: [0.95, 1.1],
              upper: [0.95, 1.1], lower: [0.95, 1.15], foot: [0.85, 1], gU: [1.1, 1.3], gL: [0.7, 0.85], shoulder: [0.3, 0.5], tailLen: [0.9, 1.4],
-             tails: ['Pig sweep', 'Thick S', 'Slender S', 'Bulb', 'Leaf'], patterns: ['patches', 'spots', 'none'], refs: ['Dog'] },
+             tails: ['Pig sweep', 'Thick S', 'Slender S', 'Bulb', 'Leaf'], patterns: ['patches', 'spots', 'none'], skins: ['Grey fur', 'Red fur', 'Brown fur', 'Black fur', 'White fur'], refs: ['Dog'] },
   runner:  { label: 'Runner',  pairs: [2], biped: true, fat: [0, 0.2], size: [0.95, 1.25], posture: [0.85, 1], crouch: [0.1, 0.3], front: [0.6, 0.8], hind: [1.2, 1.5],
              upper: [1.1, 1.35], lower: [0.85, 1.05], foot: [1.05, 1.3], gU: [1.2, 1.45], gL: [0.6, 0.75], shoulder: [0.15, 0.3], tailLen: [1.6, 2.4],
-             tails: ['Croc', 'Spiny', 'Ridged', 'Segmented', 'Spike'], patterns: ['stripes', 'spots'], refs: ['Chicken'] },
+             tails: ['Croc', 'Spiny', 'Ridged', 'Segmented', 'Spike'], patterns: ['stripes', 'spots'], skins: ['Green scales', 'Brown scales', 'Croc scutes'], refs: ['Chicken'] },
   waddler: { label: 'Waddler', pairs: [2], biped: true, fat: [0.6, 1], size: [0.85, 1.15], posture: [0.8, 1], crouch: [0.15, 0.35], front: [0.6, 0.8], hind: [0.75, 0.95],
              upper: [0.75, 0.9], lower: [0.65, 0.8], foot: [1.05, 1.3], gU: [1.3, 1.55], gL: [0.8, 0.95], shoulder: [0.4, 0.6], tailLen: [0.4, 0.75],
-             tails: ['Stub', 'Paddle', 'Leaf', 'Pig curl'], patterns: ['none', 'patches'], refs: ['Pinguin'] },
+             tails: ['Stub', 'Paddle', 'Leaf', 'Pig curl'], patterns: ['none', 'patches'], skins: ['Pig skin', 'Toad skin', 'Mottled skin', 'Black fur'], refs: ['Pinguin'] },
   crawler: { label: 'Crawler', pairs: [3, 4], biped: false, fat: [0.1, 0.4], size: [0.8, 1.05], posture: [0, 0], crouch: [0.15, 0.35], front: [0.75, 0.95], hind: [0.75, 0.95],
              upper: [0.75, 0.9], lower: [0.7, 0.85], foot: [0.85, 1], gU: [1.05, 1.25], gL: [0.7, 0.85], shoulder: [0.2, 0.4], tailLen: [1.2, 1.9],
-             tails: ['Segmented', 'Spiny', 'Croc', 'Club', 'Forked'], patterns: ['spots', 'stripes'], refs: ['procedural'] }
+             tails: ['Segmented', 'Spiny', 'Croc', 'Club', 'Forked'], patterns: ['spots', 'stripes'], skins: ['Green scales', 'Brown scales', 'Croc scutes', 'Toad skin', 'Pebbled hide'], refs: ['procedural'] }
 };
 // Latin-ish species names from the body plan
 const NAME_ROOT = { grazer: ['Cervo', 'Equi', 'Grami', 'Prato'], stalker: ['Felo', 'Lyco', 'Umbra', 'Tigri'], bruiser: ['Ursa', 'Grossi', 'Taurо', 'Robu'],
@@ -1837,6 +1907,8 @@ function enforceRules(st, arch) {
   st.tailSegs = Math.max(2, Math.min(8, Math.round(1.5 + st.tailLen * 2.6)));
   st.gait = genome.pairs > 2 ? 'wave' : 'trot';
   if (genome.pairs > 2) rules.push('many legs → wave gait');
+  // textured skins: furs and scales carry their own markings, so keep painted patterns subtle
+  if (st.skin >= 0 && st.pattern !== 'none') { st.patAmount = Math.min(st.patAmount, 0.4); rules.push('textured skin → painted pattern kept subtle'); }
   // colour harmony: pattern = darker shade of the body colour, pale belly
   const base = TINTS.body[recipe.body.indexOf(Math.max(...recipe.body))];
   const k = 0.45 + Math.random() * 0.15;
@@ -1868,7 +1940,8 @@ $('randomize').onclick = () => {
     legs: { front: seg(), hind: seg() }, girth: { upper: roll(A.gU, 0.05), lower: roll(A.gL, 0.05), foot: 1 },
     tailLen: roll(A.tailLen, 0.05), tailHeight: roll([0.25, 0.4], 0.02),
     pattern: pick(A.patterns), patAmount: roll([0.45, 0.75], 0.05), patScale: roll([0.8, 1.6], 0.05), counter: roll([0.25, 0.5], 0.05),
-    ref: pick(A.refs)
+    ref: pick(A.refs),
+    skin: SKIN_NAMES.indexOf(pick(A.skins)), texTint: roll([0.15, 0.4], 0.05), texScale: roll([0.8, 1.4], 0.05)
   };
   if (A.biped) st.legs.front = { upper: 0.8, lower: 0.75, foot: 0.8 };
   const rules = enforceRules(st, arch);
@@ -1927,6 +2000,12 @@ $('wander').onchange = e => settings.wander = e.target.checked;
 $('elbow').onchange = e => { settings.elbow = e.target.checked; if (creature) { initLegs(); } };
 bindSlider('terrain', 'terrain', v => v === 0 ? 'flat' : `${Math.round(v * 100)} cm`, false);
 $('terrain').addEventListener('input', () => { updateGround(loco.pos.x, loco.pos.z, true); if (creature) for (const l of creature.legs) l.needsPlant = true; });
+$('skin').insertAdjacentHTML('beforeend', SKIN_NAMES.map((n, i) => `<option value="${i}">${n}</option>`).join(''));
+$('skin').onchange = e => { settings.skin = +e.target.value; skinsReady.then(() => rebuild('skin texture: ' + (settings.skin < 0 ? 'none' : SKIN_NAMES[settings.skin]))); };
+bindSlider('texScale', 'texScale', v => `×${v.toFixed(2)}`, true);
+bindSlider('texTint', 'texTint', v => `${Math.round(v * 100)}%`, true);
+bindSlider('bump', 'bump', v => `×${v.toFixed(2)}`, false);
+$('bump').addEventListener('input', () => { skinMat.bumpiness = settings.bump; skinMat.update(); });
 bindSlider('patAmount', 'patAmount', v => `${Math.round(v * 100)}%`, true);
 bindSlider('patScale', 'patScale', v => `×${v.toFixed(2)}`, true);
 bindSlider('counter', 'counter', v => `${Math.round(v * 100)}%`, true);
@@ -1936,7 +2015,7 @@ $('patSeg').addEventListener('click', e => { const b = e.target.closest('[data-p
 $('patColor').addEventListener('change', e => { settings.patColor = e.target.value; rebuild('skin colour ' + e.target.value); });
 
 // ---------- DNA: the whole creature as a portable code ----------
-const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs', 'girth', 'tailHeight'];
+const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs', 'girth', 'tailHeight', 'skin', 'texScale', 'texTint', 'bump'];
 function dnaEncode() {
   const d = { v: 1, pairs: genome.pairs, recipe, s: Object.fromEntries(DNA_KEYS.map(k => [k, settings[k]])) };
   return 'HOG1.' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
@@ -1944,7 +2023,8 @@ function dnaEncode() {
 function syncUi() {
   for (const end of ['front', 'hind']) for (const part of ['upper', 'lower', 'foot']) { const el = $(`seg-${end}-${part}`); el.value = settings.legs[end][part]; el.dispatchEvent(new Event('input')); }
   for (const part of ['upper', 'lower', 'foot']) { const el = $(`girth-${part}`); el.value = settings.girth[part]; el.dispatchEvent(new Event('input')); }
-  for (const id of ['tailHeight', 'tailLen', 'tailSegs', 'posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'patAmount', 'patScale', 'counter', 'terrain']) {
+  $('skin').value = settings.skin;
+  for (const id of ['texScale', 'texTint', 'bump', 'tailHeight', 'tailLen', 'tailSegs', 'posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'patAmount', 'patScale', 'counter', 'terrain']) {
     const el = $(id); if (el) { el.value = settings[id]; el.dispatchEvent(new Event('input')); }
   }
   $('ref').value = settings.ref; $('refInfo').textContent = refInfoText(settings.ref);
@@ -2021,7 +2101,7 @@ function showManifest() {
 // ---------- boot ----------
 renderParts(); setPairs(2); showManifest();
 resize(); app.start();
-loadKit('pig3dmodel.glb').then(k => {
+Promise.all([loadKit('pig3dmodel.glb'), skinsReady]).then(([k]) => {
   kit = k;
   try { build('spawn: default pig'); }
   catch (err) { $('err').hidden = false; $('err').textContent = 'Building the creature failed: ' + err.message; console.error(err); }
