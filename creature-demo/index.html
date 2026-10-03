@@ -109,6 +109,11 @@ details summary { cursor: pointer; font-weight: 600; }
         <input id="hind" type="range" min="0.5" max="1.6" step="0.01" value="1">
         <small>Body pitch follows the height difference between front and hind hips. Live, no rebind.</small>
       </div>
+      <div class="slider">
+        <label for="rake">Leg rake</label><output id="rakeOut"></output>
+        <input id="rake" type="range" min="-30" max="30" step="1" value="0">
+        <small>0° puts each ankle straight under its hip. Positive sweeps the feet forward. Rebuilds.</small>
+      </div>
       <div class="pitch" id="pitchOut"></div>
       <div class="slider">
         <label for="overlap">Joint overlap</label><output id="overlapOut"></output>
@@ -224,7 +229,7 @@ const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -384,15 +389,18 @@ function blendPart(cat) {
 }
 
 // copies a (blended) part into the creature buffers with scale, offset and optional z-mirror
-function addPart(buf, bp, { scale = [S, S, S], offset, mirrorZ = false, slot, socket }) {
+function addPart(buf, bp, { scale = [S, S, S], offset, mirrorZ = false, slot, socket, rotZ = 0, pivot = [0, 0, 0] }) {
+  const rc = Math.cos(rotZ), rs = Math.sin(rotZ);
   const flip = mirrorZ !== (scale[0] * scale[1] * scale[2] < 0);   // mirrored → reverse winding
   for (const vr of bp.variants) {
     const base = buf.pos.length / 3;
     const p = vr.pos, nr = vr.nrm;
     for (let i = 0; i < p.length; i += 3) {
       const z = mirrorZ ? -p[i+2] : p[i+2];
-      buf.pos.push(p[i] * scale[0] + offset[0], p[i+1] * scale[1] + offset[1], z * scale[2] + offset[2]);
-      const nx = nr[i] / scale[0], ny = nr[i+1] / scale[1], nz = (mirrorZ ? -nr[i+2] : nr[i+2]) / scale[2];
+      const x = p[i] * scale[0] + offset[0] - pivot[0], y = p[i+1] * scale[1] + offset[1] - pivot[1];
+      buf.pos.push(pivot[0] + x * rc - y * rs, pivot[1] + x * rs + y * rc, z * scale[2] + offset[2]);
+      const nx0 = nr[i] / scale[0], ny0 = nr[i+1] / scale[1];
+      const nx = nx0 * rc - ny0 * rs, ny = nx0 * rs + ny0 * rc, nz = (mirrorZ ? -nr[i+2] : nr[i+2]) / scale[2];
       const l = Math.hypot(nx, ny, nz) || 1;
       buf.nrm.push(nx / l, ny / l, nz / l);
       buf.slot.push(slot); buf.tint.push(bp.tint); buf.socket.push(socket); buf.key.push(slot + '#' + vr.v); buf.kw.push(vr.w);
@@ -441,10 +449,17 @@ function assemble() {
   const thighOff = sub([0, 0, 0], tTop);
   const kneeEnd = add(thighOff, tBot);
   const shinOff = add(sub(kneeEnd, sTop), mul(thighAxis, ov * shinLen * 0.5));
-  const kneeL = add(kneeEnd, mul(thighAxis, ov * shinLen * 0.25));
+  const kneeRaw = add(kneeEnd, mul(thighAxis, ov * shinLen * 0.25));
   const ankleEnd = add(shinOff, sBot);
-  const footOff = add(sub(ankleEnd, fTop), mul(shinAxis, ov * footH * 0.6));
-  const ankleL = add(ankleEnd, mul(shinAxis, ov * footH * 0.3));
+  const footRaw = add(sub(ankleEnd, fTop), mul(shinAxis, ov * footH * 0.6));
+  const ankleRaw = add(ankleEnd, mul(shinAxis, ov * footH * 0.3));
+  // The kit's thighs and shins lean forward, so a straight chain puts the foot well ahead of the hip.
+  // Rotate thigh + shin about the hip so the ankle sits under it (plus optional rake); the foot is only
+  // translated so it stays flat.
+  const legRot = (-Math.PI / 2 + settings.rake * Math.PI / 180) - Math.atan2(ankleRaw[1], ankleRaw[0]);
+  const rz = v => [v[0] * Math.cos(legRot) - v[1] * Math.sin(legRot), v[0] * Math.sin(legRot) + v[1] * Math.cos(legRot), v[2]];
+  const kneeL = rz(kneeRaw), ankleL = rz(ankleRaw);
+  const footOff = add(footRaw, sub(ankleL, ankleRaw));
   const groundDrop = -(footOff[1] + fb.min[1]);
   // toe: front-most point of the foot near the ground
   const toeL = [footOff[0] + fb.max[0], footOff[1] + fb.min[1] + 0.01, ankleL[2]];
@@ -452,7 +467,8 @@ function assemble() {
   const body = blendPart('body');
   // front-to-back footprint of one leg (thigh, shin, foot as placed) – neighbouring legs must not overlap,
   // or the fused surface would weld them together
-  const xs = [[thigh, thighOff], [shin, shinOff], [foot, footOff]].flatMap(([pt, off]) => [pt.min[0] * legSc[0] + off[0], pt.max[0] * legSc[0] + off[0]]);
+  const corners = (pt, off, rot) => [0, 1].flatMap(i => [0, 1].map(j => { const v = [(i ? pt.max[0] : pt.min[0]) * legSc[0] + off[0], (j ? pt.max[1] : pt.min[1]) * legSc[1] + off[1], 0]; return (rot ? rz(v) : v)[0]; }));
+  const xs = [...corners(thigh, thighOff, true), ...corners(shin, shinOff, true), ...corners(foot, footOff, false)];
   const legSpan = Math.max(...xs) - Math.min(...xs);
   const baseL = (body.max[0] - body.min[0]) * S * 1.15;
   const needL = g.pairs > 1 ? (g.pairs - 1) * (legSpan + settings.fuseR + 0.02) / 0.72 : 0;
@@ -512,8 +528,8 @@ function assemble() {
       const mirror = side < 0;
       const W = l => [fx + l[0], hipY + l[1], hz + (mirror ? -l[2] : l[2])];   // leg-local → world
       const knee = W(kneeL), ankle = W(ankleL), toe = W(toeL);
-      addPart(buf, thigh, { scale: legSc, offset: W(thighOff), mirrorZ: mirror, slot: id + 'a', socket: hip });
-      addPart(buf, shin,  { scale: legSc, offset: W(shinOff), mirrorZ: mirror, slot: id + 'b', socket: knee });
+      addPart(buf, thigh, { scale: legSc, offset: W(thighOff), rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'a', socket: hip });
+      addPart(buf, shin,  { scale: legSc, offset: W(shinOff), rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'b', socket: knee });
       addPart(buf, foot,  { scale: legSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', socket: ankle });
       const ball = W([ankleL[0] + (toeL[0] - ankleL[0]) * 0.55, toeL[1] + 0.008, ankleL[2]]);
       bones.push({ name: id + '_hip', parent: spineFor(fx), pos: hip, tip: knee, own: [id + 'a'], leg: { pair: p, side } });
@@ -1327,6 +1343,7 @@ const bindSlider = (id, key, fmt, rebind) => {
 bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
 bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
 bindSlider('hind', 'hind', v => `×${v.toFixed(2)}`, false);
+bindSlider('rake', 'rake', v => `${v}°`, true);
 bindSlider('overlap', 'overlap', v => `${Math.round(v * 100)}%`, true);
 bindSlider('sharp', 'sharp', v => `k = ${v}`, true);
 bindSlider('seam', 'seam', v => `${(v * 1000).toFixed(0)} mm`, true);
