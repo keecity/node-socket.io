@@ -225,13 +225,13 @@ function updateActions(dt) {
     else if (a.type === 'pass') { if (!a.done && a.t >= 0.30 && ball.holder === p) { a.done = true; passRelease(p, a.to); } if (a.t >= 0.62) p.action = null; }
     else if (a.type === 'block') { if (a.t >= 1.15) p.action = null; }
     else if (a.type === 'steal') {
-      if (!a.done && a.t >= 0.3) {
+      if (!a.done && a.t >= 0.2) {
         a.done = true; const h = ball.holder;
         let chance = 0.22;
-        if (p.stealQ !== undefined) { const q = p.stealQ; delete p.stealQ; chance = q > 0.91 ? 1 : 0.55 * q * q; p.perfectSteal = q > 0.91;
-          toast(q > 0.91 ? 'PERFECT timing' : q > 0.7 ? 'Good reach' : q > 0.4 ? 'Late reach' : 'Whiffed', false);
-          if (q < 0.4) p.react = 0.6; }
-        if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 1.6 && Math.random() < chance) {
+        if (p.stealQ !== undefined) { const q = p.stealQ; delete p.stealQ; chance = q > 0.91 ? 1 : 0.35 + 0.5 * (q / 0.91); p.perfectSteal = q > 0.91;   // edge 35% -> just outside the box 85%
+          toast(q > 0.91 ? 'PERFECT timing' : q > 0.6 ? 'Good reach' : q > 0.3 ? 'Late reach' : 'Off the mark', false);
+          if (q < 0.15) p.react = 0.4; }
+        if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < chance) {
           if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
           else {
             const to = flat(p.pos.x - h.pos.x, p.pos.z - h.pos.z).normalize();
@@ -528,6 +528,8 @@ app.on('update', dt => {
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
   if (human.meter && !human.auto && !myBall() && !human.down && !(human.freeze > 0)) { human.meter = false; meterEl.className = ''; }
+  if (human.drain > 0) human.drain -= dt; else human.stamina = Math.min(1, human.stamina + dt * 0.15);
+  $('stam').style.width = (human.stamina * 100).toFixed(1) + '%'; $('stamina').classList.toggle('low', human.stamina < 0.25); $('stamina').hidden = !human.on;
   updateActions(dt);
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
   bodies();
@@ -560,7 +562,7 @@ $('mute').onclick = () => $('mute').classList.toggle('on');
 const HUMAN = 0;
 // marker position -1..1; starts at the left edge so the first pass through the centre is catchable
 const meterPos = () => Math.sin(human.mt * Math.PI * 1.7 - Math.PI / 2);
-const human = { on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
+const human = { stamina: 1, lastTap: null, on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
 function groundAt(sx, sy) {
   const a = camera.camera.screenToWorld(sx, sy, camera.camera.nearClip), b = camera.camera.screenToWorld(sx, sy, camera.camera.farClip);
   if (Math.abs(b.y - a.y) < 1e-6) return null; const t = a.y / (a.y - b.y); return flat(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
@@ -583,7 +585,7 @@ canEl.addEventListener('pointerdown', e => {
 function onRelease(e) {
   if (!human.down) return; human.down = false;
   if (defMode()) {           // defense: a short tap moves the closest defender (holding just chases)
-    const dd = myDefender(); if (dd && performance.now() - human.t0 < 300) { const g = groundAt(human.x, human.y); if (g) { dd.moveTarget = clamp(g); ring(g); } } return;
+    const dd = myDefender(); if (dd && performance.now() - human.t0 < 300) { const g = groundAt(human.x, human.y); if (g) moveOrder(dd, g); } return;
   }
   if (!human.auto && !human.meter) meterEl.className = '';
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
@@ -595,7 +597,7 @@ function onRelease(e) {
   let best = null, bd = 48;
   for (const q of team(HUMAN)) { if (q === h) continue; const s = screenOf(q), d = Math.hypot(s.x - human.x, s.y - human.y); if (d < bd) { bd = d; best = q; } }
   if (best) { best.lastPasser = h; h.moveTarget = null; startPass(h, best); return; }
-  const g = groundAt(human.x, human.y); if (g) { h.moveTarget = clamp(g); ring(g); }
+  const g = groundAt(human.x, human.y); if (g) moveOrder(h, g);
 }
 window.addEventListener('pointerup', onRelease); canEl.addEventListener('contextmenu', e => e.preventDefault());
 function myDefender() {
@@ -614,10 +616,22 @@ function humanDefAI(p, dt) {
   }
   if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
   if (p.moveTarget) {
-    steer(p, p.moveTarget, 3.6, dt, 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);
-    if (d2(p.pos, p.moveTarget) < 0.35) p.moveTarget = null;
+    steer(p, p.moveTarget, 3.6 * sprintMul(p, dt), dt, p.sprint ? 18 : 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);
+    if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; }
   } else defenseAI(p, dt);            // no order: stay on your man
   p.label.classList.toggle('near', near);
+}
+// sprint: tapping the same spot again (within 1.5 s) sprints there, burning stamina; empty bar = normal run
+function sprintMul(p, dt) {
+  if (!p.sprint) return 1;
+  if (human.stamina <= 0) { p.sprint = false; return 1; }
+  human.stamina = Math.max(0, human.stamina - dt * 0.35); human.drain = 0.25; return 1.45;
+}
+function moveOrder(p, g) {
+  const now = performance.now(), L = human.lastTap;
+  const again = L && now - L.t < 1500 && Math.hypot(human.x - L.x, human.y - L.y) < 70;
+  p.moveTarget = clamp(g); p.sprint = again && human.stamina > 0.05; ring(g, p.sprint);
+  human.lastTap = { t: now, x: human.x, y: human.y };
 }
 function humanAI(p, dt) {
   p.holdT += dt;
@@ -630,14 +644,14 @@ function humanAI(p, dt) {
     const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 8, dt); animMove(p, dt, 'handler'); return;
   }
   if (p.moveTarget) {
-    steer(p, p.moveTarget, 3.4, dt);
-    if (d2(p.pos, p.moveTarget) < 0.35) p.moveTarget = null;
+    steer(p, p.moveTarget, 3.4 * sprintMul(p, dt), dt, p.sprint ? 18 : 13);
+    if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; }
   } else p.vel.mulScalar(Math.pow(0.02, dt));
   animMove(p, dt, 'handler');
   if (!p.moveTarget && p.vel.length() < 0.5) { const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 5, dt); }
 }
 const ringEl = $('ring');
-function ring(g) { const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
+function ring(g, sprint) { ringEl.style.borderColor = sprint ? '#ff6a3d' : '#ffd27a'; const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
 $('mode').onclick = () => { human.on = !human.on; $('mode').textContent = human.on ? 'Watch AI' : 'Play'; $('hint').hidden = !human.on; };
 window.game = { game, P, ball, HOOPS, S, inbound, give, human };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
