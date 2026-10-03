@@ -19857,11 +19857,11 @@ app.on('update', dt => {
   if (human.freeze > 0) {      // hold the marker where the player stopped it
     human.freeze -= dt;
     if (human.freeze <= 0) { human.mt = 0; if (human.after === 'hide') { human.meter = false; meterEl.className = ''; } human.after = null; }
-  } else if (human.meter) { human.mt += dt; markEl.style.left = (50 + 46 * meterPos()) + '%'; }
+  } else if (human.meter) { human.mt += dt * (human.mspeed || 1); markEl.style.left = (50 + 46 * meterPos()) + '%'; }
   // defense: the steal meter stays on screen the whole time Teal has the ball
   if (defMode()) {
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
-    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; setZone(0.087); } $('mlabel').textContent = 'TAP TO STEAL'; }
+    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'TAP TO STEAL'; }
     else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
@@ -19982,6 +19982,7 @@ function humanAI(p, dt) {
     if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
     // the more open the shooter, the wider the perfect (green) window
     const op = openness(p); setZone(op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27);
+    human.mspeed = op < 1.0 ? 1.15 : op < 1.6 ? 1.0 : op < 2.4 ? 0.88 : op < 3.5 ? 0.78 : 0.68;   // open shooters get a slower sweep
     $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
     if (human.meter) { }
     // holding = setting up a shot: plant right away and cancel any move order
