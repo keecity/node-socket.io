@@ -153,8 +153,10 @@ function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
-  toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
-  sfx('net'); setTimeout(() => t === HUMAN ? cheer() : sfx('boo', 0.6), 150); game.phase = 'scored'; game.timer = 1.6; hud();
+  if (s.ft) toast('Free throw good', false); else toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
+  sfx('net'); setTimeout(() => t === HUMAN ? cheer() : sfx('boo', 0.6), 150); game.phase = 'scored'; game.timer = 1.6;
+  if (s.ft) { game.phase = 'ftair'; game.ftMade = true; }   // the free-throw loop decides what comes next
+  hud();
   if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; }
 }
 
@@ -163,13 +165,13 @@ const stats = { pass: 0, shot: 0, dunk: 0, steal: 0, block: 0, made: 0 }; window
 function startShot(p) { stats.shot++;
   const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z); p.vel.set(0, 0, 0);
   p.action = { type: 'shoot', t: 0, done: false }; setAnim(p, 'Shoot', 0.1);
-  const c = closestDefender(p); if (c && d2(c.pos, p.pos) < 2.4 && !c.action && Math.random() < 0.75) c.pendingBlock = 0.1 + Math.random() * 0.15;
+  const c = closestDefender(p); if (game.phase !== 'ftair' && c && d2(c.pos, p.pos) < 2.4 && !c.action && Math.random() < 0.75) c.pendingBlock = 0.1 + Math.random() * 0.15;
 }
 function shotRelease(p) {
   const A = attackHoop(p.team), p0 = p.ballNode.getPosition().clone(), dr = d2(p.pos, A.rim);
   const c = closestDefender(p), cd = c ? d2(c.pos, p.pos) : 9;
-  game.shot = { shooter: p, pts: dr > ARC ? 3 : 2, assist: p.lastPasser && p.holdT < 3 ? p.lastPasser : null };
-  if (c && c.action && c.action.type === 'block' && c.action.t > 0.2 && c.action.t < 0.75 && cd < 1.35 && Math.random() < 0.38) {
+  game.shot = { shooter: p, pts: game.phase === 'ftair' ? 1 : dr > ARC ? 3 : 2, ft: game.phase === 'ftair', assist: p.lastPasser && p.holdT < 3 ? p.lastPasser : null };
+  if (!game.shot.ft && c && c.action && c.action.type === 'block' && c.action.t > 0.2 && c.action.t < 0.75 && cd < 1.35 && Math.random() < 0.38) {
     const away = flat(p.pos.x - A.rim.x, p.pos.z - A.rim.z).normalize();
     const inC = flat(-p0.x, -p0.z).normalize(), dir2 = away.mulScalar(0.6).add(inC.mulScalar(0.4)).normalize();
     release(p0, new pc.Vec3(dir2.x * 2.6 + (Math.random() - .5) * 1.2, 1.6, dir2.z * 2.6 + (Math.random() - .5) * 1.2), false);
@@ -178,6 +180,7 @@ function shotRelease(p) {
   let make = dr < 3 ? 0.7 : dr < 4.5 ? 0.62 : dr < ARC ? 0.58 - 0.03 * (dr - 4.5) : 0.45 - 0.06 * (dr - ARC);
   make = Math.max(0.18, make) * (cd < 1.0 ? 0.55 : cd < 1.6 ? 0.75 : cd < 2.4 ? 0.9 : 1);
   if (game.shotClock < 1) make *= 0.8;
+  if (game.shot.ft) make = 0.76;
   if (p.shotQ !== undefined) {   // player's timed release: 1 = dead centre, 0 = edge of the meter
     const q = p.shotQ; delete p.shotQ;
     make = q >= 1 ? 0.99 : make * (0.15 + 1.25 * q * q);
@@ -214,6 +217,22 @@ function passRelease(p, r) {
   release(p0, tgt.sub(p0).sub(new pc.Vec3(0, -0.5 * G * T * T, 0)).mulScalar(1 / T), false);
   ball.pass = { from: p, to: r, t: 0, T, tried: new Set() }; ball.lastTouch = p.team; r.react = 0;
 }
+// ---- fouls and free throws
+const FT_DIST = 4.6;
+function callFoul(def, shooter) {
+  game.ft = { shooter, left: 2, team: shooter.team }; game.shot = null; game.phase = 'ftset'; game.timer = 1.8;
+  for (const q of P) { q.action = null; delete q.pendingBlock; q.vel.set(0, 0, 0); }
+  toast('FOUL on ' + def.name + ' — 2 free throws', true); sfx('whistle', 0.9);
+}
+function lineUpFT() {
+  const f = game.ft, s = f.shooter, A = attackHoop(f.team), dir = Math.sign(A.rim.x);   // dir points from centre to that hoop
+  s.pos.copy(flat(A.rim.x - dir * FT_DIST, 0));
+  const lane = [[1.6, 1], [1.6, -1], [2.7, 1], [2.7, -1], [3.8, 1]];   // along both sides of the key, defenders take the inside spots
+  const others = P.filter(q => q !== s).sort((a, b) => (a.team === f.team) - (b.team === f.team));
+  others.forEach((q, i) => { const [x, side] = lane[i]; q.pos.copy(flat(A.rim.x - dir * x, side * 2.1)); });
+  for (const q of P) { q.vel.set(0, 0, 0); q.action = null; q.rootBone.setLocalPosition(0, 0, 0); faceTo(q, A.rim.x, A.rim.z); setAnim(q, q === s ? 'Idle' : 'Ready', 0.1); place(q); }
+  give(s); setAnim(s, 'Dribble', 0.1);
+}
 function startBlock(p) { p.action = { type: 'block', t: 0 }; p.vel.mulScalar(0.2); setAnim(p, 'Block', 0.08); }
 function startSteal(p) { p.action = { type: 'steal', t: 0, done: false }; p.vel.mulScalar(0.3); setAnim(p, 'Steal', 0.08); }
 
@@ -221,7 +240,7 @@ function updateActions(dt) {
   for (const p of P) {
     if (p.pendingBlock !== undefined) { p.pendingBlock -= dt; if (p.pendingBlock <= 0) { delete p.pendingBlock; if (!p.action) startBlock(p); } }
     const a = p.action; if (!a) continue; a.t += dt;
-    if (a.type === 'shoot') { if (!a.done && a.t >= 0.64 && ball.holder === p) { a.done = true; game.phase = 'air'; shotRelease(p); } if (a.t >= 1.5) p.action = null; }
+    if (a.type === 'shoot') { if (!a.done && a.t >= 0.64 && ball.holder === p) { a.done = true; if (game.phase !== 'ftair') game.phase = 'air'; shotRelease(p); } if (a.t >= 1.5) p.action = null; }
     else if (a.type === 'dunk') {
       if (!a.done && a.t >= 1.06 && ball.holder === p) { a.done = true; game.phase = 'air'; dunkRelease(p); }
       if (a.t >= 2.9) { const r = p.rootBone.getPosition(); p.pos.set(r.x, 0, r.z); place(p); p.rootBone.setLocalPosition(0, 0, 0); p.action = null; setAnim(p, 'Ready', 0); }
@@ -234,7 +253,8 @@ function updateActions(dt) {
         let chance = 0.22;
         if (p.stealQ !== undefined) { const q = p.stealQ; delete p.stealQ; chance = q > 0.91 ? 1 : 0.35 + 0.5 * (q / 0.91); p.perfectSteal = q > 0.91;   // edge 35% -> just outside the box 85%
           toast(q > 0.91 ? 'PERFECT timing' : q > 0.6 ? 'Good reach' : q > 0.3 ? 'Late reach' : 'Off the mark', false);
-          if (q < 0.15) p.react = 0.4; }
+          if (q < 0.15) p.react = 0.4;
+          if (q < 0.25 && h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < 0.7) { callFoul(p, h); continue; } }
         if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < chance) {
           if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
           else {
@@ -492,6 +512,18 @@ app.on('update', dt => {
   else if (game.phase === 'scored') {
     for (const p of P) if (!p.action) { p.vel.mulScalar(Math.pow(0.1, dt)); animMove(p, dt, p.team === game.lastScoreTeam ? 'offball' : 'stance'); }
     if (game.timer <= 0 && !P.some(p => p.action && p.action.type === 'dunk')) inbound(1 - game.lastScoreTeam);
+  } else if (game.phase === 'ftset') {
+    for (const p of P) { p.vel.mulScalar(Math.pow(0.05, dt)); if (!p.action) animMove(p, dt, 'stance'); }
+    if (game.timer <= 0) { lineUpFT(); game.phase = 'ftwait'; game.timer = 1.2; toast('Free throw ' + (3 - game.ft.left) + ' of 2'); }
+  } else if (game.phase === 'ftwait') {
+    if (game.timer <= 0) { game.phase = 'ftair'; game.ftMade = false; game.ft.left--; game.timer = 3.2; startShot(game.ft.shooter); }
+  } else if (game.phase === 'ftair') {
+    if (game.timer <= 0 || (game.ftMade && game.timer < 1.4) || (!game.ftMade && game.ft.left === 0 && ball.free && ball.pos.y < RIM_Y - 0.7 && ball.vel.y < 0 && game.timer < 2.4)) {
+      const f = game.ft;
+      if (f.left > 0) { game.phase = 'ftwait'; game.timer = 1.0; lineUpFT(); toast(game.ftMade ? 'Free throw 2 of 2' : 'No good — free throw 2 of 2'); }
+      else if (game.ftMade) { game.ft = null; inbound(1 - f.team); }
+      else { game.ft = null; game.shot = null; game.phase = 'loose'; ball.lastTouch = f.team; toast('Free throw no good — rebound!'); }
+    }
   } else if (game.phase === 'over') {
     for (const p of P) if (!p.action) { p.vel.mulScalar(0.9); setAnim(p, 'Ready', 0.3); }
     if (game.timer <= 0) restart();
@@ -516,9 +548,9 @@ app.on('update', dt => {
     if (ball.free && (Math.abs(ball.pos.x) > 14.7 || Math.abs(ball.pos.z) > 7.6)) {
       const spot = clamp(flat(ball.pos.x * 0.97, ball.pos.z * 0.93));
       (window.__oob = window.__oob || []).push({ pass: !!ball.pass, phase: game.phase, pos: [ball.pos.x.toFixed(1), ball.pos.y.toFixed(1), ball.pos.z.toFixed(1)], vel: [ball.vel.x.toFixed(1), ball.vel.y.toFixed(1), ball.vel.z.toFixed(1)] });
-      toast('Out of bounds'); inbound(1 - ball.lastTouch, spot);
+      toast('Out of bounds'); sfx('whistle', 0.7); inbound(1 - ball.lastTouch, spot);
     }
-    if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); inbound(1 - game.offense, flat(0, 0)); }
+    if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); sfx('whistle', 0.7); inbound(1 - game.offense, flat(0, 0)); }
   }
   if (human.freeze > 0) {      // hold the marker where the player stopped it
     human.freeze -= dt;
@@ -563,7 +595,7 @@ function startAudio() {
   if (actx) { actx.resume(); return; }
   try { actx = new AudioContext(); } catch (e) { return; }
   master = actx.createGain(); master.gain.value = $('mute').classList.contains('on') ? 0 : 1; master.connect(actx.destination);
-  for (const k of ['bounce', 'net', 'cheer', 'crowd', 'boo', 'rim']) actx.decodeAudioData(bytes(ASSETS['snd_' + k]).buffer).then(buf => {
+  for (const k of ['bounce', 'net', 'cheer', 'crowd', 'boo', 'rim', 'whistle']) actx.decodeAudioData(bytes(ASSETS['snd_' + k]).buffer).then(buf => {
     SND[k] = buf;
     if (k === 'crowd') { crowdSrc = actx.createBufferSource(); crowdSrc.buffer = buf; crowdSrc.loop = true; const g = crowdGain = actx.createGain(); g.gain.value = 0.35; crowdSrc.connect(g); g.connect(master); crowdSrc.start(); }
   }).catch(() => {});
@@ -698,7 +730,7 @@ function humanAI(p, dt) {
 const ringEl = $('ring');
 function ring(g, sprint) { ringEl.style.borderColor = sprint ? '#ff6a3d' : '#ffd27a'; const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
 $('mode').onclick = () => { human.on = !human.on; $('mode').textContent = human.on ? 'Watch AI' : 'Play'; $('hint').hidden = !human.on; };
-window.game = { game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
+window.game = { callFoul, game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
 app.start(); $('loading').hidden = true;
 } catch (e) { $('loading').textContent = 'Unable to start: ' + (e && e.message || e); console.error(e); }
