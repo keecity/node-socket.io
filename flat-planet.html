@@ -830,7 +830,7 @@ return { ProceduralTreeGenerator, PRESETS };
 // fade out exactly where the ground does and never show up floating in the far fog.
 THREE.ShaderChunk.fog_vertex = THREE.ShaderChunk.fog_vertex.replace('fogDepth = - mvPosition.z;', 'fogDepth = length( mvPosition.xyz );');
 // apply fog BEFORE tone mapping (same stage and colour as the terrain shader), so every object fades out exactly with the ground
-THREE.ShaderChunk.tonemapping_fragment = '#if defined( USE_FOG ) && !defined( FOG_EXP2 )\n gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, smoothstep( fogNear, fogFar, fogDepth ) );\n#endif\n' + THREE.ShaderChunk.tonemapping_fragment;
+THREE.ShaderChunk.tonemapping_fragment = '#if defined( USE_FOG ) && !defined( FOG_EXP2 )\n gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, smoothstep( fogNear, fogFar, fogDepth ) );\n#endif\n#if defined( BAKED_DECL ) && defined( USE_SHADOWMAP )\n gl_FragColor.rgb = warShade(gl_FragColor.rgb, vBakedW.xz);\n#endif\n' + THREE.ShaderChunk.tonemapping_fragment;
 THREE.ShaderChunk.fog_fragment = '#if defined( USE_FOG ) && !defined( TONE_MAPPING )\n gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, smoothstep( fogNear, fogFar, fogDepth ) );\n#endif\n';
 const N = 2048;           // heightmap resolution (periodic)
 const SIZE = 4096;        // world size in units
@@ -844,7 +844,11 @@ const SH = new Float32Array(N * N), AOA = new Float32Array(N * N);   // baked su
 // baked light for DYNAMIC objects: one map-wide texture (terrain relief shadow x baked tree shadow) that every lit
 // material samples by world position, so robots, houses and cars darken inside hill and forest shade
 const BAKED = { tex: { value: null }, on: { value: 0 }, size: { value: 1 } };
-THREE.ShaderChunk.lights_pars_begin = 'uniform sampler2D uBakedSh; uniform float uBakedOn, uBakedSize;\n#ifndef BAKED_DECL\n#define BAKED_DECL\nvarying vec3 vBakedW;\n#endif\nfloat bakedLight(vec3 w){ return uBakedOn > .5 ? texture2D(uBakedSh, w.xz / uBakedSize).r : 1.; }\n' + THREE.ShaderChunk.lights_pars_begin;
+// fog of war: one map-wide texture (r = in sight, g = explored) from the battle module; black where never explored, dim and greyed
+// where explored but out of sight. Shared by the terrain, the water and (through the lit-material chunks) every lit object.
+const WARFOG = { tex: { value: new THREE.DataTexture(new Uint8Array([255, 255, 0, 255]), 1, 1) }, on: { value: 0 } };
+const WAR_GLSL = 'uniform sampler2D uWarFog; uniform float uWarOn;\nvec3 warShade(vec3 c, vec2 xz){ if (uWarOn < .5) return c; vec2 f = texture2D(uWarFog, xz / ' + SIZE.toFixed(1) + ').rg; vec3 k = c / (1. + c); float g = dot(k, vec3(.3, .59, .11));\n  vec3 seen = mix(vec3(g), k, .4) * .55, dark = k * .05 + vec3(.004, .006, .01); return mix(mix(dark, seen, f.g), c, f.r); }\n';
+THREE.ShaderChunk.lights_pars_begin = WAR_GLSL + 'uniform sampler2D uBakedSh; uniform float uBakedOn, uBakedSize;\n#ifndef BAKED_DECL\n#define BAKED_DECL\nvarying vec3 vBakedW;\n#endif\nfloat bakedLight(vec3 w){ return uBakedOn > .5 ? texture2D(uBakedSh, w.xz / uBakedSize).r : 1.; }\n' + THREE.ShaderChunk.lights_pars_begin;
 THREE.ShaderChunk.worldpos_vertex = THREE.ShaderChunk.worldpos_vertex + '\n#if defined( USE_SHADOWMAP ) && defined( BAKED_DECL )\n vBakedW = worldPosition.xyz;\n#endif\n';
 THREE.ShaderChunk.shadowmap_pars_vertex = '#ifndef BAKED_DECL\n#define BAKED_DECL\nvarying vec3 vBakedW;\n#endif\n' + THREE.ShaderChunk.shadowmap_pars_vertex;
 THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalDirectLightIrradiance( directionalLight, geometry, directLight );',
@@ -852,7 +856,7 @@ THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begi
 // hook every material in a subtree onto the shared baked-light uniforms (idempotent)
 function applyBaked(root) { root.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
   for (const m of ms) { if (m.__baked || m.isShaderMaterial || m.isMeshBasicMaterial || m.isPointsMaterial) continue; m.__baked = true; const prev = m.onBeforeCompile;
-    m.onBeforeCompile = (sh, r) => { if (prev) prev.call(m, sh, r); sh.uniforms.uBakedSh = BAKED.tex; sh.uniforms.uBakedOn = BAKED.on; sh.uniforms.uBakedSize = BAKED.size; };
+    m.onBeforeCompile = (sh, r) => { if (prev) prev.call(m, sh, r); sh.uniforms.uBakedSh = BAKED.tex; sh.uniforms.uBakedOn = BAKED.on; sh.uniforms.uBakedSize = BAKED.size; sh.uniforms.uWarFog = WARFOG.tex; sh.uniforms.uWarOn = WARFOG.on; };
     m.needsUpdate = true; } }); }
 let FLOW_LOG = 1;
 const at = (i, j) => mod(j, N) * N + mod(i, N);
@@ -1180,9 +1184,9 @@ function buildTreeLibrary() {
 
   impostorMat = new THREE.ShaderMaterial({
     uniforms: { uAtlas: { value: rt.texture }, uVar: { value: treeLib.map(t => new THREE.Vector4(t.C.x, t.C.y, t.C.z, t.R)) },
-                uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR } },
+                uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on },
     vertexShader: `
-      attribute vec4 aInst; attribute vec2 aInst2;
+      attribute vec4 aInst; attribute vec2 aInst2; varying vec2 vWarXZ;
       uniform vec4 uVar[${NV}];
       varying vec2 vUv; varying float vShade, vDist;
       void main(){
@@ -1196,16 +1200,16 @@ function buildTreeLibrary() {
         vec4 mv = viewMatrix * vec4(wp, 1.);
         gl_Position = projectionMatrix * mv;
         vUv = vec2((position.x * .5 + .5 + float(vi)) / ${NV}.0, position.y * .5 + .5);
-        vShade = aInst2.y; vDist = -mv.z;
+        vShade = aInst2.y; vDist = -mv.z; vWarXZ = cen.xz;
       }`,
-    fragmentShader: `
+    fragmentShader: WAR_GLSL + `
       uniform sampler2D uAtlas; uniform vec3 uH; uniform float uNear, uFar;
-      varying vec2 vUv; varying float vShade, vDist;
+      varying vec2 vUv; varying float vShade, vDist; varying vec2 vWarXZ;
       void main(){
         vec4 t = texture2D(uAtlas, vUv);
         if (t.a < .45) discard;
         vec3 c = t.rgb * vShade;                          // atlas colour is stored straight (not premultiplied)
-        c = mix(c, uH, smoothstep(uNear, uFar, vDist));
+        c = mix(c, uH, smoothstep(uNear, uFar, vDist)); c = warShade(c, vWarXZ);
         gl_FragColor = vec4(c, 1.);
         #include <tonemapping_fragment>
         #include <encodings_fragment>
@@ -1231,11 +1235,11 @@ function makeLeafDepthMaterial(tex) {
 }
 function makeLeafMaterial(tex, size) {
   return new THREE.ShaderMaterial({
-    uniforms: { map: { value: tex }, uSize: { value: size }, uScale: { value: 400 }, uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR } },
+    uniforms: { map: { value: tex }, uSize: { value: size }, uScale: { value: 400 }, uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on },
     vertexShader: `
       attribute vec3 color; attribute float aSize; attribute vec4 aInst; attribute vec2 aInst2;
       uniform float uSize, uScale;
-      varying vec3 vCol; varying float vDist;
+      varying vec3 vCol; varying float vDist; varying vec2 vWarXZ;
       void main(){
         float c = cos(aInst2.x), s = sin(aInst2.x);
         vec3 p = position * aInst.w;
@@ -1243,16 +1247,16 @@ function makeLeafMaterial(tex, size) {
         vec4 mv = modelViewMatrix * vec4(p, 1.);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = aSize * aInst.w * uScale / -mv.z;
-        vCol = color * aInst2.y; vDist = -mv.z;
+        vCol = color * aInst2.y; vDist = -mv.z; vWarXZ = (modelMatrix * vec4(p, 1.)).xz;
       }`,
-    fragmentShader: `
+    fragmentShader: WAR_GLSL + `
       uniform sampler2D map; uniform vec3 uH; uniform float uNear, uFar;
-      varying vec3 vCol; varying float vDist;
+      varying vec3 vCol; varying float vDist; varying vec2 vWarXZ;
       void main(){
         vec4 t = texture2D(map, vec2(gl_PointCoord.x, 1. - gl_PointCoord.y));
         if (t.a < .35) discard;
         vec3 c = pow(t.rgb, vec3(2.2)) * vCol;
-        c = mix(c, uH, smoothstep(uNear, uFar, vDist));
+        c = mix(c, uH, smoothstep(uNear, uFar, vDist)); c = warShade(c, vWarXZ);
         gl_FragColor = vec4(c, 1.);
         #include <tonemapping_fragment>
         #include <encodings_fragment>
@@ -1381,13 +1385,14 @@ async function buildWorld() {
                 uRoad: { value: (window.Battle && Battle.roadTex) || new THREE.DataTexture(new Uint8Array(4), 1, 1) }, uRoadW: { value: 0.46 * 12 },
                 uSegs: { value: roadSegUniform() }, uSegD: { value: roadDistUniform() }, uSegN: { value: Math.min(128, ((window.Battle && Battle.roadSegs) || []).length) },
                 uShadowMap: SHADOW.map, uShadowMat: SHADOW.mat, uShadowOn: SHADOW.on, uShadowTexel: SHADOW.texel,
-                uTreeSh: TREE_SH.tex, uNearC: TREE_SH.nearC, uNearR: TREE_SH.nearR, uTerrShow: TERR_SHOW, uTerr: { value: (window.Battle && Battle.territoryTex) || new THREE.DataTexture(new Uint8Array(4), 1, 1) } },
+                uTreeSh: TREE_SH.tex, uNearC: TREE_SH.nearC, uNearR: TREE_SH.nearR, uTerrShow: TERR_SHOW, uWarFog: WARFOG.tex, uWarOn: WARFOG.on, uTerr: { value: (window.Battle && Battle.territoryTex) || new THREE.DataTexture(new Uint8Array(4), 1, 1) } },
     vertexShader: `
       attribute vec3 aData; varying vec3 vPos, vN, vData;
       void main(){ vec4 w = modelMatrix * vec4(position,1.); vPos = w.xyz; vN = normal; vData = aData;
         gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: NOISE_GLSL + `
       #include <packing>
+      ` + WAR_GLSL + `
       uniform sampler2D uShadowMap, uTreeSh, uTerr; uniform float uTerrShow; uniform mat4 uShadowMat; uniform float uShadowOn, uShadowTexel, uNearR; uniform vec2 uNearC;
       float dynShadow(vec3 p){
         if (uShadowOn < .5) return 1.;
@@ -1585,6 +1590,7 @@ async function buildWorld() {
         c = mix(c, vec3(.3, .9, 1.25), line.x * .9 * uTerrShow);
         c = mix(c, vec3(1.25, .32, .26), line.y * .8 * uTerrShow);
         c = mix(c, uH, smoothstep(uNear, uFar, d));
+        c = warShade(c, wp.xz);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <encodings_fragment>
@@ -1610,9 +1616,10 @@ async function buildWorld() {
   waterMat = new THREE.ShaderMaterial({
     transparent: true, extensions: { derivatives: true },
     uniforms: { uTime: { value: 0 }, uDepth: { value: depthTex }, uSize: { value: SIZE }, uSun: { value: SUN },
-                uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR } },
+                uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on },
     vertexShader: `varying vec3 vPos; void main(){ vec4 w = modelMatrix * vec4(position,1.); vPos = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: NOISE_GLSL + `
+      ` + WAR_GLSL + `
       uniform float uTime, uSize, uNear, uFar; uniform sampler2D uDepth; uniform vec3 uSun, uH, uZ;
       varying vec3 vPos;
       vec3 lin(vec3 c){ return pow(c, vec3(2.2)); }
@@ -1639,6 +1646,7 @@ async function buildWorld() {
         float alpha = mix(.45, .96, smoothstep(0.0, .35, depth)) ;
         alpha = max(alpha, foam);
         c = mix(c, uH, smoothstep(uNear, uFar, length(cameraPosition - vPos)));
+        c = warShade(c, vPos.xz);
         gl_FragColor = vec4(c, alpha);
         #include <tonemapping_fragment>
         #include <encodings_fragment>
@@ -1766,10 +1774,13 @@ mini.addEventListener('mousedown', e => {
 function drawMini() {
   const s = mini.width / SIZE;
   mctx.drawImage(miniBase, 0, 0, mini.width, mini.height);
+  if (Battle.fogOn) { const N = Battle.FOG_N, D = Battle.fogData; if (!drawMini.fc) { drawMini.fc = document.createElement('canvas'); drawMini.fc.width = drawMini.fc.height = N; drawMini.fi = drawMini.fc.getContext('2d').createImageData(N, N); }
+    const px = drawMini.fi.data; for (let i = 0; i < N * N; i++) { px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = 4; px[i * 4 + 3] = 235 - D[i * 4 + 1] * 0.55 - D[i * 4] * 0.37; }
+    drawMini.fc.getContext('2d').putImageData(drawMini.fi, 0, 0); mctx.imageSmoothingEnabled = true; mctx.drawImage(drawMini.fc, 0, 0, mini.width, mini.height); }
   if (terrToggle || placing) for (const [team, col] of [[0, 'rgba(95,208,255,.35)'], [1, 'rgba(255,80,70,.3)']]) { mctx.fillStyle = col;
     for (const [cx, cz, fn] of Battle.terrDiscs(team)) { mctx.beginPath(); for (let i = 0; i <= 64; i++) { const a = i / 64 * 6.283, r = fn(a) * 12 * s; mctx[i ? 'lineTo' : 'moveTo'](cx * 12 * s + Math.cos(a) * r, cz * 12 * s + Math.sin(a) * r); } mctx.fill(); } }
-  for (const f of Battle.oilFields) { mctx.fillStyle = '#1a1208'; mctx.strokeStyle = '#c89a3a'; mctx.lineWidth = 1; mctx.beginPath(); mctx.arc(f.x * 12 * s, f.z * 12 * s, 3.5, 0, 7); mctx.fill(); mctx.stroke(); }
-  for (const o of Battle.outposts) if (o.alive) { mctx.fillStyle = o.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(o.x * 12 * s - 3, o.z * 12 * s - 3, 6, 6); }
+  for (const f of Battle.oilFields) { if (!Battle.fogExplored(f.x, f.z)) continue; mctx.fillStyle = '#1a1208'; mctx.strokeStyle = '#c89a3a'; mctx.lineWidth = 1; mctx.beginPath(); mctx.arc(f.x * 12 * s, f.z * 12 * s, 3.5, 0, 7); mctx.fill(); mctx.stroke(); }
+  for (const o of Battle.outposts) if (o.alive && (o.team === 0 || o.seen || !Battle.fogOn)) { mctx.fillStyle = o.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(o.x * 12 * s - 3, o.z * 12 * s - 3, 6, 6); }
   for (const b of Battle.airbases) if (b.alive && (b.team === 0 || Battle.towns[1].seenAB)) { mctx.save(); mctx.translate(b.x * 12 * s, b.z * 12 * s); mctx.rotate(-b.rot); mctx.fillStyle = b.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(-4, -7, 8, 14); mctx.restore(); }
   Battle.drawMini(mctx, s);
   const r = cam.dist * 0.6 * s;
@@ -2116,7 +2127,7 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   await buildWorld();
   setStatus('Loading robots and gunships…');
   await Battle.ready;
-  const start = Battle.start(); cam.x = start.x; cam.z = start.z;
+  const start = Battle.start(); cam.x = start.x; cam.z = start.z; WARFOG.tex.value = Battle.fogTex; WARFOG.on.value = 1;
   setStatus('Baking tree shadows…'); await new Promise(r => setTimeout(r, 0)); bakeTreeShadows();
   document.getElementById('loading').hidden = true;
   let last = performance.now();

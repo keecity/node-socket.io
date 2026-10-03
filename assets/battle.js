@@ -3119,6 +3119,37 @@ const stock = (team, k) => k === 'cr' ? CR[team] : k === 'oil' ? OIL[team] : k =
 const researchPrice = n => ({ cr: n, ore: Math.round(n * 0.25 / 10) * 10, oil: Math.round(n * 0.15 / 10) * 10 });
 function canAfford(team, c) { const short = Object.entries(c).filter(([k, v]) => stock(team, k) < v).map(([k, v]) => Math.ceil(v - stock(team, k)) + ' ' + RES_NAME[k]); return short.length ? 'Not enough resources: need ' + short.join(', ') + ' more' : null; }
 function spend(team, c) { for (const [k, v] of Object.entries(c)) { if (k === 'cr') CR[team] -= v; else if (k === 'oil') OIL[team] -= v; else if (k === 'wood') WOOD[team] -= v; else if (k === 'ore') ORE[team] -= v; else FOOD[team] -= v; } }
+// ------------------------------------------------------------------ fog of war
+// A map-wide grid: r = in sight right now, g = explored at some point. Your units and buildings light it up every few frames;
+// the terrain, water and every lit object are darkened by it (black where never explored, dim grey where explored but out of sight),
+// enemy units only show while in sight and enemy buildings once their ground has been explored.
+const FOG_N = 256, FOG_C = W / FOG_N, fogVis = new Float32Array(FOG_N * FOG_N), fogExp = new Uint8Array(FOG_N * FOG_N), fogData = new Uint8Array(FOG_N * FOG_N * 4);
+const fogTex = new THREE.DataTexture(fogData, FOG_N, FOG_N, THREE.RGBAFormat); fogTex.wrapS = fogTex.wrapT = THREE.RepeatWrapping; fogTex.magFilter = fogTex.minFilter = THREE.LinearFilter;
+let fogT = 0, FOG_ON = true;
+const fogIdx = (x, z) => (Math.floor(wm(z) / FOG_C) % FOG_N) * FOG_N + (Math.floor(wm(x) / FOG_C) % FOG_N);
+const fogVisible = (x, z) => !FOG_ON || fogVis[fogIdx(x, z)] > 0.3, fogExplored = (x, z) => !FOG_ON || fogExp[fogIdx(x, z)] > 0;
+function fogStamp(x, z, R) { const ci = Math.floor(wm(x) / FOG_C), cj = Math.floor(wm(z) / FOG_C), rc = Math.ceil(R / FOG_C) + 1;
+  for (let dj = -rc; dj <= rc; dj++) for (let di = -rc; di <= rc; di++) { const d = Math.hypot((ci + di + 0.5) * FOG_C - wm(x), (cj + dj + 0.5) * FOG_C - wm(z)), v = clamp((R - d) / 1.2 + 0.5, 0, 1); if (v <= 0) continue;
+    const k = (((cj + dj) % FOG_N + FOG_N) % FOG_N) * FOG_N + (((ci + di) % FOG_N + FOG_N) % FOG_N); if (v > fogVis[k]) fogVis[k] = v; if (v > 0.3) fogExp[k] = 1; } }
+const FOG_SIGHT = { robot: 7, heli: 8, soldier: 4.5, truck: 3, building: 3.5 };
+function updateFog(dt) { fogT -= dt; if (fogT > 0) return; fogT = 0.2; fogVis.fill(0);
+  const t = towns[0]; if (!t.hqDown) fogStamp(t.x, t.z, TOWN + 4);
+  for (const o of outposts) if (o.alive && o.team === 0) fogStamp(o.x, o.z, o.done === false ? FOG_SIGHT.building : OUTPOST_SENSE);
+  for (const L of [airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.alive && b.team === 0) fogStamp(b.x, b.z, FOG_SIGHT.building);
+  for (const f of robots) if (f.team === 0 && f.state !== 'ko') fogStamp(f.pos.x, f.pos.z, FOG_SIGHT.robot);
+  for (const h of helis) if (h.team === 0 && h.alive) fogStamp(h.pos.x, h.pos.z, FOG_SIGHT.heli);
+  for (const s of soldiers) if (s.team === 0 && s.alive && !s.inHeli) fogStamp(s.pos.x, s.pos.z, FOG_SIGHT.soldier);
+  for (const k of trucks) if (k.team === 0 && !k.dead) fogStamp(k.x, k.z, FOG_SIGHT.truck);
+  for (let i = 0; i < FOG_N * FOG_N; i++) { fogData[i * 4] = FOG_ON ? fogVis[i] * 255 : 255; fogData[i * 4 + 1] = FOG_ON ? fogExp[i] * 255 : 255; fogData[i * 4 + 3] = 255; }
+  fogTex.needsUpdate = true; }
+// hide what the player cannot see: enemy units out of sight, enemy buildings on unexplored ground
+function applyFog() { if (!FOG_ON) return;
+  for (const f of robots) if (f.team === 1 && !fogVisible(f.pos.x, f.pos.z)) { f.root.visible = false; if (f.bar) f.bar.g.visible = false; }
+  for (const h of helis) if (h.team === 1) { const v = fogVisible(h.pos.x, h.pos.z); if (!v) { h.root.visible = false; h.fogHid = true; if (h.bar) h.bar.g.visible = false; } else if (h.fogHid) { h.root.visible = true; h.fogHid = false; } }
+  for (const s of soldiers) if (s.team === 1 && !s.inHeli) { const v = fogVisible(s.pos.x, s.pos.z); s.root.visible = v; if (!v && s.bar) s.bar.g.visible = false; }
+  for (const k of trucks) if (k.team === 1 && !k.dead) { const v = fogVisible(k.x, k.z); k.obj.visible = v; if (!v) { if (k.trailer.visible) { k.trailer.visible = false; k.fogTr = k.trailer; } } else if (k.fogTr) { if (k.fogTr === k.trailer) k.trailer.visible = true; k.fogTr = null; } }
+  for (const L of [outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
+const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
 // ---- enemy AI helpers
 let aiEcoT = 20, aiSquadT = 120;
 const aiCount = (list, kind) => list.filter(p => p.alive && p.team === 1 && (!kind || p.kind === kind)).length;
@@ -3234,7 +3265,7 @@ const Battle = {
   amove(sel, ground) { for (const u of sel) if (u.kind === 'robot') { u.order = { type: 'amove', x: wm(ground.x / S), z: wm(ground.z / S) }; u.target = null; u.thinkT = 0; } },
   select(list) { for (const u of Battle.selectables()) u.sel = false; for (const u of list) u.sel = true; },
   order(sel, ground, enemy) {
-    if (!sel.length) return;
+    if (!sel.length) return; if (enemy && !fogSeen(enemy)) enemy = null;
     if (enemy) { for (const u of sel) { u.order = { type: 'attack', target: enemy }; u.target = enemy; if (u.kind === 'robot' && u.state === 'idle') { u.thinkT = u.pilot.react * 0.5; u.st = 0; } if (u.kind === 'soldier') { u.order = null; u.target = enemy; continue; } if (u.kind === 'heli') { u.retarget = 0; u.anchor = { x: enemy.pos.x, z: enemy.pos.z }; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; } }
       log(0, `Attack order: ${sel.length} unit${sel.length > 1 ? 's' : ''} → <b>${unitName(enemy)}</b>`); return; }
     const gx = ground.x / S, gz = ground.z / S;
@@ -3278,7 +3309,7 @@ const Battle = {
     for (const t of towns) if (t.plant && t.root.visible) t.plant.update(dt, camera);
     updateBullets(dt); updateLasers(dt); updateBeams(dt); updateHeliProjectiles(dt); updateDebris(dt);
     for (const p of PARTS) p.update(dt);
-    teamUpdate(dt); checkVictory();
+    teamUpdate(dt); checkVictory(); updateFog(dt); applyFog();
     trauma = Math.max(0, trauma - dt * 1.1);
     Battle.hud();
   },
@@ -3286,8 +3317,8 @@ const Battle = {
     camera.position.x += amp * (Math.sin(t * 91) + Math.sin(t * 57)) * 0.5; camera.position.y += amp * (Math.sin(t * 73) + Math.sin(t * 41)) * 0.5; camera.position.z += amp * (Math.sin(t * 67) + Math.sin(t * 83)) * 0.5; },
   drawMini(ctx, s) {
     for (const t of towns) { ctx.strokeStyle = t.idx === 0 ? '#ff5aa8' : t.idx === 1 ? '#46b8ff' : '#e8e0d0'; ctx.lineWidth = 1.5; ctx.strokeRect(t.x * S * s - 5, t.z * S * s - 5, 10, 10); }
-    for (const r of robots) { if (r.state === 'ko') continue; ctx.fillStyle = r.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(r.pos.x * S * s - 2, r.pos.z * S * s - 2, 4, 4); }
-    for (const h of helis) { if (!h.alive) continue; ctx.fillStyle = h.team ? '#9fe0ff' : '#ffb0d8'; ctx.beginPath(); ctx.arc(h.pos.x * S * s, h.pos.z * S * s, 3, 0, 7); ctx.fill(); }
+    for (const r of robots) { if (r.state === 'ko' || !fogSeen(r)) continue; ctx.fillStyle = r.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(r.pos.x * S * s - 2, r.pos.z * S * s - 2, 4, 4); }
+    for (const h of helis) { if (!h.alive || !fogSeen(h)) continue; ctx.fillStyle = h.team ? '#9fe0ff' : '#ffb0d8'; ctx.beginPath(); ctx.arc(h.pos.x * S * s, h.pos.z * S * s, 3, 0, 7); ctx.fill(); }
   },
   hud() {
     const el = document.getElementById('status'); if (!el) return;
@@ -3298,6 +3329,7 @@ const Battle = {
     el.innerHTML = `<b class="t0">Violet</b> ${my.length} robots · ${heliTxt(0)}${towns[0]?.hqDown ? ' · HQ down' : ''}<br><b class="t1">Cobalt</b> ${en.length} robots · ${heliTxt(1)}${towns[1]?.hqDown ? ' · HQ down' : ''}`
       + (sel.length ? `<br>Selected: ${sel.length} · ${sel.map(u => Math.ceil(u.hp / u.maxHp * 100) + '%').slice(0, 8).join(' ')}` : '');
   },
+  fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; },
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },
