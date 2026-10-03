@@ -22,11 +22,26 @@ for c in range(16):
     return x
   for tr in T: a0,b0,c0=fd(tr[0]),fd(tr[1]),fd(tr[2]); par[b0]=a0; par[c0]=a0
   rt=np.array([fd(tr[0]) for tr in T]); ids,cn=np.unique(rt,return_counts=True)
-  # keep every real piece of the tail (many tails are several shells: segments, spikes, balls);
-  # drop only specks and pieces far from the tail's main body
-  main=ids[cn.argmax()]; mc=P[T[rt==main]].reshape(-1,3).mean(0)
-  keep=[i for i,k in zip(ids,cn) if k>=60 and np.linalg.norm(P[T[rt==i]].reshape(-1,3).mean(0)[:2]-mc[:2])<0.14]
-  T=T[np.isin(rt,keep)]
+  # Keep pieces by contact, not size: many tails are built from lots of small touching pieces
+  # (segments, spines). Grow a cluster from the largest piece through every piece that touches it
+  # (within 4 mm); only pieces standing apart from the tail are strays.
+  pts={i:P[np.unique(T[rt==i])] for i in ids}
+  cellsz=0.004; grid={}
+  for i,pp in pts.items():
+    for key in set(map(tuple,np.floor(pp/cellsz).astype(int))): grid.setdefault(key,set()).add(i)
+  def touching(i):
+    out=set()
+    for key in set(map(tuple,np.floor(pts[i]/cellsz).astype(int))):
+      for dx in (-1,0,1):
+        for dy in (-1,0,1):
+          for dz in (-1,0,1): out|=grid.get((key[0]+dx,key[1]+dy,key[2]+dz),set())
+    return out
+  main=ids[cn.argmax()]; keep={main}; todo=[main]
+  while todo:
+    for j in touching(todo.pop()):
+      if j not in keep: keep.add(j); todo.append(j)
+  T=T[np.isin(rt,list(keep))]
+  if c in (12,13): print('  tail',c,'pieces kept',len(keep),'of',len(ids),'tris',len(T))
   vs=np.unique(T); remap=-np.ones(len(P),int); remap[vs]=np.arange(len(vs))
   p=P[vs].copy(); n=N[vs].copy(); t=remap[T]
   # principal axis; the two ends along it
