@@ -19568,7 +19568,7 @@ function callFoul(def, shooter) {
   if (TUT) return tutEvent('foul', def);
   game.ft = { shooter, left: 2, team: shooter.team }; game.shot = null; game.phase = 'ftset'; game.timer = 1.8;
   for (const q of P) { q.action = null; delete q.pendingBlock; q.vel.set(0, 0, 0); }
-  toast('FOUL on ' + def.name + ' — 2 free throws', true); sfx('whistle', 0.9);
+  toast('Reach-in foul on ' + def.name + ' (' + (def.team ? 'Teal' : 'Purple') + ') — ' + (shooter.team ? 'Teal' : 'Purple') + ' shoots 2', true); sfx('whistle', 0.9);
 }
 function lineUpFT() {
   const f = game.ft, s = f.shooter, A = attackHoop(f.team), dir = Math.sign(A.rim.x);   // dir points from centre to that hoop
@@ -19920,7 +19920,7 @@ function viewFrame(dt) {
   } else if (human.meter) { human.mt += dt * (human.mspeed || 1); markEl.style.left = (50 + 46 * meterPos()) + '%'; }
   if (defMode()) {   // defense: the steal meter shows while your closest defender is in range
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
-    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'TAP TO STEAL'; }
+    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; human.stealT0 = performance.now(); meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'TAP TO STEAL'; }
     else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
@@ -20003,7 +20003,9 @@ canEl.addEventListener('pointerdown', e => {
   if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
   if (defMode()) {
     const d = closestDef();
-    if (d && !d.action && d2(d.pos, bodyPos(ball.holder)) < 1.6) {     // in range: tap = steal now
+    // in range with the steal meter up long enough to read it: tap = steal now. A tap right after losing the ball
+    // (meter not on screen yet, marker still in the red end) is a move, not a reach-in foul.
+    if (d && !d.action && d2(d.pos, bodyPos(ball.holder)) < 1.6 && human.auto && human.meter && performance.now() - (human.stealT0 || 0) > 300) {
       const m = meterPos(); act({ t: 'steal', p: d.id, q: Math.max(0, 1 - Math.abs(m)) }); human.freeze = 0.3; human.after = null; return;
     }
   }
