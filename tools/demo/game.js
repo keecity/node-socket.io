@@ -176,8 +176,8 @@ function shotRelease(p) {
   if (game.shotClock < 1) make *= 0.8;
   if (p.shotQ !== undefined) {   // player's timed release: 1 = dead centre, 0 = edge of the meter
     const q = p.shotQ; delete p.shotQ;
-    make = q > 0.91 ? 0.99 : make * (0.15 + 1.25 * q * q);
-    toast(q > 0.91 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
+    make = q >= 1 ? 0.99 : make * (0.15 + 1.25 * q * q);
+    toast(q >= 1 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
   }
   const tgt = A.rim.clone();
   if (Math.random() < make) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
@@ -523,7 +523,7 @@ app.on('update', dt => {
   // defense: the steal meter stays on screen the whole time Teal has the ball
   if (defMode()) {
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
-    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; } $('mlabel').textContent = 'TAP TO STEAL'; }
+    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; setZone(0.087); } $('mlabel').textContent = 'TAP TO STEAL'; }
     else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
@@ -561,6 +561,11 @@ $('mute').onclick = () => $('mute').classList.toggle('on');
 // tap court = move ball handler there, tap teammate = pass, hold 1 s = timing meter, release = shoot
 const HUMAN = 0;
 // marker position -1..1; starts at the left edge so the first pass through the centre is catchable
+function setZone(halfM) {   // halfM: perfect window half-width in marker units (marker spans 46% of the bar each side)
+  human.zone = halfM; const w = halfM * 46 * 2, pf = meterEl.querySelector('.perfect');
+  pf.style.left = (50 - w / 2) + '%'; pf.style.width = w + '%';
+  meterEl.style.setProperty('--g0', (50 - w / 2) + '%'); meterEl.style.setProperty('--g1', (50 + w / 2) + '%');
+}
 const meterPos = () => Math.sin(human.mt * Math.PI * 1.7 - Math.PI / 2);
 const human = { stamina: 1, lastTap: null, on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
 function groundAt(sx, sy) {
@@ -591,7 +596,7 @@ function onRelease(e) {
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
   if (human.meter) {          // shoot with the meter reading
     const m = meterPos(); human.freeze = 0.7; human.after = 'hide';
-    h.shotQ = Math.max(0, 1 - Math.abs(m)); h.moveTarget = null; startShot(h); return;
+    const am = Math.abs(m); h.shotQ = am <= human.zone ? 1 : Math.max(0, 0.9 * (1 - am) / (1 - human.zone)); h.moveTarget = null; startShot(h); return;
   }
   // tap: teammate under the finger = pass, else move there
   let best = null, bd = 48;
@@ -636,7 +641,10 @@ function moveOrder(p, g) {
 function humanAI(p, dt) {
   p.holdT += dt;
   if (human.down && performance.now() - human.t0 > 300) {   // only a real hold sets up a shot; taps keep the player moving
-    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; $('mlabel').textContent = 'RELEASE IN THE CENTRE'; }
+    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
+    // the more open the shooter, the wider the perfect (green) window
+    const op = openness(p); setZone(op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27);
+    $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
     if (human.meter) { }
     // holding = setting up a shot: plant right away and cancel any move order
     p.moveTarget = null; p.sprint = false; p.vel.set(0, 0, 0);

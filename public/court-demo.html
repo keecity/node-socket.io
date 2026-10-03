@@ -16,8 +16,8 @@ canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;widt
 #controls button{font:inherit;font-size:13px;color:#dbe6ef;border:1px solid #40505f;border-radius:9px;background:#101b28dd;padding:10px 14px;cursor:pointer;min-height:40px}
 #controls button:hover{background:#2b4055}#mute.on{background:#5a2b2b}
 #tags{position:absolute;inset:0;pointer-events:none;overflow:hidden}.tag{position:absolute;left:0;top:0;font-size:11px;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap;opacity:.85}.tag.t0{background:#4b2a8fcc}.tag.t1{background:#127e75cc}.tag.ball{opacity:1;box-shadow:0 0 0 2px #ffb23e;font-size:12px}
-#meter{position:absolute;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 60px);transform:translateX(-50%) scale(.9);width:min(260px,70vw);height:22px;border-radius:11px;background:linear-gradient(90deg,#b8383b,#e0a83a 30%,#3fbf6a 45%,#3fbf6a 55%,#e0a83a 70%,#b8383b);box-shadow:0 0 0 2px #0009,0 6px 18px #0008;opacity:0;transition:.15s;pointer-events:none}
-#meter.show{opacity:1;transform:translateX(-50%) scale(1)}#meter .perfect{position:absolute;left:46%;width:8%;top:-4px;bottom:-4px;border-radius:3px;border:2px solid #fff}
+#meter{position:absolute;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 60px);transform:translateX(-50%) scale(.9);width:min(260px,70vw);height:22px;border-radius:11px;--g0:46%;--g1:54%;background:linear-gradient(90deg,#b8383b,#e0a83a 22%,#3fbf6a var(--g0),#3fbf6a var(--g1),#e0a83a 78%,#b8383b);transition:opacity .15s,transform .15s;box-shadow:0 0 0 2px #0009,0 6px 18px #0008;opacity:0;transition:.15s;pointer-events:none}
+#meter.show{opacity:1;transform:translateX(-50%) scale(1)}#meter .perfect{position:absolute;left:46%;width:8%;transition:left .2s,width .2s;top:-4px;bottom:-4px;border-radius:3px;border:2px solid #fff}
 #mark{position:absolute;top:-7px;width:6px;height:36px;margin-left:-3px;border-radius:3px;background:#fff;box-shadow:0 0 8px #000}#meter span{position:absolute;top:28px;width:100%;text-align:center;font-size:10px;letter-spacing:1.5px;font-weight:700;color:#fff;text-shadow:0 1px 4px #000}
 #meter.steal{background:linear-gradient(90deg,#6a2a8f,#3a6fe0 30%,#3fd0e0 45%,#3fd0e0 55%,#3a6fe0 70%,#6a2a8f)}.tag.near{box-shadow:0 0 0 2px #3fd0e0}
 #stamina{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(12px,env(safe-area-inset-top)) + 100px);width:min(160px,40vw);height:6px;border-radius:3px;background:#0008;box-shadow:0 0 0 1px #fff3;pointer-events:none}#stam{height:100%;border-radius:3px;background:linear-gradient(90deg,#ff9a3d,#ffd27a);transition:width .1s}#stamina.low #stam{background:#e04a3a}#stamina span{position:absolute;top:8px;width:100%;text-align:center;font-size:9px;letter-spacing:1.5px;color:#cfe0ea;text-shadow:0 1px 3px #000}
@@ -19514,8 +19514,8 @@ function shotRelease(p) {
   if (game.shotClock < 1) make *= 0.8;
   if (p.shotQ !== undefined) {   // player's timed release: 1 = dead centre, 0 = edge of the meter
     const q = p.shotQ; delete p.shotQ;
-    make = q > 0.91 ? 0.99 : make * (0.15 + 1.25 * q * q);
-    toast(q > 0.91 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
+    make = q >= 1 ? 0.99 : make * (0.15 + 1.25 * q * q);
+    toast(q >= 1 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
   }
   const tgt = A.rim.clone();
   if (Math.random() < make) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
@@ -19861,7 +19861,7 @@ app.on('update', dt => {
   // defense: the steal meter stays on screen the whole time Teal has the ball
   if (defMode()) {
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
-    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; } $('mlabel').textContent = 'TAP TO STEAL'; }
+    if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; setZone(0.087); } $('mlabel').textContent = 'TAP TO STEAL'; }
     else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
@@ -19899,6 +19899,11 @@ $('mute').onclick = () => $('mute').classList.toggle('on');
 // tap court = move ball handler there, tap teammate = pass, hold 1 s = timing meter, release = shoot
 const HUMAN = 0;
 // marker position -1..1; starts at the left edge so the first pass through the centre is catchable
+function setZone(halfM) {   // halfM: perfect window half-width in marker units (marker spans 46% of the bar each side)
+  human.zone = halfM; const w = halfM * 46 * 2, pf = meterEl.querySelector('.perfect');
+  pf.style.left = (50 - w / 2) + '%'; pf.style.width = w + '%';
+  meterEl.style.setProperty('--g0', (50 - w / 2) + '%'); meterEl.style.setProperty('--g1', (50 + w / 2) + '%');
+}
 const meterPos = () => Math.sin(human.mt * Math.PI * 1.7 - Math.PI / 2);
 const human = { stamina: 1, lastTap: null, on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
 function groundAt(sx, sy) {
@@ -19929,7 +19934,7 @@ function onRelease(e) {
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
   if (human.meter) {          // shoot with the meter reading
     const m = meterPos(); human.freeze = 0.7; human.after = 'hide';
-    h.shotQ = Math.max(0, 1 - Math.abs(m)); h.moveTarget = null; startShot(h); return;
+    const am = Math.abs(m); h.shotQ = am <= human.zone ? 1 : Math.max(0, 0.9 * (1 - am) / (1 - human.zone)); h.moveTarget = null; startShot(h); return;
   }
   // tap: teammate under the finger = pass, else move there
   let best = null, bd = 48;
@@ -19974,7 +19979,10 @@ function moveOrder(p, g) {
 function humanAI(p, dt) {
   p.holdT += dt;
   if (human.down && performance.now() - human.t0 > 300) {   // only a real hold sets up a shot; taps keep the player moving
-    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; $('mlabel').textContent = 'RELEASE IN THE CENTRE'; }
+    if (!human.meter && performance.now() - human.t0 > 300) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
+    // the more open the shooter, the wider the perfect (green) window
+    const op = openness(p); setZone(op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27);
+    $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
     if (human.meter) { }
     // holding = setting up a shot: plant right away and cancel any move order
     p.moveTarget = null; p.sprint = false; p.vel.set(0, 0, 0);
