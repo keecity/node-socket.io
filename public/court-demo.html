@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Court Clash 3v3</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet"><style>
-*{box-sizing:border-box}html,body{margin:0;height:100%;background:#080e17;font-family:system-ui,sans-serif;color:#eaf1f7;overflow:hidden}
-canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;width:100vw;height:100vh;display:block;touch-action:none}
+*{box-sizing:border-box}html{background:#05080c}body{position:relative;max-width:calc(100vh * 0.52);margin:0 auto!important;container-type:size;box-shadow:0 0 0 1px #1c2a38,0 0 60px #000}html,body{margin:0;height:100%;background:#080e17;font-family:system-ui,sans-serif;color:#eaf1f7;overflow:hidden}
+canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;width:100%;height:100%;display:block;touch-action:none}
 #board{position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;align-items:stretch;gap:0;border-radius:12px;overflow:hidden;box-shadow:0 6px 24px #0007;font-variant-numeric:tabular-nums;user-select:none}
 .team{display:flex;align-items:center;gap:10px;padding:8px 14px;min-width:120px}
 .t0{background:#4b2a8f}.t1{background:#127e75;flex-direction:row-reverse}
@@ -12,30 +12,30 @@ canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;widt
 #toast.show{opacity:1;transform:none}#toast.big{font-size:30px;font-weight:900;color:#ffd27a}
 #banner{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) scale(.8);padding:18px 28px;border-radius:14px;font-size:28px;font-weight:900;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap}
 #banner.show{opacity:1;transform:translate(-50%,-50%) scale(1)}#banner.t0{background:#4b2a8fee}#banner.t1{background:#127e75ee}
-#controls{position:absolute;bottom:max(14px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px)}
+#controls{position:absolute;bottom:max(14px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:calc(100cqw - 24px)}
 #controls button{font:inherit;font-size:13px;color:#dbe6ef;border:1px solid #40505f;border-radius:9px;background:#101b28dd;padding:10px 14px;cursor:pointer;min-height:40px}
 #controls button:hover{background:#2b4055}#mute.on{background:#5a2b2b}
 #tags{position:absolute;inset:0;pointer-events:none;overflow:hidden}.tag{position:absolute;left:0;top:0;font-size:11px;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap;opacity:.85}.tag.t0{background:#4b2a8fcc}.tag.t1{background:#127e75cc}.tag.ball{opacity:1;box-shadow:0 0 0 2px #ffb23e;font-size:12px}
-#meter{position:absolute;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 60px);transform:translateX(-50%) scale(.9);width:min(260px,70vw);height:22px;border-radius:11px;--g0:46%;--g1:54%;background:linear-gradient(90deg,#b8383b,#e0a83a 22%,#3fbf6a var(--g0),#3fbf6a var(--g1),#e0a83a 78%,#b8383b);transition:opacity .15s,transform .15s;box-shadow:0 0 0 2px #0009,0 6px 18px #0008;opacity:0;transition:.15s;pointer-events:none}
+#meter{position:absolute;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 60px);transform:translateX(-50%) scale(.9);width:min(260px,70cqw);height:22px;border-radius:11px;--g0:46%;--g1:54%;background:linear-gradient(90deg,#b8383b,#e0a83a 22%,#3fbf6a var(--g0),#3fbf6a var(--g1),#e0a83a 78%,#b8383b);transition:opacity .15s,transform .15s;box-shadow:0 0 0 2px #0009,0 6px 18px #0008;opacity:0;transition:.15s;pointer-events:none}
 #meter.show{opacity:1;transform:translateX(-50%) scale(1)}#meter .perfect{position:absolute;left:46%;width:8%;transition:left .2s,width .2s;top:-4px;bottom:-4px;border-radius:3px;border:2px solid #fff}
 #mark{position:absolute;top:-7px;width:6px;height:36px;margin-left:-3px;border-radius:3px;background:#fff;box-shadow:0 0 8px #000}#meter span{position:absolute;top:28px;width:100%;text-align:center;font-size:10px;letter-spacing:1.5px;font-weight:700;color:#fff;text-shadow:0 1px 4px #000}
 #meter.steal{background:linear-gradient(90deg,#d0283a 0,#d0283a 15.5%,#6a2a8f 15.5%,#3a6fe0 30%,#3fd0e0 45%,#3fd0e0 55%,#3a6fe0 70%,#6a2a8f 84.5%,#d0283a 84.5%,#d0283a)}.tag.near{box-shadow:0 0 0 2px #3fd0e0}
-#stamina{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(12px,env(safe-area-inset-top)) + 100px);width:min(160px,40vw);height:6px;border-radius:3px;background:#0008;box-shadow:0 0 0 1px #fff3;pointer-events:none}#stam{height:100%;border-radius:3px;background:linear-gradient(90deg,#ff9a3d,#ffd27a);transition:width .1s}#stamina.low #stam{background:#e04a3a}#stamina span{position:absolute;top:8px;width:100%;text-align:center;font-size:9px;letter-spacing:1.5px;color:#cfe0ea;text-shadow:0 1px 3px #000}
+#stamina{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(12px,env(safe-area-inset-top)) + 100px);width:min(160px,40cqw);height:6px;border-radius:3px;background:#0008;box-shadow:0 0 0 1px #fff3;pointer-events:none}#stam{height:100%;border-radius:3px;background:linear-gradient(90deg,#ff9a3d,#ffd27a);transition:width .1s}#stamina.low #stam{background:#e04a3a}#stamina span{position:absolute;top:8px;width:100%;text-align:center;font-size:9px;letter-spacing:1.5px;color:#cfe0ea;text-shadow:0 1px 3px #000}
 .tag .sbar{display:block;height:3px;margin:2px -2px 0;border-radius:2px;background:#0007;overflow:hidden}.tag .sbar b{display:block;height:100%;background:#ffd27a}.tag .sbar.low b{background:#e04a3a}
 #ring{position:absolute;width:34px;height:14px;margin:-7px 0 0 -17px;border:2px solid #ffd27a;border-radius:50%;opacity:0;pointer-events:none}#ring.go{animation:ring .6s ease-out}@keyframes ring{from{opacity:1;transform:scale(.4)}to{opacity:0;transform:scale(1.6)}}
-#online{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,88vw);background:#0d1824ee;border:1px solid #2c4357;border-radius:14px;padding:16px;box-shadow:0 10px 40px #000a;z-index:20;font-size:13px}#online[hidden]{display:none}#online p{color:#b9cad6;line-height:1.4}#online i{color:#7f9cab}#onlist{display:flex;flex-direction:column;gap:6px;margin:8px 0}#online button{background:#4b2a8f;color:#fff;border:0;border-radius:9px;padding:9px 12px;font-weight:700;cursor:pointer}#onlist button{background:#127e75}.onrow{display:flex;gap:8px;justify-content:flex-end}#onclose{background:#2a3a48!important}
-.sbar[hidden]{display:none!important}#tut{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(12px,env(safe-area-inset-top)) + 64px);width:min(360px,92vw);background:#0d1824e6;border:1px solid #2c4357;border-radius:14px;padding:10px 14px;box-shadow:0 8px 30px #0009;font-size:13px;z-index:15;pointer-events:auto}#tut[hidden]{display:none}#tut b{font-size:14px;letter-spacing:.5px}#tut p{margin:5px 0 6px;color:#cfdde8;line-height:1.35;font-size:12px}.tsteps{display:flex;gap:5px;margin-bottom:6px}.tsteps i{flex:1;height:4px;border-radius:2px;background:#2a3a48}.tsteps i.d{background:#3fbf6a}.tsteps i.c{background:#ffb23e}.trow{display:flex;align-items:center;justify-content:space-between;gap:8px}#tok{color:#5fe08a;font-weight:700;font-size:12px}#tskip{background:#2a3a48;color:#cfe0ea;border:0;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer}
+#online{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,88cqw);background:#0d1824ee;border:1px solid #2c4357;border-radius:14px;padding:16px;box-shadow:0 10px 40px #000a;z-index:20;font-size:13px}#online[hidden]{display:none}#online p{color:#b9cad6;line-height:1.4}#online i{color:#7f9cab}#onlist{display:flex;flex-direction:column;gap:6px;margin:8px 0}#online button{background:#4b2a8f;color:#fff;border:0;border-radius:9px;padding:9px 12px;font-weight:700;cursor:pointer}#onlist button{background:#127e75}.onrow{display:flex;gap:8px;justify-content:flex-end}#onclose{background:#2a3a48!important}
+.sbar[hidden]{display:none!important}#tut{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(12px,env(safe-area-inset-top)) + 64px);width:min(360px,92cqw);background:#0d1824e6;border:1px solid #2c4357;border-radius:14px;padding:10px 14px;box-shadow:0 8px 30px #0009;font-size:13px;z-index:15;pointer-events:auto}#tut[hidden]{display:none}#tut b{font-size:14px;letter-spacing:.5px}#tut p{margin:5px 0 6px;color:#cfdde8;line-height:1.35;font-size:12px}.tsteps{display:flex;gap:5px;margin-bottom:6px}.tsteps i{flex:1;height:4px;border-radius:2px;background:#2a3a48}.tsteps i.d{background:#3fbf6a}.tsteps i.c{background:#ffb23e}.trow{display:flex;align-items:center;justify-content:space-between;gap:8px}#tok{color:#5fe08a;font-weight:700;font-size:12px}#tskip{background:#2a3a48;color:#cfe0ea;border:0;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer}
 #hint{position:absolute;top:calc(max(12px,env(safe-area-inset-top)) + 62px);width:100%;text-align:center;font-size:11px;color:#cfe0ea;text-shadow:0 1px 4px #000;pointer-events:none}
 #loading{position:absolute;top:45%;width:100%;text-align:center;color:#61d1c4;font-size:18px}#status{display:none}
-@media(max-width:520px){#controls{gap:4px;flex-wrap:nowrap;max-width:100vw}#controls button{padding:6px 6px;font-size:10.5px;min-height:30px}.team{min-width:92px;padding:7px 10px}.team b{font-size:22px}#toast.big{font-size:24px}#banner{font-size:21px}}
+@media(max-width:520px){#controls{gap:4px;flex-wrap:nowrap;max-width:100cqw}#controls button{padding:6px 6px;font-size:10.5px;min-height:30px}.team{min-width:92px;padding:7px 10px}.team b{font-size:22px}#toast.big{font-size:24px}#banner{font-size:21px}}
 /* ---------- arena HUD built from the sprite sheet ---------- */
 body{font-family:'Rajdhani',system-ui,sans-serif}
 .deco{position:absolute;pointer-events:none;opacity:.95}
-.deco.tl{left:0;top:0;width:46vw;height:120px;background:linear-gradient(135deg,transparent 46%,#7b3cf0 46.5%,#7b3cf0 49%,transparent 49.5%,transparent 54%,#5a2bb5 54.5%,#5a2bb5 56%,transparent 56.5%)}
-.deco.tr{right:0;top:0;width:46vw;height:120px;background:linear-gradient(225deg,transparent 46%,#19c6c0 46.5%,#19c6c0 49%,transparent 49.5%,transparent 54%,#118f8b 54.5%,#118f8b 56%,transparent 56.5%)}
-.deco.bl{left:0;bottom:0;width:min(40vw,240px);aspect-ratio:341/150;background:var(--i-decol) no-repeat left bottom/contain}
-.deco.br{right:0;bottom:0;width:min(40vw,240px);aspect-ratio:341/152;background:var(--i-decor) no-repeat right bottom/contain}
-#board{--W:min(600px,calc(100vw - 62px));top:max(6px,env(safe-area-inset-top));left:calc(50% - 26px);transform:translateX(-50%);width:var(--W);height:calc(var(--W) * 177 / 1278);
+.deco.tl{left:0;top:0;width:46cqw;height:120px;background:linear-gradient(135deg,transparent 46%,#7b3cf0 46.5%,#7b3cf0 49%,transparent 49.5%,transparent 54%,#5a2bb5 54.5%,#5a2bb5 56%,transparent 56.5%)}
+.deco.tr{right:0;top:0;width:46cqw;height:120px;background:linear-gradient(225deg,transparent 46%,#19c6c0 46.5%,#19c6c0 49%,transparent 49.5%,transparent 54%,#118f8b 54.5%,#118f8b 56%,transparent 56.5%)}
+.deco.bl{left:0;bottom:0;width:min(40cqw,240px);aspect-ratio:341/150;background:var(--i-decol) no-repeat left bottom/contain}
+.deco.br{right:0;bottom:0;width:min(40cqw,240px);aspect-ratio:341/152;background:var(--i-decor) no-repeat right bottom/contain}
+#board{--W:min(430px,calc(100cqw - 62px),62cqh);top:max(6px,env(safe-area-inset-top));left:calc(50% - 26px);transform:translateX(-50%);width:var(--W);height:calc(var(--W) * 177 / 1278);
   display:block;border-radius:0;overflow:visible;box-shadow:none;filter:drop-shadow(0 6px 10px #000a)}
 #board .team,#mid{position:absolute;top:0;height:100%;padding:0;min-width:0;background:none;display:block}
 #board .t0{left:0;width:39.05%;background:var(--i-pl) no-repeat center/100% 100%}
@@ -55,7 +55,7 @@ body{font-family:'Rajdhani',system-ui,sans-serif}
 #board .t0 .dot{left:88%}#board .t1 .dot{left:3%}
 #board .dot.on{opacity:1;background:var(--i-dot) no-repeat center/contain;box-shadow:none}
 #ft21{position:absolute;left:36.5%;width:26%;top:88%;aspect-ratio:461/96;background:var(--i-ft21) no-repeat center/contain;z-index:3}
-#menu-btn{position:absolute;top:calc(max(6px,env(safe-area-inset-top)) + 6px);right:max(6px,env(safe-area-inset-right));width:46px;height:51px;border:0;cursor:pointer;z-index:12;background:var(--i-pause) no-repeat center/contain;clip-path:none;padding:0}
+#menu-btn{position:absolute;top:calc(max(6px,env(safe-area-inset-top)) + 4px);right:max(6px,env(safe-area-inset-right));width:38px;height:42px;border:0;cursor:pointer;z-index:12;background:var(--i-pause) no-repeat center/contain;clip-path:none;padding:0}
 #menu-btn::before,#menu-btn i{display:none}
 #controls{top:calc(max(8px,env(safe-area-inset-top)) + 62px);bottom:auto;left:auto;right:max(8px,env(safe-area-inset-right));transform:none;flex-direction:column;flex-wrap:nowrap;gap:6px;background:#0b121bf0;border:1px solid #2c4357;border-radius:12px;padding:8px;z-index:12;width:auto;max-width:none}
 #controls[hidden]{display:none}
@@ -69,8 +69,8 @@ body{font-family:'Rajdhani',system-ui,sans-serif}
 .tag.near{filter:drop-shadow(0 0 6px #22d3cb)}
 .tag .sbar{margin:2px 0 0;height:3px}
 /* bottom: hint plate + timing meter */
-#hint{top:auto!important;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 108px);left:50%;width:min(360px,86vw);transform:translateX(-50%);aspect-ratio:583/69;font-size:0!important;background:var(--i-hint) no-repeat center/contain;text-shadow:none}
-#meter{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 30px);width:min(440px,92vw);height:auto;aspect-ratio:1173/112;border-radius:0;opacity:.45;transform:translateX(-50%);box-shadow:none;overflow:visible;
+#hint{top:auto!important;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 108px);left:50%;width:min(360px,86cqw);transform:translateX(-50%);aspect-ratio:583/69;font-size:0!important;background:var(--i-hint) no-repeat center/contain;text-shadow:none}
+#meter{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 30px);width:min(440px,92cqw);height:auto;aspect-ratio:1173/112;border-radius:0;opacity:.45;transform:translateX(-50%);box-shadow:none;overflow:visible;
   background:var(--i-meter) no-repeat center/100% 100%!important;clip-path:none!important;padding:0}
 #meter::before{display:none}
 #meter.show{opacity:1;transform:translateX(-50%)}
@@ -19407,11 +19407,12 @@ const $ = id => document.getElementById(id);
 try {
 // ====================================================================== scene (court from the PlayCanvas court page)
 const app = new pc.Application($('scene'), { graphicsDeviceOptions: { antialias: true, alpha: false }, mouse: new pc.Mouse($('scene')), touch: new pc.TouchDevice($('scene')) });
-window.app = app; app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW); app.setCanvasResolution(pc.RESOLUTION_AUTO);
+window.app = app; app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
 app.graphicsDevice.maxPixelRatio = Math.min(devicePixelRatio, 2);
 app.maxDeltaTime = 1 / 20;                       // game logic and animation share one clamped clock
 app.scene.ambientLight = new pc.Color(.35, .38, .43); app.scene.toneMapping = pc.TONEMAP_ACES;
-window.addEventListener('resize', () => app.resizeCanvas());
+const fitCanvas = () => app.resizeCanvas(document.body.clientWidth, document.body.clientHeight);   // the game lives in a phone-shaped column
+window.addEventListener('resize', fitCanvas); fitCanvas();
 const camera = new pc.Entity('Camera'); camera.addComponent('camera', { clearColor: new pc.Color(.025, .04, .06), farClip: 160, fov: 40 }); app.root.addChild(camera);
 const light = new pc.Entity('Key'); light.addComponent('light', { type: 'directional', color: new pc.Color(1, .94, .84), intensity: 1.15, castShadows: true, shadowDistance: 45, shadowResolution: 2048, shadowBias: .15, normalOffsetBias: .025 }); light.setEulerAngles(52, 25, 0); app.root.addChild(light);
 const fill = new pc.Entity('Fill'); fill.addComponent('light', { type: 'directional', color: new pc.Color(.73, .84, 1), intensity: .45 }); fill.setEulerAngles(65, 210, 0); app.root.addChild(fill);
@@ -19945,7 +19946,7 @@ function updateCamera(dt) {
   // arena cam renders only into the gap between the scoreboard and the hint/meter, so the HUD never covers the court
   let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
   if (camMode === 'arena') {
-    const H = window.innerHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
+    const H = document.body.clientHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
     const bot = $('hint').getBoundingClientRect().top - 4, h = Math.max(0.3, (bot - top) / H);
     camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
   } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
@@ -19957,8 +19958,9 @@ function updateCamera(dt) {
     // Clash Royale style: high above Purple's baseline, looking down the length of the court (court runs bottom to top on a phone)
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
     const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
-    pos = new pc.Vec3(side * -34 + drift, 19, 0); look = new pc.Vec3(side * 0.8 + drift, -1.5, 0); fov = 40;
-    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 9.8);
+    const sh = side * 1.3;   // nudge the view toward the far basket so its backboard has room under the scoreboard
+    pos = new pc.Vec3(side * -34 + drift + sh, 19, 0); look = new pc.Vec3(side * 0.8 + drift + sh, -1.5, 0); fov = 40;
+    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 10.4);
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }

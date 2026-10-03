@@ -5,11 +5,12 @@ const $ = id => document.getElementById(id);
 try {
 // ====================================================================== scene (court from the PlayCanvas court page)
 const app = new pc.Application($('scene'), { graphicsDeviceOptions: { antialias: true, alpha: false }, mouse: new pc.Mouse($('scene')), touch: new pc.TouchDevice($('scene')) });
-window.app = app; app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW); app.setCanvasResolution(pc.RESOLUTION_AUTO);
+window.app = app; app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
 app.graphicsDevice.maxPixelRatio = Math.min(devicePixelRatio, 2);
 app.maxDeltaTime = 1 / 20;                       // game logic and animation share one clamped clock
 app.scene.ambientLight = new pc.Color(.35, .38, .43); app.scene.toneMapping = pc.TONEMAP_ACES;
-window.addEventListener('resize', () => app.resizeCanvas());
+const fitCanvas = () => app.resizeCanvas(document.body.clientWidth, document.body.clientHeight);   // the game lives in a phone-shaped column
+window.addEventListener('resize', fitCanvas); fitCanvas();
 const camera = new pc.Entity('Camera'); camera.addComponent('camera', { clearColor: new pc.Color(.025, .04, .06), farClip: 160, fov: 40 }); app.root.addChild(camera);
 const light = new pc.Entity('Key'); light.addComponent('light', { type: 'directional', color: new pc.Color(1, .94, .84), intensity: 1.15, castShadows: true, shadowDistance: 45, shadowResolution: 2048, shadowBias: .15, normalOffsetBias: .025 }); light.setEulerAngles(52, 25, 0); app.root.addChild(light);
 const fill = new pc.Entity('Fill'); fill.addComponent('light', { type: 'directional', color: new pc.Color(.73, .84, 1), intensity: .45 }); fill.setEulerAngles(65, 210, 0); app.root.addChild(fill);
@@ -543,7 +544,7 @@ function updateCamera(dt) {
   // arena cam renders only into the gap between the scoreboard and the hint/meter, so the HUD never covers the court
   let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
   if (camMode === 'arena') {
-    const H = window.innerHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
+    const H = document.body.clientHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
     const bot = $('hint').getBoundingClientRect().top - 4, h = Math.max(0.3, (bot - top) / H);
     camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
   } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
@@ -555,8 +556,9 @@ function updateCamera(dt) {
     // Clash Royale style: high above Purple's baseline, looking down the length of the court (court runs bottom to top on a phone)
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
     const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
-    pos = new pc.Vec3(side * -34 + drift, 19, 0); look = new pc.Vec3(side * 0.8 + drift, -1.5, 0); fov = 40;
-    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 9.8);
+    const sh = side * 1.3;   // nudge the view toward the far basket so its backboard has room under the scoreboard
+    pos = new pc.Vec3(side * -34 + drift + sh, 19, 0); look = new pc.Vec3(side * 0.8 + drift + sh, -1.5, 0); fov = 40;
+    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 10.4);
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
