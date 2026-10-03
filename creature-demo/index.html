@@ -85,6 +85,17 @@ details summary { cursor: pointer; font-weight: 600; }
       </div>
     </section>
     <section>
+      <h2>Locomotion</h2>
+      <div class="part"><span>Gait</span><div class="seg" role="group" aria-label="Gait" id="gaitSeg">
+        <button data-gait="trot" aria-pressed="true">Trot</button><button data-gait="wave" aria-pressed="false">Wave</button></div></div>
+      <div class="slider">
+        <label for="speed">Walk speed</label><output id="speedOut"></output>
+        <input id="speed" type="range" min="0.08" max="0.6" step="0.01" value="0.22">
+        <small>Step rate and stride follow speed; feet stay planted.</small>
+      </div>
+      <div class="toggles"><label><input type="checkbox" id="wander" checked> Wander when no turn key is held</label></div>
+    </section>
+    <section>
       <h2>Fuse · one mesh from all parts</h2>
       <div class="toggles"><label><input type="checkbox" id="fuse" checked> Fuse parts into a single projected mesh</label></div>
       <div class="slider">
@@ -111,7 +122,7 @@ details summary { cursor: pointer; font-weight: 600; }
         <small>How widely colour and bone weights from neighbouring parts mix on the fused skin.</small>
       </div>
       <div class="toggles">
-        <label><input type="checkbox" id="showBones"> Show skeleton</label>
+        <label><input type="checkbox" id="showBones"> Show skeleton and foot targets</label>
         <label><input type="checkbox" id="showWeights"> Color by bone weights</label>
         <label><input type="checkbox" id="seamBlend" checked> Blend skin at seams (composite mode)</label>
       </div>
@@ -139,26 +150,30 @@ const V3 = pc.Vec3;
 
 // ---------- Part manifests: the "instruction manual" each part ships with ----------
 const MANIFESTS = {
-  body: { socket: 'root', bones: ['body'],
-    animations: { breathe: { clip: 'breathe', loop: true } },
-    triggers: [ { on: 'input', action: 'walk', key: 'W', label: 'Walk / stop', play: 'toggleWalk' },
+  body: { socket: 'root', bones: ['pelvis', 'spine', 'chest'],
+    animations: { locomotion: { clip: 'ik_gait', loop: true, gaits: ['trot', 'wave'] },
+                  breathe: { clip: 'breathe', loop: true },
+                  jump: { clip: 'crouch_launch_land', duration: 1.15 } },
+    triggers: [ { on: 'input', action: 'walk', key: 'W', label: 'Walk / stop', play: 'locomotion' },
+                { on: 'hold', action: 'turn_left', key: 'A', label: 'Turn left (hold)', play: 'locomotion' },
+                { on: 'hold', action: 'turn_right', key: 'D', label: 'Turn right (hold)', play: 'locomotion' },
+                { on: 'input', action: 'gait', key: 'G', label: 'Switch gait (trot / wave)', play: 'locomotion' },
                 { on: 'input', action: 'jump', key: 'Space', label: 'Jump', play: 'jump' } ] },
-  head: { socket: 'neck', bones: ['head'], seam: true,
+  head: { socket: 'neck', bones: ['neck', 'head'], seam: true, stabilize: true,
     animations: { oink: { clip: 'nod', duration: 0.8 }, look: { clip: 'look', loop: true } },
     triggers: [ { on: 'input', action: 'oink', key: 'O', label: 'Oink (head nod)', play: 'oink' },
                 { on: 'state', when: 'still', play: 'look' } ] },
-  leg: { socket: ['hip_L', 'hip_R'], bones: ['hip', 'knee', 'ankle'], seam: true,
+  leg: { socket: ['hip_L', 'hip_R'], bones: ['hip', 'knee', 'ankle', 'toe'], seam: true,
     stack: ['thigh', 'shin', 'foot'],
-    animations: { walk: { clip: 'stride', loop: true, syncWith: 'gait' },
-                  idle: { clip: 'stand', loop: true },
-                  jump: { clip: 'tuck', duration: 0.9 },
-                  stomp: { clip: 'stomp', duration: 0.6 } },
-    triggers: [ { on: 'state', when: 'moving', play: 'walk' },
-                { on: 'state', when: 'still', play: 'idle' },
-                { on: 'input', action: 'jump', play: 'jump' },
+    ik: { chain: ['hip', 'knee'], effector: 'ankle', plantFeet: true, keepFootLevel: true },
+    animations: { step: { clip: 'ik_step', syncWith: 'gait' },
+                  settle: { clip: 'ik_settle' },
+                  stomp: { clip: 'stomp', duration: 0.85 } },
+    triggers: [ { on: 'state', when: 'moving', play: 'step' },
+                { on: 'state', when: 'still', play: 'settle' },
                 { on: 'input', action: 'stomp', key: 'S', label: 'Stomp (front legs)', play: 'stomp' } ] },
-  tail: { socket: 'rump', bones: ['tail'], seam: true,
-    animations: { wag: { clip: 'wag', duration: 1.2 }, sway: { clip: 'sway', loop: true } },
+  tail: { socket: 'rump', bones: ['tail0', 'tail1', 'tail2'], seam: true,
+    animations: { wag: { clip: 'wag', duration: 1.2 }, sway: { clip: 'wave', loop: true } },
     triggers: [ { on: 'input', action: 'wag', key: 'T', label: 'Tail wag', play: 'wag' } ] }
 };
 
@@ -171,10 +186,10 @@ const TINTS = {
   foot:  [[110, 72, 70],[ 90, 64, 60],[130, 90, 80],[ 80, 60, 64]],
   tail:  [[245,160,175],[210,130,140],[235,165,145],[250,185,195]]
 };
-const BONE_HUES = [[255,90,90],[90,170,255],[120,220,120],[255,200,60],[200,110,255],[60,220,220],[255,130,200],[160,160,60]];
+const BONE_HUES = [[255,90,90],[90,170,255],[120,220,120],[255,200,60],[200,110,255],[60,220,220],[255,130,200],[160,160,60],[255,150,70],[110,120,255],[60,190,140],[230,90,170],[150,210,60]];
 
 const genome = { head: 0, body: 0, thigh: 0, shin: 0, foot: 0, tail: 0, pairs: 2 };
-const settings = { sharp: 4, seam: 0.012, legLen: 1, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03 };
+const settings = { sharp: 4, seam: 0.012, legLen: 1, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -246,7 +261,7 @@ app.scene.ambientLight = new pc.Color(0.42, 0.38, 0.4);
 const cssColor = name => { const c = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const m = c.match(/\w\w/g).map(h => parseInt(h, 16) / 255); return new pc.Color(m[0], m[1], m[2]); };
 
 const camera = new pc.Entity('camera');
-camera.addComponent('camera', { clearColor: cssColor('--stage'), fov: 40, nearClip: 0.01, farClip: 20 });
+camera.addComponent('camera', { clearColor: cssColor('--stage'), fov: 40, nearClip: 0.01, farClip: 60 });
 app.root.addChild(camera);
 const themeMq = matchMedia('(prefers-color-scheme: dark)');
 const syncTheme = () => camera.camera.clearColor = cssColor('--stage');
@@ -259,10 +274,15 @@ const fill = new pc.Entity('fill');
 fill.addComponent('light', { type: 'directional', intensity: 0.35, color: new pc.Color(0.8, 0.85, 1) });
 fill.setEulerAngles(-30, -140, 0); app.root.addChild(fill);
 
-const groundMat = new pc.StandardMaterial(); groundMat.diffuse = new pc.Color(0.82, 0.74, 0.72); groundMat.gloss = 0.1; groundMat.update();
+// large tiled ground so travel and planted feet read clearly
+const tileCv = document.createElement('canvas'); tileCv.width = tileCv.height = 64;
+{ const c = tileCv.getContext('2d'); c.fillStyle = '#d6c6c3'; c.fillRect(0, 0, 64, 64); c.fillStyle = '#cbb8b5'; c.fillRect(0, 0, 32, 32); c.fillRect(32, 32, 32, 32); }
+const tileTex = new pc.Texture(app.graphicsDevice, { width: 64, height: 64, mipmaps: true, addressU: pc.ADDRESS_REPEAT, addressV: pc.ADDRESS_REPEAT, anisotropy: 8 });
+tileTex.setSource(tileCv);
+const groundMat = new pc.StandardMaterial(); groundMat.diffuseMap = tileTex; groundMat.diffuseMapTiling = new pc.Vec2(200, 200); groundMat.gloss = 0.1; groundMat.update();
 const ground = new pc.Entity('ground');
 ground.addComponent('render', { type: 'plane', material: groundMat, castShadows: false });
-ground.setLocalScale(3, 1, 3); app.root.addChild(ground);
+ground.setLocalScale(100, 1, 100); app.root.addChild(ground);
 
 const skinMat = new pc.StandardMaterial();
 skinMat.diffuse = new pc.Color(1, 1, 1);
@@ -357,7 +377,12 @@ function assemble() {
   const bodyOff = [-(bb.min[0] + bb.max[0]) / 2, bodyMinY - bb.min[1], -(bb.min[2] + bb.max[2]) / 2];
   const bodyCenter = [0, bodyMinY + bodyH / 2, 0];
   addPart(buf, body, { scale: bodySc, offset: bodyOff, slot: 'body', tint: TINTS.body[g.body], socket: bodyCenter });
-  bones.push({ name: 'body', parent: null, pos: [-bodyL * 0.42, bodyCenter[1], 0], tip: [bodyL * 0.42, bodyCenter[1], 0], own: ['body'] });
+  // spine: pelvis → spine → chest along the body's centre line, so the torso can bend and roll
+  const cy = bodyCenter[1], sx = [-0.46, -0.16, 0.16, 0.46].map(f => f * bodyL);
+  bones.push({ name: 'pelvis', parent: null, pos: [sx[0], cy, 0], tip: [sx[1], cy, 0], own: ['body'] });
+  bones.push({ name: 'spine', parent: 'pelvis', pos: [sx[1], cy, 0], tip: [sx[2], cy, 0], own: ['body'] });
+  bones.push({ name: 'chest', parent: 'spine', pos: [sx[2], cy, 0], tip: [sx[3], cy, 0], own: ['body'] });
+  const spineFor = x => x > 0.1 * bodyL ? 'chest' : x < -0.1 * bodyL ? 'pelvis' : 'spine';
 
   // head at the front socket
   const head = P('head' + g.head), headSc = [S * 1.15, S * 1.15, S * 1.3];
@@ -365,7 +390,9 @@ function assemble() {
   const neck = [bodyL * 0.5 - headL * 0.1, bodyCenter[1] + bodyH * 0.15, 0];
   const headOff = [neck[0] - hb.min[0] - headL * 0.15, neck[1] - (hb.min[1] + hb.max[1]) / 2 + bodyH * 0.12, -(hb.min[2] + hb.max[2]) / 2];
   addPart(buf, head, { scale: headSc, offset: headOff, slot: 'head', tint: TINTS.head[g.head], socket: neck });
-  bones.push({ name: 'head', parent: 'body', pos: neck, tip: [hb.max[0] + headOff[0], neck[1] + bodyH * 0.1, 0], own: ['head'] });
+  const headMid = [(hb.min[0] + hb.max[0]) / 2 + headOff[0] - headL * 0.12, (hb.min[1] + hb.max[1]) / 2 + headOff[1], 0];
+  bones.push({ name: 'neck', parent: 'chest', pos: neck, tip: headMid, own: ['head'] });
+  bones.push({ name: 'head', parent: 'neck', pos: headMid, tip: [hb.max[0] + headOff[0], headMid[1], 0], own: ['head'] });
 
   // tail at the rump socket, mirrored in x so the curl points backwards
   const tail = P('tail' + g.tail), tailSc = [-S, S, S];
@@ -373,8 +400,18 @@ function assemble() {
   const tailL = tlb.max[0] - tlb.min[0];
   const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * 0.2, 0];
   const tailOff = [rump[0] - tlb.max[0] + tailL * 0.15, rump[1] - tlb.max[1] + (tlb.max[1] - tlb.min[1]) * 0.2, -(tlb.min[2] + tlb.max[2]) / 2];
+  const tailBase = buf.pos.length / 3;
   addPart(buf, tail, { scale: tailSc, offset: tailOff, slot: 'tail', tint: TINTS.tail[g.tail], socket: rump });
-  bones.push({ name: 'tail', parent: 'body', pos: rump, tip: [tlb.min[0] + tailOff[0], tlb.min[1] + tailOff[1] + 0.03, 0], own: ['tail'] });
+  // tail chain follows the actual curl: joints at the centroids of distance bands from the rump
+  {
+    const tv = [];
+    for (let i = tailBase; i < buf.pos.length / 3; i++) tv.push([buf.pos[i*3], buf.pos[i*3+1], buf.pos[i*3+2]]);
+    const dist = tv.map(p => Math.hypot(p[0] - rump[0], p[1] - rump[1], p[2] - rump[2]));
+    const dmax = Math.max(...dist);
+    const band = (a, b) => { const c = [0, 0, 0]; let n = 0; tv.forEach((p, i) => { if (dist[i] >= a * dmax && dist[i] <= b * dmax) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; n++; } }); return c.map(v => v / Math.max(n, 1)); };
+    const j = [rump, band(0.28, 0.4), band(0.6, 0.72), band(0.92, 1)];
+    for (let i = 0; i < 3; i++) bones.push({ name: 'tail' + i, parent: i ? 'tail' + (i - 1) : 'pelvis', pos: j[i], tip: j[i + 1], own: ['tail'] });
+  }
 
   // leg pairs along the belly
   const legs = [];
@@ -390,9 +427,11 @@ function assemble() {
       addPart(buf, thigh, { scale: legSc, offset: W(thighOff), mirrorZ: mirror, slot: id + 'a', tint: TINTS.thigh[g.thigh], socket: hip });
       addPart(buf, shin,  { scale: legSc, offset: W(shinOff), mirrorZ: mirror, slot: id + 'b', tint: TINTS.shin[g.shin], socket: knee });
       addPart(buf, foot,  { scale: legSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', tint: TINTS.foot[g.foot], socket: ankle });
-      bones.push({ name: id + '_hip', parent: 'body', pos: hip, tip: knee, own: [id + 'a'], leg: { pair: p, side } });
+      const ball = W([ankleL[0] + (toeL[0] - ankleL[0]) * 0.55, toeL[1] + 0.008, ankleL[2]]);
+      bones.push({ name: id + '_hip', parent: spineFor(fx), pos: hip, tip: knee, own: [id + 'a'], leg: { pair: p, side } });
       bones.push({ name: id + '_knee', parent: id + '_hip', pos: knee, tip: ankle, own: [id + 'b'] });
-      bones.push({ name: id + '_ankle', parent: id + '_knee', pos: ankle, tip: toe, own: [id + 'c'] });
+      bones.push({ name: id + '_ankle', parent: id + '_knee', pos: ankle, tip: ball, own: [id + 'c'] });
+      bones.push({ name: id + '_toe', parent: id + '_ankle', pos: ball, tip: toe, own: [id + 'c'] });
       legs.push(id);
     }
   }
@@ -410,35 +449,34 @@ function bind(asm, { plain = false } = {}) {
   const k = settings.sharp, R = Math.max(settings.seam, 1e-4);
   const bi = new Uint8Array(n * 4), bw = new Float32Array(n * 4);
   const colors = new Uint8Array(n * 4), seamT = new Float32Array(n);
-  const ownerOf = {}; bones.forEach((b, i) => b.own.forEach(s => ownerOf[s] = i));
-  const bodyIdx = 0;
+  const ownersOf = {}; bones.forEach((b, i) => b.own.forEach(sl => (ownersOf[sl] ||= []).push(i)));
+  const byName = Object.fromEntries(bones.map((b, i) => [b.name, i]));
   const bodyTint = buf.tint[0];
   const p = [0, 0, 0];
   for (let v = 0; v < n; v++) {
     p[0] = buf.pos[v*3]; p[1] = buf.pos[v*3+1]; p[2] = buf.pos[v*3+2];
     const slot = buf.slot[v];
-    const cands = [];
-    if (slot === 'body' && plain) {
-      cands.push({ i: bodyIdx, w: 1 });
-    } else if (slot === 'body') {
-      cands.push({ i: bodyIdx, w: 1 / Math.pow(segDist(p, bones[0].pos, bones[0].tip) + 0.01, k) });
-      // seam: body flesh near a socket follows that limb a little
-      bones.forEach((b, i) => {
-        if (i === bodyIdx || b.parent !== 'body') return;
-        const d = Math.hypot(p[0]-b.pos[0], p[1]-b.pos[1], p[2]-b.pos[2]);
-        if (d < R) cands.push({ i, w: cands[0].w * 0.6 * (1 - pc.math.smoothstep(0, R, d)) });
-      });
-    } else {
-      // own chain: the part's bone plus its neighbours in the same limb
-      const own = ownerOf[slot];
-      const chain = [own];
-      bones.forEach((b, i) => { if (b.parent === bones[own].name || bones[own].parent === b.name) chain.push(i); });
-      for (const i of chain) {
-        const d = segDist(p, bones[i].pos, bones[i].tip);
-        const bias = i === own ? 1 : 0.35;    // prefer the bone the part was attached to
-        cands.push({ i, w: bias / Math.pow(d + 0.01, k) });
+    const owners = ownersOf[slot], ownSet = new Set(owners);
+    const cands = owners.map(i => ({ i, w: 1 / Math.pow(segDist(p, bones[i].pos, bones[i].tip) + 0.01, k) }));
+    if (slot === 'body') {
+      // seam (composite mode): body flesh near a socket follows that limb a little
+      if (!plain) {
+        const wMax = Math.max(...cands.map(c => c.w));
+        bones.forEach((b, i) => {
+          if (ownSet.has(i) || !b.parent || !ownSet.has(byName[b.parent])) return;
+          const d = Math.hypot(p[0]-b.pos[0], p[1]-b.pos[1], p[2]-b.pos[2]);
+          if (d < R) cands.push({ i, w: wMax * 0.6 * (1 - pc.math.smoothstep(0, R, d)) });
+        });
       }
+    } else {
+      // neighbours in the same chain (parent or child of an owning bone), at a lower bias
+      bones.forEach((b, i) => {
+        if (ownSet.has(i)) return;
+        const near = (b.parent && ownSet.has(byName[b.parent])) || owners.some(o => bones[o].parent === b.name);
+        if (near) cands.push({ i, w: 0.35 / Math.pow(segDist(p, b.pos, b.tip) + 0.01, k) });
+      });
     }
+    const bodyIdx = byName[bones[owners[0]].parent] ?? 0;   // the bone this part hangs from
     // seam band: distance from the part's socket drives skin blend (and body weight for limbs)
     const sk = buf.socket[v];
     const ds = Math.hypot(p[0]-sk[0], p[1]-sk[1], p[2]-sk[2]);
@@ -850,6 +888,7 @@ function build(reason) {
 
   if (creature) creature.root.destroy();
   creature = { root, bones: boneEnts, asm, oneShots: [] };
+  initLegs();
   const t3 = performance.now();
   steps.unshift(`── ${reason}`);
   steps.push(`skeleton ${asm.bones.length} bones generated`);
@@ -860,80 +899,217 @@ function build(reason) {
   renderMoves();
 }
 
-// ---------- Animation clips (the "library" animations) ----------
+// ---------- Locomotion: gait scheduler + planted feet + two-bone IK ----------
 let moving = true, time = 0;
-const D = pc.math.DEG_TO_RAD;
-const CLIPS = {
-  stride(b, ph) {   // per leg; ph = gait phase
-    const s = Math.sin(ph), c = Math.cos(ph);
-    b.hip.setLocalEulerAngles(0, 0, 26 * s);
-    b.knee.setLocalEulerAngles(0, 0, -Math.max(0, c) * 38);
-    b.ankle.setLocalEulerAngles(0, 0, -26 * s * 0.6 + Math.max(0, c) * 20);
-  },
-  stand(b, ph, t) { b.hip.setLocalEulerAngles(0, 0, Math.sin(t * 1.3 + ph) * 1.5); b.knee.setLocalEulerAngles(0, 0, 0); b.ankle.setLocalEulerAngles(0, 0, 0); },
-  tuck(b, u) { const k = Math.sin(Math.PI * u); b.hip.setLocalEulerAngles(0, 0, 30 * k); b.knee.setLocalEulerAngles(0, 0, -70 * k); b.ankle.setLocalEulerAngles(0, 0, 35 * k); },
-  stomp(b, u) { const k = Math.sin(Math.PI * Math.min(1, u * 1.6)); b.hip.setLocalEulerAngles(0, 0, 40 * k); b.knee.setLocalEulerAngles(0, 0, -50 * k); b.ankle.setLocalEulerAngles(0, 0, 20 * k); },
-  nod(e, u) { e.setLocalEulerAngles(0, 0, -Math.sin(u * Math.PI * 4) * 18 * (1 - u)); },
-  look(e, t) { e.setLocalEulerAngles(0, Math.sin(t * 0.7) * 14, Math.sin(t * 1.1) * 4); },
-  wag(e, u) { e.setLocalEulerAngles(0, Math.sin(u * Math.PI * 10) * 45 * (1 - u * 0.5), 0); },
-  sway(e, t) { e.setLocalEulerAngles(0, Math.sin(t * 2) * 10, 0); }
-};
+const loco = { speed: 0, yaw: 0, yawRate: 0, pos: new V3(), cycle: 0, held: new Set(), burst: null, jump: null, stomp: null };
+const qA = new pc.Quat(), qB = new pc.Quat(), qC = new pc.Quat(), m4 = new pc.Mat4(), tv = new V3();
+const AX = new V3(1, 0, 0), AY = new V3(0, 1, 0), AZ = new V3(0, 0, 1);
+const R2D = 180 / Math.PI;
+const ease = t => t * t * (3 - 2 * t);
+const fract = x => x - Math.floor(x);
+const clamp = pc.math.clamp;
+
+// per-leg runtime state, rebuilt with every new skeleton
+function initLegs() {
+  const { bones, asm } = creature;
+  creature.legs = asm.bones.filter(b => b.leg).map(b => {
+    const id = b.name.replace('_hip', '');
+    const hipB = asm.bones.find(x => x.name === id + '_hip'), ankleB = asm.bones.find(x => x.name === id + '_ankle');
+    const l = { id, pair: b.leg.pair, side: b.leg.side,
+      hip: bones[id + '_hip'], knee: bones[id + '_knee'], ankle: bones[id + '_ankle'], toe: bones[id + '_toe'],
+      hipRoot: hipB.pos, ankleRoot: ankleB.pos,
+      plant: new V3(), lift: new V3(), target: new V3(), foot: new V3(), inSwing: false, skip: true };
+    const v1 = l.knee.restPos, v2 = l.ankle.restPos;     // rest bone vectors (hip and knee space)
+    l.l1 = Math.hypot(v1.x, v1.y); l.l2 = Math.hypot(v2.x, v2.y);
+    l.a1 = Math.atan2(v1.y, v1.x); l.a2 = Math.atan2(v2.y, v2.x);
+    l.bend = Math.sign(v1.x * v2.y - v1.y * v2.x) || 1;
+    l.ankleZ = v1.z + v2.z;
+    homeOf(l, l.plant); l.foot.copy(l.plant);
+    return l;
+  });
+}
+// where a leg's ankle rests on the ground right now (follows the body's position and heading)
+function homeOf(l, out) {
+  const L = settings.legLen, h = l.hipRoot, a = l.ankleRoot;
+  const lx = h[0] + (a[0] - h[0]) * L, lz = a[2];
+  const c = Math.cos(loco.yaw), s = Math.sin(loco.yaw);
+  return out.set(loco.pos.x + lx * c + lz * s, a[1] * L, loco.pos.z - lx * s + lz * c);
+}
+const gaitOffset = (l, pairs) => settings.gait === 'wave'
+  ? fract(-l.pair / pairs * 0.5 + (l.side < 0 ? 0.5 : 0))
+  : fract((l.pair + (l.side < 0 ? 1 : 0)) * 0.5);
+const swingFrac = pairs => settings.gait === 'wave' ? 0.9 / (2 * pairs) : 0.38;
+
+// analytic two-bone IK: hip + knee reach the ankle target, hip rolls sideways for off-plane targets
+function solveLeg(l, footWorld, footPitch, toeCurl) {
+  const L = settings.legLen;
+  l.hip.setLocalScale(L, L, L);
+  m4.copy(l.hip.parent.getWorldTransform()).invert();
+  m4.transformPoint(footWorld, tv);
+  const hp = l.hip.restPos;
+  const dx = tv.x - hp.x, dy = tv.y - hp.y, dz = tv.z - hp.z;
+  const r = Math.hypot(dy, dz) || 1e-6;
+  let al = Math.atan2(dz, dy); if (al < 0) al += 2 * Math.PI;
+  const roll = clamp(al - Math.PI + Math.asin(clamp(l.ankleZ * L / r, -1, 1)), -0.6, 0.6);
+  const ty = dy * Math.cos(roll) + dz * Math.sin(roll);
+  const l1 = l.l1 * L, l2 = l.l2 * L;
+  const d = clamp(Math.hypot(dx, ty), Math.abs(l1 - l2) + 1e-4, (l1 + l2) * 0.999);
+  const phi = Math.atan2(ty, dx);
+  const A = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const t1 = phi - A * l.bend;
+  const kx = l1 * Math.cos(t1), ky = l1 * Math.sin(t1);
+  const t2 = Math.atan2(d * Math.sin(phi) - ky, d * Math.cos(phi) - kx);
+  const hipRot = t1 - l.a1, kneeRot = (t2 - l.a2) - hipRot;
+  qA.setFromAxisAngle(AX, roll * R2D); qB.setFromAxisAngle(AZ, hipRot * R2D);
+  l.hip.setLocalRotation(qA.mul(qB));
+  l.knee.setLocalRotation(qC.setFromAxisAngle(AZ, kneeRot * R2D));
+  // foot stays level with the ground (plus the step's pitch), whatever the leg above does
+  qA.setFromAxisAngle(AY, loco.yaw * R2D); qB.setFromAxisAngle(AZ, footPitch);
+  l.ankle.setRotation(qA.mul(qB));
+  l.toe.setLocalRotation(qC.setFromAxisAngle(AZ, toeCurl));
+}
 
 // one-shot triggers resolved through manifests
 function trigger(action) {
   if (!creature) return;
-  const now = time;
   if (action === 'walk') { moving = !moving; return; }
-  for (const [cat, m] of Object.entries(MANIFESTS)) {
-    for (const tr of m.triggers) {
-      if (tr.on !== 'input' || tr.action !== action) continue;
-      const anim = m.animations[tr.play];
-      if (tr.play === 'jump' && cat === 'body') { if (!creature.oneShots.some(o => o.name === 'bodyJump')) creature.oneShots.push({ name: 'bodyJump', start: now, dur: 0.9 }); continue; }
-      if (anim) creature.oneShots.push({ name: cat + ':' + tr.play, cat, clip: anim.clip, start: now, dur: anim.duration || 1 });
-    }
+  if (action === 'gait') { setGait(settings.gait === 'trot' ? 'wave' : 'trot'); return; }
+  if (action === 'jump') { if (!loco.jump && !loco.stomp) loco.jump = { t: 0 }; return; }
+  if (action === 'stomp') { if (!loco.jump && !loco.stomp) loco.stomp = { t: 0 }; return; }
+  if (action === 'turn_left' || action === 'turn_right') { loco.burst = { dir: action === 'turn_left' ? 1 : -1, until: time + 0.9 }; return; }
+  for (const [cat, m] of Object.entries(MANIFESTS)) for (const tr of m.triggers) {
+    if (tr.on !== 'input' || tr.action !== action) continue;
+    const anim = m.animations[tr.play];
+    if (anim) creature.oneShots.push({ name: cat + ':' + tr.play, cat, clip: anim.clip, start: time, dur: anim.duration || 1 });
   }
 }
-const activeShot = (pred) => creature.oneShots.find(o => pred(o) && time - o.start < o.dur);
+const activeShot = pred => creature.oneShots.find(o => pred(o) && time - o.start < o.dur);
 
 function animate(dt) {
   if (!creature) return;
   time += dt;
-  const { bones, asm } = creature;
+  const { bones, asm, legs } = creature;
   creature.oneShots = creature.oneShots.filter(o => time - o.start < o.dur);
-  const speed = 1.6;
-  const ph = time * speed * Math.PI * 2;
-  // body: breathe, bob, jump arc
-  const body = bones.body;
-  const jump = activeShot(o => o.name === 'bodyJump');
-  const ju = jump ? (time - jump.start) / jump.dur : 0;
-  const lift = jump ? Math.sin(Math.PI * ju) * 0.12 : 0;
-  const bob = moving ? Math.abs(Math.sin(ph)) * 0.006 : Math.sin(time * 2) * 0.002;
-  body.setLocalPosition(body.restPos.x, body.restPos.y + bob, body.restPos.z);
-  body.setLocalEulerAngles(moving ? Math.sin(ph) * 2 : 0, 0, moving ? Math.sin(ph * 2) * 1.2 : 0);
-  // root carries the jump and leg-length compensation (bones scaled → feet stay planted)
-  creature.root.setLocalPosition(0, asm.hipY * (settings.legLen - 1) + lift, 0);
+  const L = settings.legLen, hipY = asm.hipY * L, pairs = genome.pairs;
 
-  // legs
-  for (const b of asm.bones) {
-    if (!b.leg) continue;
-    const id = b.name.replace('_hip', '');
-    const L = { hip: bones[id + '_hip'], knee: bones[id + '_knee'], ankle: bones[id + '_ankle'] };
-    L.hip.setLocalScale(settings.legLen, settings.legLen, settings.legLen);
-    const legPhase = ph + (b.leg.side > 0 ? 0 : Math.PI) + b.leg.pair * Math.PI;
-    const stomp = b.leg.pair === 0 && activeShot(o => o.clip === 'stomp');
-    if (jump) CLIPS.tuck(L, ju);
-    else if (stomp) CLIPS.stomp(L, (time - stomp.start) / stomp.dur);
-    else if (moving) CLIPS.stride(L, legPhase);
-    else CLIPS.stand(L, b.leg.pair + b.leg.side, time);
+  // --- steering and speed
+  const busy = loco.stomp || (loco.jump && loco.jump.t < 0.3);
+  const target = moving && !busy ? settings.speed : 0;
+  loco.speed += (target - loco.speed) * Math.min(1, dt * 2.5);
+  let steer = 0;
+  if (loco.held.has('turn_left')) steer += 1;
+  if (loco.held.has('turn_right')) steer -= 1;
+  if (loco.burst && time < loco.burst.until) steer += loco.burst.dir;
+  if (!steer && moving && settings.wander) steer = 0.45 * Math.sin(time * 0.23) + 0.25 * Math.sin(time * 0.61 + 1);
+  loco.yawRate += (clamp(steer, -1, 1) * 0.9 - loco.yawRate) * Math.min(1, dt * 3);
+  loco.yaw += loco.yawRate * dt;
+  const fwdX = Math.cos(loco.yaw), fwdZ = -Math.sin(loco.yaw);
+  loco.pos.x += fwdX * loco.speed * dt; loco.pos.z += fwdZ * loco.speed * dt;
+  const amt = clamp(loco.speed / 0.2, 0, 1.3);
+
+  // --- jump: crouch → launch → air → land
+  let jumpY = 0, jumpPitch = 0, tuck = 0, airborne = false;
+  if (loco.jump) {
+    const j = loco.jump; j.t += dt / 1.15; const a = j.t;
+    const crouch = 0.16 * hipY;
+    if (a < 0.25) { jumpY = -crouch * ease(a / 0.25); jumpPitch = -4 * ease(a / 0.25); }
+    else if (a < 0.78) { const s = (a - 0.25) / 0.53; jumpY = -crouch * (1 - ease(Math.min(1, s * 5))) + 0.5 * hipY * Math.sin(Math.PI * s); jumpPitch = 8 * Math.cos(Math.PI * s); tuck = Math.sin(Math.PI * s); airborne = s > 0.08; }
+    else if (a < 1) { const s = (a - 0.78) / 0.22; jumpY = -0.13 * hipY * Math.sin(Math.PI * s); jumpPitch = -3 * Math.sin(Math.PI * s); }
+    else loco.jump = null;
+    if (j.t >= 0.78 && !j.landed) { j.landed = true; for (const l of legs) { homeOf(l, l.plant); l.inSwing = false; } }
   }
+  creature.root.setPosition(loco.pos.x, asm.hipY * (L - 1) + jumpY, loco.pos.z);
+  creature.root.setEulerAngles(0, loco.yaw * R2D, 0);
+
+  // --- gait clock: runs with speed, keeps running while feet still need to settle
+  const sw = swingFrac(pairs);
+  const strideLen = 0.55 * hipY / (1 - sw);
+  let f = loco.speed / strideLen;
+  const home = new V3();
+  const settling = legs.some(l => l.inSwing && !l.skip) || legs.some(l => l.plant.distance(homeOf(l, home)) > 0.012 * L);
+  if (settling && f < 1.3) f = 1.3;
+  if (!loco.jump && !loco.stomp) loco.cycle += f * dt;
+
+  // --- stomp: both front feet rise, then slam
+  let stompLean = 0;
+  if (loco.stomp) { loco.stomp.t += dt / 0.85; const a = loco.stomp.t; stompLean = a < 0.5 ? ease(a / 0.5) : a < 0.6 ? 1 - (a - 0.5) / 0.1 : 0; if (a >= 1) loco.stomp = null; }
+
+  // --- spine: bob, roll, lateral bend into the stride and into turns, breathing
+  const cyc = 2 * Math.PI * loco.cycle;
+  const bob = (settings.gait === 'trot' ? Math.cos(2 * cyc) : Math.cos(2 * pairs * cyc)) * 0.008 * L * Math.min(amt, 1);
+  const breathe = Math.sin(time * 1.7);
+  const pelvis = bones.pelvis;
+  pelvis.setLocalPosition(pelvis.restPos.x, pelvis.restPos.y - bob - 0.004 * L * (1 - Math.min(amt, 1)) * (breathe * 0.5 + 0.5), pelvis.restPos.z);
+  const bend = 4 * Math.min(amt, 1) * Math.sin(cyc) + loco.yawRate * 9;
+  pelvis.setLocalEulerAngles(2.5 * Math.min(amt, 1) * Math.sin(cyc), -bend * 0.4, jumpPitch * 0.5 + stompLean * 4);
+  bones.spine.setLocalEulerAngles(0, bend * 0.5, jumpPitch * 0.3 + stompLean * 4);
+  bones.chest.setLocalEulerAngles(-1.5 * Math.min(amt, 1) * Math.sin(cyc), bend * 0.6, 0.8 * breathe * (1 - Math.min(amt, 1)) + jumpPitch * 0.2 + stompLean * 6);
+
+  // --- legs
+  const liftH = 0.15 * hipY * clamp(0.6 + amt * 0.5, 0.6, 1.2);
+  for (const l of legs) {
+    homeOf(l, home);
+    let pitch = 0, curl = 0;
+    if (loco.jump) {
+      if (airborne) {
+        l.foot.copy(home); l.foot.y += Math.max(0, jumpY) + 0.12 * hipY * tuck;
+        pitch = -20 * tuck; curl = 25 * tuck;
+      } else l.foot.copy(l.plant);
+    } else if (loco.stomp && l.pair === 0) {
+      const a = loco.stomp.t;
+      if (a < 0.5) { const s = ease(a / 0.5); l.foot.copy(l.plant); l.foot.x += fwdX * 0.04 * L * s; l.foot.z += fwdZ * 0.04 * L * s; l.foot.y += 0.38 * hipY * s; pitch = -25 * s; }
+      else if (a < 0.6) { const s = (a - 0.5) / 0.1; l.foot.copy(l.plant); l.foot.x += fwdX * 0.04 * L; l.foot.z += fwdZ * 0.04 * L; l.foot.y += 0.38 * hipY * (1 - s * s); pitch = -25 * (1 - s); }
+      else { if (!l.stomped) { l.plant.set(l.plant.x + fwdX * 0.04 * L, l.plant.y, l.plant.z + fwdZ * 0.04 * L); l.stomped = true; } l.foot.copy(l.plant); }
+    } else {
+      l.stomped = false;
+      const u = fract(loco.cycle - gaitOffset(l, pairs));
+      const inSwing = u < sw;
+      if (inSwing && !l.inSwing) { l.inSwing = true; l.lift.copy(l.plant); l.skip = !(loco.speed > 0.02 || l.plant.distance(home) > 0.012 * L); }
+      if (!inSwing && l.inSwing) { l.inSwing = false; if (!l.skip) l.plant.copy(l.target); }
+      if (l.inSwing && !l.skip) {
+        const s = u / sw;
+        // land where home will be at mid-stance (predictive placement)
+        const lead = ((sw - u) + (1 - sw) * 0.5) / Math.max(f, 0.05);
+        l.target.set(home.x + fwdX * loco.speed * lead, home.y, home.z + fwdZ * loco.speed * lead);
+        l.foot.lerp(l.lift, l.target, ease(s));
+        l.foot.y += (loco.speed > 0.02 ? liftH : liftH * 0.5) * Math.sin(Math.PI * s);
+        pitch = -22 * Math.sin(Math.PI * s) * (1 - s) + 8 * Math.sin(Math.PI * s) * s;
+        curl = 28 * Math.sin(Math.PI * Math.min(1, s * 1.5));
+      } else l.foot.copy(l.plant);
+    }
+    solveLeg(l, l.foot, pitch, curl);
+  }
+
+  // --- neck + head: look into turns, idle glances, nod on oink; head stays level
   const nod = activeShot(o => o.clip === 'nod');
-  if (nod) CLIPS.nod(bones.head, (time - nod.start) / nod.dur); else if (!moving) CLIPS.look(bones.head, time); else bones.head.setLocalEulerAngles(0, 0, Math.sin(ph * 2) * 3);
+  let hPitch = -jumpPitch * 0.6 - stompLean * 8, hYaw = loco.yawRate * 14 + (1 - Math.min(amt, 1)) * 16 * Math.sin(time * 0.5) * Math.sin(time * 0.17 + 2);
+  if (nod) { const u = (time - nod.start) / nod.dur; hPitch += -Math.sin(u * Math.PI * 4) * 16 * (1 - u); }
+  bones.neck.setLocalEulerAngles(0, hYaw * 0.4, hPitch * 0.4 + 2 * Math.min(amt, 1) * Math.sin(2 * cyc));
+  qA.setFromAxisAngle(AY, loco.yaw * R2D + hYaw); qB.setFromAxisAngle(AZ, hPitch);
+  bones.head.setRotation(qA.mul(qB));
+
+  // --- tail: a wave travelling down the chain; wag is a fast, wide version
   const wag = activeShot(o => o.clip === 'wag');
-  if (wag) CLIPS.wag(bones.tail, (time - wag.start) / wag.dur); else CLIPS.sway(bones.tail, time);
+  const wu = wag ? (time - wag.start) / wag.dur : 0;
+  for (let i = 0; i < 3; i++) {
+    const b = bones['tail' + i]; if (!b) continue;
+    const yaw = wag ? 30 * Math.sin(time * 18 - i * 0.8) * (1 - wu * 0.6)
+      : 9 * Math.min(amt, 1) * Math.sin(cyc - i * 0.9) + 6 * Math.sin(time * 2.1 - i * 0.9) - loco.yawRate * 10;
+    const pitch = (i === 0 ? 6 * Math.min(amt, 1) + (wag ? 12 : 0) : 0) + 3 * Math.sin(time * 1.3 - i);
+    b.setLocalEulerAngles(0, yaw, pitch - jumpPitch * 0.8);
+  }
+
+  // camera follows the creature
+  orbit.target.x += (loco.pos.x - orbit.target.x) * Math.min(1, dt * 3);
+  orbit.target.z += (loco.pos.z - orbit.target.z) * Math.min(1, dt * 3);
 }
 
 const tmpA = new V3(), tmpB = new V3();
-const boneColor = new pc.Color(0.15, 0.6, 1), jointColor = new pc.Color(1, 0.85, 0.2);
+const boneColor = new pc.Color(0.15, 0.6, 1), jointColor = new pc.Color(1, 0.85, 0.2), plantColor = new pc.Color(0.2, 0.85, 0.4), swingColor = new pc.Color(1, 0.5, 0.2);
+const cross = (p, s, col) => {
+  app.drawLine(new V3(p.x - s, p.y, p.z), new V3(p.x + s, p.y, p.z), col, false);
+  app.drawLine(new V3(p.x, p.y, p.z - s), new V3(p.x, p.y, p.z + s), col, false);
+};
 function drawBones() {
   if (!settings.showBones || !creature) return;
   for (const b of creature.asm.bones) {
@@ -944,6 +1120,11 @@ function drawBones() {
     const s = 0.008;
     app.drawLine(new V3(tmpA.x - s, tmpA.y, tmpA.z), new V3(tmpA.x + s, tmpA.y, tmpA.z), jointColor, false);
     app.drawLine(new V3(tmpA.x, tmpA.y - s, tmpA.z), new V3(tmpA.x, tmpA.y + s, tmpA.z), jointColor, false);
+  }
+  // IK targets: green = planted foot, orange = where a swinging foot will land
+  for (const l of creature.legs) {
+    cross(tmpA.set(l.plant.x, 0.002, l.plant.z), 0.02, plantColor);
+    if (l.inSwing && !l.skip) cross(tmpA.set(l.target.x, 0.002, l.target.z), 0.02, swingColor);
   }
 }
 
@@ -980,13 +1161,17 @@ bindSlider('fuseR', 'fuseR', v => `${(v * 1000).toFixed(0)} mm`, true);
 bindSlider('voxel', 'voxel', v => `${(v * 1000).toFixed(0)} mm`, true);
 $('fuse').onchange = e => { settings.fuse = e.target.checked; rebuild(e.target.checked ? 'fuse: single projected mesh' : 'unfuse: show composite parts'); };
 $('showBones').onchange = e => settings.showBones = e.target.checked;
+bindSlider('speed', 'speed', v => `${v.toFixed(2)} m/s`, false);
+$('wander').onchange = e => settings.wander = e.target.checked;
+function setGait(gk) { settings.gait = gk; document.querySelectorAll('#gaitSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.gait === gk)); log(`── gait → ${gk}`); }
+$('gaitSeg').addEventListener('click', e => { const b = e.target.closest('[data-gait]'); if (b) setGait(b.dataset.gait); });
 $('showWeights').onchange = e => { settings.showWeights = e.target.checked; rebuild('recolor: weight view ' + (e.target.checked ? 'on' : 'off')); };
 $('seamBlend').onchange = e => { settings.seamBlend = e.target.checked; rebuild('recolor: seam blend ' + (e.target.checked ? 'on' : 'off')); };
 
 function renderMoves() {
   const seen = new Set(), rows = [];
   for (const [cat, m] of Object.entries(MANIFESTS)) for (const t of m.triggers) {
-    if (t.on !== 'input' || !t.key || seen.has(t.action)) continue;
+    if ((t.on !== 'input' && t.on !== 'hold') || !t.key || seen.has(t.action)) continue;
     seen.add(t.action);
     rows.push(`<button class="move" data-action="${t.action}"><kbd>${t.key}</kbd><span>${t.label}<small>${cat} manifest · plays “${t.play}”</small></span></button>`);
   }
@@ -995,17 +1180,22 @@ function renderMoves() {
 $('moves').addEventListener('click', e => { const b = e.target.closest('[data-action]'); if (b) trigger(b.dataset.action); });
 const KEYMAP = {};
 for (const m of Object.values(MANIFESTS)) for (const t of m.triggers) if (t.key) KEYMAP[t.key === 'Space' ? ' ' : t.key.toLowerCase()] = t.action;
+const HOLD = new Set(Object.values(MANIFESTS).flatMap(m => m.triggers.filter(t => t.on === 'hold').map(t => t.action)));
 addEventListener('keydown', e => {
   if (e.target.matches('input, textarea')) return;
   const a = KEYMAP[e.key.toLowerCase()];
-  if (a) { e.preventDefault(); trigger(a); }
+  if (!a) return;
+  e.preventDefault();
+  if (HOLD.has(a)) loco.held.add(a); else if (!e.repeat) trigger(a);
 });
+addEventListener('keyup', e => { const a = KEYMAP[e.key.toLowerCase()]; if (a) loco.held.delete(a); });
+addEventListener('blur', () => loco.held.clear());
 
 let logText = '';
 function log(s) { logText = s + '\n' + logText; $('log').textContent = logText; }
 function showManifest() {
   const m = { id: `pig_leg_t${genome.thigh + 1}s${genome.shin + 1}f${genome.foot + 1}`, ...MANIFESTS.leg,
-    bind: { weightExponent: settings.sharp, seamRadius: settings.seam, blendBone: 'body' } };
+    bind: { weightExponent: settings.sharp, seamRadius: settings.seam, blendBone: 'hip parent (pelvis / spine / chest)' } };
   $('manifest').textContent = JSON.stringify(m, null, 2);
 }
 
@@ -1021,6 +1211,6 @@ loadKit('pig3dmodel.glb').then(k => {
   $('err').textContent = 'Could not load pig3dmodel.glb. Serve this folder over http so the model file sits next to the page. (' + err.message + ')';
   $('stat').textContent = '';
 });
-window.__hog = { trigger, genome, build, orbit, settings, setMoving: m => moving = m, get creature() { return creature; } };
+window.__hog = { trigger, genome, build, orbit, settings, loco, setMoving: m => moving = m, get creature() { return creature; } };
 })();
 </script>
