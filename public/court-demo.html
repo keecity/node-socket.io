@@ -19479,7 +19479,7 @@ function hud() {
 }
 function inbound(t, spot) {
   // team t takes the ball; spot defaults to under the basket they defend
-  game.offense = t; game.phase = 'inbound'; game.timer = 1.0; game.shotClock = SHOT_CLOCK; game.shot = null;
+  game.pendingFoul = null; game.offense = t; game.phase = 'inbound'; game.timer = 1.0; game.shotClock = SHOT_CLOCK; game.shot = null;
   const D = defendHoop(t), A = attackHoop(t), dir = Math.sign(A.rim.x - D.rim.x);
   const o = team(t), d = team(1 - t);
   const h = o[Math.floor(Math.random() * 3)];
@@ -19500,6 +19500,8 @@ function scored(H) {
   stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   if (s.ft) toast('Free throw good', false); else toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
   sfx('net'); netEv('score', t); crowdReact(t); game.phase = 'scored'; game.timer = 1.6;
+  const pf = game.pendingFoul; game.pendingFoul = null;
+  game.andOne = pf && !s.ft && game.score[t] < TARGET ? pf : null;
   if (s.ft) { game.phase = 'ftair'; game.ftMade = true; }   // the free-throw loop decides what comes next
   hud();
   if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; netEv('ban', $('banner').textContent, 'show t' + t); }
@@ -19531,8 +19533,9 @@ function shotRelease(p) {
     make = q >= 1 ? 0.99 : make * (0.15 + 1.25 * q * q);
     toast(q >= 1 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
   }
-  const tgt = A.rim.clone();
-  if (Math.random() < make) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
+  const tgt = A.rim.clone(), made = Math.random() < make;
+  if (!game.shot.ft && c && cd < 1.3 && Math.random() < (c.action && c.action.type === 'block' ? 0.2 : 0.1)) game.pendingFoul = { def: c, shooter: p, pts: game.shot.pts, made };
+  if (made) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
   else { const a = Math.random() * 6.283, r = RIM_R * (0.85 + Math.random() * 0.45); tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; tgt.y += 0.02; }
   const T = 0.75 + 0.055 * dr;
   release(p0, tgt.sub(p0).sub(new pc.Vec3(0, -0.5 * G * T * T, 0)).mulScalar(1 / T), true);
@@ -19564,12 +19567,14 @@ function passRelease(p, r) {
 }
 // ---- fouls and free throws
 const FT_DIST = 4.6;
-function callFoul(def, shooter) {
+function callFoul(def, shooter, n = 2, kind = 'Reach-in foul') {
   if (TUT) return tutEvent('foul', def);
-  game.ft = { shooter, left: 2, team: shooter.team }; game.shot = null; game.phase = 'ftset'; game.timer = 1.8;
+  game.pendingFoul = null;
+  game.ft = { shooter, left: n, n, team: shooter.team }; game.shot = null; game.phase = 'ftset'; game.timer = 1.8;
   for (const q of P) { q.action = null; delete q.pendingBlock; q.vel.set(0, 0, 0); }
-  toast('Reach-in foul on ' + def.name + ' (' + (def.team ? 'Teal' : 'Purple') + ') — ' + (shooter.team ? 'Teal' : 'Purple') + ' shoots 2', true); sfx('whistle', 0.9);
+  toast(kind + ' on ' + def.name + ' (' + (def.team ? 'Teal' : 'Purple') + ') — ' + (shooter.team ? 'Teal' : 'Purple') + (n === 1 ? ' shoots 1' : ' shoots ' + n), true); sfx('whistle', 0.9);
 }
+function ftShoot(q) { const s = game.ft.shooter; game.phase = 'ftair'; game.ftMade = false; game.ft.left--; game.timer = 3.2; if (q !== undefined) s.shotQ = q; startShot(s); }
 function lineUpFT() {
   const f = game.ft, s = f.shooter, A = attackHoop(f.team), dir = Math.sign(A.rim.x);   // dir points from centre to that hoop
   s.pos.copy(flat(A.rim.x - dir * FT_DIST, 0));
@@ -19596,11 +19601,12 @@ function updateActions(dt) {
     else if (a.type === 'steal') {
       if (!a.done && a.t >= 0.2) {
         a.done = true; const h = ball.holder;
-        let chance = 0.22;
+        let chance = 0.22; const aiReach = p.stealQ === undefined;
         if (p.stealQ !== undefined) { const q = p.stealQ; delete p.stealQ; chance = q > 0.91 ? 1 : 0.35 + 0.5 * (q / 0.91); p.perfectSteal = q > 0.91;   // edge 35% -> just outside the box 85%
           toast(q > 0.91 ? 'PERFECT timing' : q > 0.6 ? 'Good reach' : q > 0.3 ? 'Late reach' : 'Off the mark', false);
           if (q < 0.15) p.react = 0.4;
           if (q < 0.25 && h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < 0.7) { callFoul(p, h); continue; } }
+        if (aiReach && h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < 0.14) { callFoul(p, h); continue; }   // the computer reaches in too
         if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < chance) {
           if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
           else {
@@ -19859,16 +19865,16 @@ app.on('update', dt => {
   else if (game.phase === 'inbound') { if (game.timer <= 0) { game.phase = 'live'; toast((game.offense ? 'Teal' : 'Purple') + ' ball'); } }
   else if (game.phase === 'scored') {
     for (const p of P) if (!p.action) { p.vel.mulScalar(Math.pow(0.1, dt)); animMove(p, dt, p.team === game.lastScoreTeam ? 'offball' : 'stance'); }
-    if (game.timer <= 0 && !P.some(p => p.action && p.action.type === 'dunk')) inbound(1 - game.lastScoreTeam);
+    if (game.timer <= 0 && !P.some(p => p.action && p.action.type === 'dunk')) { const a = game.andOne; game.andOne = null; if (a) callFoul(a.def, a.shooter, 1, 'And one! Foul'); else inbound(1 - game.lastScoreTeam); }
   } else if (game.phase === 'ftset') {
     for (const p of P) { p.vel.mulScalar(Math.pow(0.05, dt)); if (!p.action) animMove(p, dt, 'stance'); }
-    if (game.timer <= 0) { lineUpFT(); game.phase = 'ftwait'; game.timer = 1.2; toast('Free throw ' + (3 - game.ft.left) + ' of 2'); }
+    if (game.timer <= 0) { lineUpFT(); game.phase = 'ftwait'; game.timer = 1.2; toast('Free throw ' + (game.ft.n - game.ft.left + 1) + ' of ' + game.ft.n + (ctl(game.ft.shooter.team) ? ' — hold & release' : '')); }
   } else if (game.phase === 'ftwait') {
-    if (game.timer <= 0) { game.phase = 'ftair'; game.ftMade = false; game.ft.left--; game.timer = 3.2; startShot(game.ft.shooter); }
+    if (game.timer <= 0 && !ctl(game.ft.shooter.team)) ftShoot();   // a player-controlled shooter takes it with the meter
   } else if (game.phase === 'ftair') {
     if (game.timer <= 0 || (game.ftMade && game.timer < 1.4) || (!game.ftMade && game.ft.left === 0 && ball.free && ball.pos.y < RIM_Y - 0.7 && ball.vel.y < 0 && game.timer < 2.4)) {
       const f = game.ft;
-      if (f.left > 0) { game.phase = 'ftwait'; game.timer = 1.0; lineUpFT(); toast(game.ftMade ? 'Free throw 2 of 2' : 'No good — free throw 2 of 2'); }
+      if (f.left > 0) { game.phase = 'ftwait'; game.timer = 1.0; lineUpFT(); const nx = 'free throw ' + (f.n - f.left + 1) + ' of ' + f.n; toast(game.ftMade ? 'Good — ' + nx : 'No good — ' + nx); }
       else if (game.ftMade) { game.ft = null; inbound(1 - f.team); }
       else { game.ft = null; game.shot = null; game.phase = 'loose'; ball.lastTouch = f.team; toast('Free throw no good — rebound!'); }
     }
@@ -19894,7 +19900,7 @@ app.on('update', dt => {
       if (ball.free && d2(ball.pos, r.pos) < 1.0 && ball.pos.y < 2.4) { give(r); setAnim(r, 'Dribble', 0.12); }
       else if (ball.pass.t > ball.pass.T + 0.5) { ball.pass = null; game.phase = 'loose'; }
     }
-    if (game.phase === 'air' && ball.free && ball.pos.y < RIM_Y - 0.7 && !ball.crossed) { game.phase = 'loose'; game.shot = null; }
+    if (game.phase === 'air' && ball.free && ball.pos.y < RIM_Y - 0.7 && !ball.crossed) { game.phase = 'loose'; game.shot = null; const f = game.pendingFoul; if (f) callFoul(f.def, f.shooter, f.pts, 'Shooting foul'); }
     if (ball.free && (Math.abs(ball.pos.x) > 14.7 || Math.abs(ball.pos.z) > 7.6)) {
       const spot = clamp(flat(ball.pos.x * 0.97, ball.pos.z * 0.93));
       (window.__oob = window.__oob || []).push({ pass: !!ball.pass, phase: game.phase, pos: [ball.pos.x.toFixed(1), ball.pos.y.toFixed(1), ball.pos.z.toFixed(1)], vel: [ball.vel.x.toFixed(1), ball.vel.y.toFixed(1), ball.vel.z.toFixed(1)] });
@@ -19998,7 +20004,8 @@ function groundAt(sx, sy) {
 }
 function screenOf(p) { const s = new pc.Vec3(); const bp = bodyPos(p); camera.camera.worldToScreen(new pc.Vec3(bp.x, 1.0, bp.z), s); return s; }
 const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
-function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live'); }
+function myFT() { return human.on && game.phase === 'ftwait' && game.timer <= 0 && game.ft && ball.holder === game.ft.shooter && ball.holder.team === HUMAN; }
+function myBall() { return human.on && ball.holder && ball.holder.team === HUMAN && !ball.holder.action && (game.phase === 'live' || myFT()); }
 canEl.addEventListener('pointerdown', e => {
   if (!myBall() && !myDefender()) return; const r = canEl.getBoundingClientRect();
   if (defMode()) {
@@ -20024,6 +20031,7 @@ function onRelease(e) {
     const m = meterPos(); human.freeze = 0.7; human.after = 'hide';
     const am = Math.abs(m); act({ t: 'shoot', p: h.id, q: am <= human.zone ? 1 : Math.max(0, 0.9 * (1 - am) / (1 - human.zone)) }); return;
   }
+  if (myFT()) return;   // at the line only the shot counts
   // tap: teammate under the finger = pass, else move there
   let best = null, bd = 48;
   for (const q of team(HUMAN)) { if (q === h) continue; const s = screenOf(q), d = Math.hypot(s.x - human.x, s.y - human.y); if (d < bd) { bd = d; best = q; } }
@@ -20106,7 +20114,9 @@ function act(c) {               // a command from this screen's player
   } else apply(c, HUMAN);
 }
 function apply(c, t) {          // runs on the host only; t = the team the command came from
-  const p = P[c.p]; if (!p || p.team !== t || game.phase !== 'live' && c.t !== 'move') return;
+  const p = P[c.p]; if (!p || p.team !== t) return;
+  if (game.phase === 'ftwait' && c.t === 'shoot' && game.ft && game.ft.shooter === p && game.timer <= 0) return ftShoot(Math.max(0, Math.min(1, +c.q || 0)));
+  if (game.phase !== 'live' && c.t !== 'move') return;
   const q = Math.max(0, Math.min(1, +c.q || 0));
   if (c.t === 'move') { if (Number.isFinite(c.x) && Number.isFinite(c.z)) moveOrder(p, flat(c.x, c.z)); }
   else if (c.t === 'steal') { const h = ball.holder; if (!p.action && h && h.team !== t && d2(p.pos, bodyPos(h)) < 1.9) { p.stealQ = q; p.moveTarget = null; startSteal(p); } }
@@ -20120,7 +20130,7 @@ function netSend() {            // host: stream the state to the guest (presence
   const now = performance.now(); if (now - NET.sent < 40) return; NET.sent = now;
   const s = {
     ph: game.phase, sc: game.score, sk: Math.max(0, Math.ceil(game.shotClock)), of: game.offense,
-    bh: ball.holder ? ball.holder.id : -1, b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
+    bh: ball.holder ? ball.holder.id : -1, ft: game.ft ? game.ft.shooter.id : -1, tm: r2(game.timer), b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
     p: P.map(p => [r2(p.pos.x), r2(p.pos.z), r2(p.yaw), STATES.indexOf(p.state), r2(p.model.anim.speed), ACTS.indexOf(p.action ? p.action.type : ''), r2(p.stamina)])
   };
   NET.room.presence({ host: 1, s, ev: NET.ev }).catch(() => {});
@@ -20138,7 +20148,7 @@ function onHostState(pr) {      // guest: take in the host's latest state
 function guestFrame(dt) {
   const s = NET.snap;
   if (s) {
-    game.phase = s.ph; game.score = s.sc; game.shotClock = s.sk; game.offense = s.of;
+    game.phase = s.ph; game.score = s.sc; game.ft = s.ft >= 0 ? { shooter: P[s.ft] } : null; game.timer = s.tm; game.shotClock = s.sk; game.offense = s.of;
     const k = Math.min(1, dt * 14);
     P.forEach((p, i) => {
       const v = s.p[i]; if (!v) return;
