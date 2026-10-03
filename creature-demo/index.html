@@ -652,8 +652,26 @@ function assemble() {
   bones.push({ name: 'head', parent: 'neck', pos: headMid, tip: [hb.max[0] + headOff[0], headMid[1], 0], own: ['head'] });
 
   // tail at the rump socket, mirrored in x so the curl points backwards
-  const tLen = settings.tailLen, tailSc = [-S * tLen, S * tLen, S * Math.sqrt(tLen)];   // longer tails stay slimmer
+  // tail length: stretch along the tail's own axis (base → tip) only, so its thickness never changes
+  const tailSc = [-S, S, S];
   const tail = blendPart('tail');
+  if (settings.tailLen !== 1) {
+    const all = tail.variants.flatMap(vr => Array.from(vr.pos));
+    const xmin = Math.min(...all.filter((_, i) => i % 3 === 0)), ext = tail.max[0] - tail.min[0];
+    const cen = (pred) => { const c = [0, 0, 0]; let n = 0; for (let i = 0; i < all.length; i += 3) if (pred(all[i], all[i+1], all[i+2])) { c[0] += all[i]; c[1] += all[i+1]; c[2] += all[i+2]; n++; } return c.map(v => v / Math.max(n, 1)); };
+    const base = cen(x => x < xmin + ext * 0.12);                        // where it joins the body
+    const dist = i => Math.hypot(all[i] - base[0], all[i+1] - base[1], all[i+2] - base[2]);
+    let dmax = 0; for (let i = 0; i < all.length; i += 3) dmax = Math.max(dmax, dist(i));
+    const tip = cen((x, y, z) => Math.hypot(x - base[0], y - base[1], z - base[2]) > dmax * 0.9);
+    const ax = [tip[0] - base[0], tip[1] - base[1], tip[2] - base[2]], al = Math.hypot(...ax) || 1;
+    const u = ax.map(v => v / al), k = settings.tailLen - 1;
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (const vr of tail.variants) for (let i = 0; i < vr.pos.length; i += 3) {
+      const t = Math.max(0, (vr.pos[i] - base[0]) * u[0] + (vr.pos[i+1] - base[1]) * u[1] + (vr.pos[i+2] - base[2]) * u[2]);
+      for (let a = 0; a < 3; a++) { vr.pos[i+a] += u[a] * t * k; mn[a] = Math.min(mn[a], vr.pos[i+a]); mx[a] = Math.max(mx[a], vr.pos[i+a]); }
+    }
+    tail.min = mn; tail.max = mx;
+  }
   const tlb = { min: [-tail.max[0] * -tailSc[0], tail.min[1] * tailSc[1], tail.min[2] * tailSc[2]], max: [-tail.min[0] * -tailSc[0], tail.max[1] * tailSc[1], tail.max[2] * tailSc[2]] };
   const tailSegs = Math.round(settings.tailSegs);
   const tailL = tlb.max[0] - tlb.min[0];
