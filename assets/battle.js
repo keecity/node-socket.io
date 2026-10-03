@@ -1779,7 +1779,7 @@ function orderBoard(sel, h) { const troops = sel.filter(u => u.kind === 'soldier
   let best = { x: cx, z: cz }; for (let i = 0; i < 40; i++) { const a = rand(0, 6.28), r = rand(0, 1.2), x = wm(cx + Math.cos(a) * r), z = wm(cz + Math.sin(a) * r); if (Hd(x, z) > 2 / S * 1.2 && !lotBlocked(x, z, []) && roadAt(x * S, z * S) < 0.5) { best = { x, z }; break; } }
   h.tr = { phase: 'pickup', x: best.x, z: best.z }; h.target = null; h.anchor = { x: best.x, z: best.z }; if (h.mode === 'landed') h.mode = 'takeoff';
   for (const s of troops) { s.order = { type: 'board', heli: h, x: best.x, z: best.z }; s.target = null; s.stuck = 0; }
-  log(0, `${troops.length} soldier${troops.length > 1 ? 's' : ''} boarding <b>${unitName(h)}</b>`); }
+  log(troops[0].team, `${troops.length} soldier${troops.length > 1 ? 's' : ''} boarding <b>${unitName(h)}</b>`); }
 function orderDrop(h, x, z) { h.tr = { phase: 'drop', x, z }; h.target = null; h.anchor = { x, z }; if (h.mode === 'landed') h.mode = 'takeoff'; }
 // ------------------------------------------------------------------ mech hangars
 // One bay per hangar. Mechs come in to be repaired, to be brought up to the team's researched upgrades, and new mechs are
@@ -3097,6 +3097,42 @@ function checkVictory() {
     if (units === 0 && towns[team].hqDown) { gameOver = true; banner(team === 0 ? 'Defeat' : 'Victory', team === 0 ? 'Your forces and HQ are destroyed' : 'Enemy forces and HQ destroyed'); }
   }
 }
+// ---- enemy AI helpers
+let aiEcoT = 20, aiSquadT = 120;
+const aiCount = (list, kind) => list.filter(p => p.alive && p.team === 1 && (!kind || p.kind === kind)).length;
+// random points inside enemy territory: around the HQ and its outposts, optionally only near the border
+function aiSpots(n, edge) { const t = towns[1], C = [{ x: t.x, z: t.z, r: TERR_HQ_R }, ...outposts.filter(o => o.alive && o.team === 1).map(o => ({ x: o.x, z: o.z, r: OUTPOST_R }))], out = [];
+  for (let i = 0; i < n * 4 && out.length < n; i++) { const c = C[Math.floor(rand(0, C.length))], a = rand(0, 6.28), r = edge ? rand(c.r * 0.7, c.r * 0.97) : rand(TOWN * (c === C[0] ? 1 : 0) + 0.5, c.r - 1.5);
+    const x = wm(c.x + Math.cos(a) * r), z = wm(c.z + Math.sin(a) * r); if (inTerritory(1, x, z)) out.push({ x, z, rot: Math.floor(rand(0, 4)) * Math.PI / 2 + rand(-0.3, 0.3) }); } return out; }
+function aiTry(list, check, build, score) { let best = null, bs = -1e9; for (const q of list) { if (check(q)) continue; const s = score ? score(q) : 0; if (s > bs) { bs = s; best = q; } } if (!best) return false; build(best); return true; }
+function aiBuildNext() { const T = missionClock, P = towns[0], pl = q => -wdist2(q.x, q.z, P.x, P.z);
+  const plan = [
+    // [condition, attempt]
+    [aiCount(outposts) < Math.min(4, 1 + Math.floor(T / 150)), () => aiTry(aiSpots(40, true), q => canPlaceOutpost(1, q.x * S, q.z * S), q => buildOutpost(1, q.x * S, q.z * S, q.rot), pl)],
+    [pumpProto && aiCount(pumpjacks) < 4, () => aiTry(oilFields.filter(f => inTerritory(1, f.x, f.z)).map(f => ({ x: f.x, z: f.z, rot: f.rot })), q => canPlacePump(1, q.x * S, q.z * S, q.rot), q => buildPump(1, q.x * S, q.z * S, q.rot))],
+    [semiParts && aiCount(warehouses) < 1 && T > 90, () => aiTry(aiSpots(50), q => canPlaceWarehouse(1, q.x * S, q.z * S, q.rot), q => buildWarehouse(1, q.x * S, q.z * S, q.rot))],
+    [WC_BOX && camps.filter(p => p.alive && p.team === 1 && !p.depleted).length < 2 && T > 100, () => aiTry(aiSpots(50), q => canPlaceCamp(1, q.x * S, q.z * S, q.rot) || campTrees(q).length < 6, q => buildCamp(1, q.x * S, q.z * S, q.rot), q => campTrees(q).length)],
+    [farmProto && aiCount(farms) < 3 && T > 110, () => aiTry(aiSpots(40), q => canPlaceFarm(1, q.x * S, q.z * S, q.rot), q => buildFarm(1, q.x * S, q.z * S, q.rot))],
+    [mineProto && aiCount(mines) < 1 && T > 160, () => aiTry(aiSpots(80).map(q => ({ ...q, rot: mineFacing(q.x, q.z) })), q => canPlaceMine(1, q.x * S, q.z * S, q.rot), q => buildMine(1, q.x * S, q.z * S, q.rot))],
+    [hangarProto && aiCount(hangars) < 1 && T > 200, () => aiTry(aiSpots(60), q => canPlaceHangar(1, q.x * S, q.z * S, q.rot), q => buildHangar(1, q.x * S, q.z * S, q.rot), q => -pl(q))] ];
+  for (const [want, go] of plan) if (want && go()) return; }
+// hangar: build mechs while the army is small, research, send badly damaged mechs out of the fight for repair and idle ones for upgrades
+function aiHangar() { const H = hangars.filter(h => h.alive && h.done && h.team === 1); if (!H.length) return;
+  const army = robots.filter(r => r.team === 1 && r.state !== 'ko').length, queued = H.reduce((n, h) => n + h.buildQ.length, 0);
+  if (army + queued < 10) queueMech(H[0], chance(0.4) ? 'gunner' : 'striker');
+  if (!mechResearch[1] && chance(0.4)) { const keys = Object.keys(MECH_UPGRADES).filter(k => MECH_UP[1][k] < MECH_UPGRADES[k].cost.length); if (keys.length) startMechResearch(1, keys[Math.floor(rand(0, keys.length))]); }
+  for (const f of robots) { if (f.team !== 1 || f.state === 'ko' || f.docked || f.svc) continue;
+    if (f.hp < f.maxHp * 0.4 && !alive(f.target)) requestService(f, needsUpgrade(f) ? 'upgrade' : 'repair');
+    else if (needsUpgrade(f) && !f.order && !alive(f.target) && chance(0.3)) requestService(f, 'upgrade'); } }
+// infantry: replace lost squads at the HQ, ferry them to the front in a gunship
+function aiInfantry() { if (!soldierKinds) return; const S1 = soldiers.filter(s => s.team === 1 && s.alive);
+  aiSquadT -= 9; if (aiSquadT <= 0 && S1.length < 6) { aiSquadT = 120; spawnSquad(1, 6 - S1.length); log(1, `<b>${TEAM_NAME[1]}</b> infantry squad deploys at HQ`); }
+  const h = helis.find(h => h.team === 1 && h.alive && !h.tr && h.fuel > h.fuelMax * 0.6 && h.hp > h.maxHp * 0.7), t = towns[1];
+  if (h && missionClock > 120 && chance(0.25)) { if (h.cargo.length) { const tgt = robots.filter(r => r.team === 0 && r.state !== 'ko'), g = tgt.length ? tgt[Math.floor(rand(0, tgt.length))].pos : towns[0];
+      for (let i = 0; i < 30; i++) { const a = rand(0, 6.28), x = wm(g.x + Math.cos(a) * 3), z = wm(g.z + Math.sin(a) * 3); if (Hd(x, z) > 2 / S * 1.2 && !lotBlocked(x, z, [])) { orderDrop(h, x, z); log(1, `<b>${TEAM_NAME[1]}</b> gunship ferries troops to the front`); break; } } }
+    else { const idle = S1.filter(s => !s.order && !alive(s.target) && !s.inHeli && wdist2(s.pos.x, s.pos.z, t.x, t.z) < TERR_HQ_R); if (idle.length >= 3) orderBoard(idle, h); } }
+  // soldiers already near the front advance with the robots
+  for (const s of S1) if (!s.inHeli && !s.order && !alive(s.target) && wdist2(s.pos.x, s.pos.z, t.x, t.z) > TERR_HQ_R && chance(0.2)) { const e = robots.filter(r => r.team === 0 && r.state !== 'ko').sort((a, b) => wdist2(a.pos.x, a.pos.z, s.pos.x, s.pos.z) - wdist2(b.pos.x, b.pos.z, s.pos.x, s.pos.z))[0]; if (e && wdist2(e.pos.x, e.pos.z, s.pos.x, s.pos.z) < 8) s.order = { type: 'move', x: wm(e.pos.x + rand(-1, 1)), z: wm(e.pos.z + rand(-1, 1)) }; } }
 function teamUpdate(dt) {
   for (const team of [0, 1]) {
     if (towns[team].hqDown) continue;
@@ -3115,6 +3151,9 @@ function teamUpdate(dt) {
         if (!canPlaceAirbase(1, x * S, z * S, rot)) { buildAirbase(1, x * S, z * S, rot); break; } } }
     for (const b of mine) if (baseHelis(b) + b.queue < AB_CAP) queueHeli(b);
     if (mine.length && !research[1] && chance(0.3)) { const k = Object.keys(UPGRADES)[Math.floor(rand(0, 4))]; startResearch(1, k); } }
+  // enemy AI: economy and support — outposts toward the player, pumps on its oil fields, a depot, woodcutters by forests,
+  // farms, a mine in a hillside, a mech hangar; then keeps the hangar busy and sends its soldiers into battle by gunship
+  aiEcoT -= dt; if (aiEcoT <= 0 && !towns[1].hqDown) { aiEcoT = 9; if (missionClock > 45) aiBuildNext(); aiHangar(); aiInfantry(); }
   missionClock += dt;
   for (const h of helis) if (h.team === 1 && h.alive && h.mode === 'landed' && h.fuel > h.fuelMax * 0.9 && h.hp > h.maxHp * 0.9 && chance(dt * 0.05)) h.sortie = true;
   // enemy AI: send attack waves toward the player's units / HQ
