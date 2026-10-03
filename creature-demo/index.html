@@ -35,7 +35,14 @@ section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppe
 .mix > span { font-weight: 600; }
 .mix label { display: grid; gap: 0; text-align: center; font: 11px var(--f-mono); color: var(--muted); }
 .mix input { width: 100%; accent-color: var(--accent); margin: 0; }
+#dna { width: 100%; font: 11px/1.4 var(--f-mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px; resize: vertical; margin-top: 6px; }
 .note { display: block; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.segs { display: grid; grid-template-columns: 44px repeat(3, minmax(0, 1fr)); gap: 4px 6px; align-items: center; }
+.segs > span { font: 600 11px var(--f-mono); color: var(--muted); text-align: center; }
+.segs > span:nth-child(5n+1), .segs > span:nth-child(5) { text-align: left; color: var(--ink); }
+.segs label { display: grid; text-align: center; }
+.segs input { width: 100%; accent-color: var(--accent); margin: 0; }
+.segs output { font: 11px var(--f-mono); color: var(--muted); }
 .pitch { font: 12px var(--f-mono); color: var(--ink); background: var(--chip); border-radius: 6px; padding: 6px 8px; margin: 2px 0 10px; }
 .part { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; }
 .part > span { font-weight: 600; }
@@ -77,6 +84,23 @@ details summary { cursor: pointer; font-weight: 600; }
   </div>
   <aside class="rail">
     <section>
+      <h2>DNA</h2>
+      <div class="row" id="presets">
+        <button class="btn" data-preset="hog">Hog</button>
+        <button class="btn" data-preset="raptor">Raptor</button>
+        <button class="btn" data-preset="centipig">Centipig</button>
+        <button class="btn" data-preset="sumo">Sumo</button>
+        <button class="btn" data-preset="strider">Strider</button>
+      </div>
+      <label for="dna" class="note">Creature code: copy it to keep this creature, paste one and apply to load it.</label>
+      <textarea id="dna" rows="3" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="btn" id="dnaCopy">Copy code</button>
+        <button class="btn primary" id="dnaApply">Apply code</button>
+        <span id="dnaMsg" class="note" style="margin:0"></span>
+      </div>
+    </section>
+    <section>
       <h2>Recipe · blend the 4 kit variants per part</h2>
       <div class="mixhead" aria-hidden="true"><span></span><span>1</span><span>2</span><span>3</span><span>4</span></div>
       <div id="parts"></div>
@@ -95,6 +119,25 @@ details summary { cursor: pointer; font-weight: 600; }
       </div>
     </section>
     <section>
+      <h2>Skin</h2>
+      <div class="part"><span>Pattern</span><div class="seg" role="group" aria-label="Pattern" id="patSeg">
+        <button data-pat="none">None</button><button data-pat="spots">Spots</button><button data-pat="stripes">Stripes</button><button data-pat="patches">Patches</button></div></div>
+      <div class="row" style="margin-bottom:8px"><label for="patColor">Pattern colour</label><input type="color" id="patColor" value="#8a4f5a"></div>
+      <div class="slider">
+        <label for="patAmount">Pattern strength</label><output id="patAmountOut"></output>
+        <input id="patAmount" type="range" min="0" max="1" step="0.05" value="0.6">
+      </div>
+      <div class="slider">
+        <label for="patScale">Pattern size</label><output id="patScaleOut"></output>
+        <input id="patScale" type="range" min="0.3" max="3" step="0.05" value="1">
+      </div>
+      <div class="slider">
+        <label for="counter">Pale belly</label><output id="counterOut"></output>
+        <input id="counter" type="range" min="0" max="1" step="0.05" value="0.35">
+        <small>Countershading: lighter underneath. Skin changes rebuild.</small>
+      </div>
+    </section>
+    <section>
       <h2>Body plan</h2>
       <div class="slider">
         <label for="fat">Weight</label><output id="fatOut"></output>
@@ -110,6 +153,29 @@ details summary { cursor: pointer; font-weight: 600; }
         <label for="posture">Posture</label><output id="postureOut"></output>
         <input id="posture" type="range" min="0" max="1" step="0.01" value="0">
         <small>0 = on all legs, 1 = standing upright. Front legs that can't reach the ground become arms.</small>
+      </div>
+      <h2 style="margin-top:6px">Leg segments</h2>
+      <div class="segs">
+        <span></span><span>Upper</span><span>Lower</span><span>Foot</span>
+        <span>Front</span>
+        <label><input type="range" id="seg-front-upper" min="0.5" max="1.8" step="0.05" value="1" aria-label="Front upper leg length"><output id="seg-front-upperOut">×1.00</output></label>
+        <label><input type="range" id="seg-front-lower" min="0.5" max="1.8" step="0.05" value="1" aria-label="Front lower leg length"><output id="seg-front-lowerOut">×1.00</output></label>
+        <label><input type="range" id="seg-front-foot" min="0.5" max="1.8" step="0.05" value="1" aria-label="Front foot length"><output id="seg-front-footOut">×1.00</output></label>
+        <span>Hind</span>
+        <label><input type="range" id="seg-hind-upper" min="0.5" max="1.8" step="0.05" value="1" aria-label="Hind upper leg length"><output id="seg-hind-upperOut">×1.00</output></label>
+        <label><input type="range" id="seg-hind-lower" min="0.5" max="1.8" step="0.05" value="1" aria-label="Hind lower leg length"><output id="seg-hind-lowerOut">×1.00</output></label>
+        <label><input type="range" id="seg-hind-foot" min="0.5" max="1.8" step="0.05" value="1" aria-label="Hind foot length"><output id="seg-hind-footOut">×1.00</output></label>
+      </div>
+      <small class="note">Length of each part; girth follows partly. Standing height and body pitch follow the real leg. Middle pairs blend front→hind. Rebuilds.</small>
+      <h2 style="margin-top:12px">Tail</h2>
+      <div class="slider">
+        <label for="tailLen">Tail length</label><output id="tailLenOut"></output>
+        <input id="tailLen" type="range" min="0.4" max="2.5" step="0.05" value="1">
+      </div>
+      <div class="slider">
+        <label for="tailSegs">Tail segments</label><output id="tailSegsOut"></output>
+        <input id="tailSegs" type="range" min="2" max="8" step="1" value="3">
+        <small>Bones along the tail: more segments give a smoother, whippier wave. Rebuilds.</small>
       </div>
       <div class="slider">
         <label for="crouch">Crouch</label><output id="crouchOut"></output>
@@ -171,7 +237,13 @@ details summary { cursor: pointer; font-weight: 600; }
         <input id="speed" type="range" min="0.08" max="1.6" step="0.01" value="0.22">
         <small>Step rate and stride follow speed; feet stay planted. With a reference, faster speeds blend from its walk into its run.</small>
       </div>
-      <div class="toggles"><label><input type="checkbox" id="wander" checked> Wander when no turn key is held</label></div>
+      <div class="toggles"><label><input type="checkbox" id="wander" checked> Wander when no turn key is held</label>
+        <label><input type="checkbox" id="elbow" checked> Elbow-style front legs (knees fold back)</label></div>
+      <div class="slider">
+        <label for="terrain">Terrain</label><output id="terrainOut"></output>
+        <input id="terrain" type="range" min="0" max="0.25" step="0.01" value="0.05">
+        <small>Hill height. Feet plant on the surface; the body pitches and rises with the slope.</small>
+      </div>
     </section>
     <section>
       <h2>Fuse · one mesh from all parts</h2>
@@ -273,7 +345,7 @@ const genome = { pairs: 2 };
 // the recipe: how much of each kit variant goes into every slot (normalised when used)
 const RECIPE_DEFAULT = { head: [1, 0, 0, 0], body: [1, 0, 0, 0], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [1, 0, 0, 0], tail: [1, 0, 0, 0] };
 const recipe = JSON.parse(JSON.stringify(RECIPE_DEFAULT));
-const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
+const settings = { sharp: 4, seam: 0.012, front: 1, hind: 1, posture: 0, overlap: 0.3, rake: 0, shoulder: 0.35, rearFwd: 0.08, fat: 0.3, size: 1, crouch: 0, terrain: 0.05, elbow: true, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } }, tailLen: 1, tailSegs: 3, pattern: 'spots', patScale: 1, patColor: '#8a4f5a', patAmount: 0.6, counter: 0.35, showBones: false, showWeights: false, seamBlend: true, fuse: true, voxel: 0.006, fuseR: 0.03, gait: 'trot', speed: 0.22, wander: true, ref: 'procedural', lift: 0.7 };
 
 // ---------- GLB → parts kit ----------
 async function loadKit(url) {
@@ -377,10 +449,36 @@ const tileCv = document.createElement('canvas'); tileCv.width = tileCv.height = 
 { const c = tileCv.getContext('2d'); c.fillStyle = '#d6c6c3'; c.fillRect(0, 0, 64, 64); c.fillStyle = '#cbb8b5'; c.fillRect(0, 0, 32, 32); c.fillRect(32, 32, 32, 32); }
 const tileTex = new pc.Texture(app.graphicsDevice, { width: 64, height: 64, mipmaps: true, addressU: pc.ADDRESS_REPEAT, addressV: pc.ADDRESS_REPEAT, anisotropy: 8 });
 tileTex.setSource(tileCv);
-const groundMat = new pc.StandardMaterial(); groundMat.diffuseMap = tileTex; groundMat.diffuseMapTiling = new pc.Vec2(200, 200); groundMat.gloss = 0.1; groundMat.update();
+const groundMat = new pc.StandardMaterial(); groundMat.diffuseMap = tileTex; groundMat.gloss = 0.1; groundMat.update();
+
+// rolling terrain: one height function shared by the ground mesh, foot placement and body tilt
+function groundY(x, z) {
+  const a = settings.terrain; if (!a) return 0;
+  return a * (0.55 * Math.sin(x * 0.9 + 0.3) * Math.cos(z * 0.7) + 0.3 * Math.sin(x * 2.1 - z * 1.7 + 1.1) + 0.15 * Math.sin(z * 3.3 + x * 0.4));
+}
+// a grid of ground that re-centres on the creature as it travels
+const GN = 160, GSIZE = 24;
+const groundMesh = new pc.Mesh(app.graphicsDevice);
+const gIdx = [];
+for (let j = 0; j < GN; j++) for (let i = 0; i < GN; i++) { const a = j * (GN + 1) + i, b = a + 1, c = a + GN + 1, d = c + 1; gIdx.push(a, c, b, b, c, d); }
+const gPos = new Float32Array((GN + 1) * (GN + 1) * 3), gUv = new Float32Array((GN + 1) * (GN + 1) * 2);
+let groundCentre = null;
+function updateGround(cx, cz, force) {
+  const sx = Math.round(cx / 2) * 2, sz = Math.round(cz / 2) * 2;
+  if (!force && groundCentre && groundCentre[0] === sx && groundCentre[1] === sz) return;
+  groundCentre = [sx, sz];
+  for (let j = 0, k = 0; j <= GN; j++) for (let i = 0; i <= GN; i++, k++) {
+    const x = sx + (i / GN - 0.5) * GSIZE, z = sz + (j / GN - 0.5) * GSIZE;
+    gPos[k*3] = x; gPos[k*3+1] = groundY(x, z); gPos[k*3+2] = z; gUv[k*2] = x * 2; gUv[k*2+1] = z * 2;   // 0.5 m checker tiles
+  }
+  groundMesh.setPositions(gPos); groundMesh.setUvs(0, gUv);
+  groundMesh.setNormals(pc.calculateNormals(gPos, gIdx));
+  groundMesh.setIndices(gIdx); groundMesh.update();
+}
+updateGround(0, 0, true);
 const ground = new pc.Entity('ground');
-ground.addComponent('render', { type: 'plane', material: groundMat, castShadows: false });
-ground.setLocalScale(100, 1, 100); app.root.addChild(ground);
+ground.addComponent('render', { meshInstances: [new pc.MeshInstance(groundMesh, groundMat)], castShadows: false, receiveShadows: true });
+app.root.addChild(ground);
 
 const skinMat = new pc.StandardMaterial();
 skinMat.diffuse = new pc.Color(1, 1, 1);
@@ -469,51 +567,61 @@ function assemble() {
   // vertices), not their bounding boxes, so a bent shin's tip lands in the foot's ankle cuff.
   const thigh = blendPart('thigh'), shin = blendPart('shin'), foot = blendPart('foot');
   const legSc = [S * 0.8, S * 0.8, S * 0.8];
-  const fb = box(foot, legSc);
+  const len = v => Math.hypot(v[0], v[1], v[2]), unit = v => { const l = len(v) || 1; return v.map(x => x / l); }, mul = (v, k) => v.map(x => x * k);
+  const sub = (a, b) => a.map((v, i) => v - b[i]), add = (a, b) => a.map((v, i) => v + b[i]);
   // contact point = centroid of the top / bottom band of vertices, weighted over the recipe's variants
-  const contact = (bp, which, frac = 0.12) => {
+  const contact = (bp, which, sc, frac = 0.12) => {
     const y0 = bp.min[1], y1 = bp.max[1], hgt = y1 - y0;
     const lim = which === 'top' ? y1 - hgt * frac : y0 + hgt * frac;
     const out = [0, 0, 0];
     for (const vr of bp.variants) {
       const p = vr.pos, c = [0, 0, 0]; let n = 0;
       for (let i = 0; i < p.length; i += 3) if (which === 'top' ? p[i+1] >= lim : p[i+1] <= lim) { c[0] += p[i]; c[1] += p[i+1]; c[2] += p[i+2]; n++; }
-      for (let a = 0; a < 3; a++) out[a] += vr.w * c[a] / Math.max(n, 1) * legSc[a];
+      for (let a = 0; a < 3; a++) out[a] += vr.w * c[a] / Math.max(n, 1) * sc[a];
     }
     return out;
   };
-  const len = v => Math.hypot(v[0], v[1], v[2]), unit = v => { const l = len(v) || 1; return v.map(x => x / l); }, mul = (v, k) => v.map(x => x * k);
-  const sub = (a, b) => a.map((v, i) => v - b[i]), add = (a, b) => a.map((v, i) => v + b[i]);
-  // leg-local chain, origin at the hip. Each child's top end is pushed up into its parent along the
-  // parent's axis (joint overlap), and the joint pivot sits in the middle of that overlap.
-  const tTop = contact(thigh, 'top'), tBot = contact(thigh, 'bottom'), sTop = contact(shin, 'top'), sBot = contact(shin, 'bottom');
-  const fTop = contact(foot, 'top', 0.2);
-  const thighAxis = unit(sub(tTop, tBot)), shinAxis = unit(sub(sTop, sBot));
-  const shinLen = len(sub(sTop, sBot)), footH = (foot.max[1] - foot.min[1]) * legSc[1];
-  const thighOff = sub([0, 0, 0], tTop);
-  const kneeEnd = add(thighOff, tBot);
-  const shinOff = add(sub(kneeEnd, sTop), mul(thighAxis, ov * shinLen * 0.5));
-  const kneeRaw = add(kneeEnd, mul(thighAxis, ov * shinLen * 0.25));
-  const ankleEnd = add(shinOff, sBot);
-  const footRaw = add(sub(ankleEnd, fTop), mul(shinAxis, ov * footH * 0.6));
-  const ankleRaw = add(ankleEnd, mul(shinAxis, ov * footH * 0.3));
-  // The kit's thighs and shins lean forward, so a straight chain puts the foot well ahead of the hip.
-  // Rotate thigh + shin about the hip so the ankle sits under it (plus optional rake); the foot is only
-  // translated so it stays flat.
-  const legRot = (-Math.PI / 2 + settings.rake * Math.PI / 180) - Math.atan2(ankleRaw[1], ankleRaw[0]);
-  const rz = v => [v[0] * Math.cos(legRot) - v[1] * Math.sin(legRot), v[0] * Math.sin(legRot) + v[1] * Math.cos(legRot), v[2]];
-  const kneeL = rz(kneeRaw), ankleL = rz(ankleRaw);
-  const footOff = add(footRaw, sub(ankleL, ankleRaw));
-  const groundDrop = -(footOff[1] + fb.min[1]);
-  // toe: front-most point of the foot near the ground
-  const toeL = [footOff[0] + fb.max[0], footOff[1] + fb.min[1] + 0.01, ankleL[2]];
+  // segment length → part scale: stretched along its length, girth follows partly so it stays in proportion
+  const segScale = k => { const gth = 1 + (k - 1) * 0.4; return [legSc[0] * gth, legSc[1] * k, legSc[2] * gth]; };
+  // Build one leg chain (leg-local, origin at the hip) for a set of segment lengths. Each child's top end
+  // is pushed up into its parent (joint overlap), the joint pivot sits mid-overlap, and thigh + shin are
+  // rotated about the hip so the ankle lands under it (plus rake); the foot is only translated.
+  function legChain(L) {
+    const thSc = segScale(L.upper), shSc = segScale(L.lower), ftSc = segScale(L.foot);
+    const fb = box(foot, ftSc);
+    const tTop = contact(thigh, 'top', thSc), tBot = contact(thigh, 'bottom', thSc), sTop = contact(shin, 'top', shSc), sBot = contact(shin, 'bottom', shSc);
+    const fTop = contact(foot, 'top', ftSc, 0.2);
+    const thighAxis = unit(sub(tTop, tBot)), shinAxis = unit(sub(sTop, sBot));
+    const shinLen = len(sub(sTop, sBot)), footH = (foot.max[1] - foot.min[1]) * ftSc[1];
+    const thighOff = sub([0, 0, 0], tTop);
+    const kneeEnd = add(thighOff, tBot);
+    const shinOff = add(sub(kneeEnd, sTop), mul(thighAxis, ov * shinLen * 0.5));
+    const kneeRaw = add(kneeEnd, mul(thighAxis, ov * shinLen * 0.25));
+    const ankleEnd = add(shinOff, sBot);
+    const footRaw = add(sub(ankleEnd, fTop), mul(shinAxis, ov * footH * 0.6));
+    const ankleRaw = add(ankleEnd, mul(shinAxis, ov * footH * 0.3));
+    const legRot = (-Math.PI / 2 + settings.rake * Math.PI / 180) - Math.atan2(ankleRaw[1], ankleRaw[0]);
+    const rz = v => [v[0] * Math.cos(legRot) - v[1] * Math.sin(legRot), v[0] * Math.sin(legRot) + v[1] * Math.cos(legRot), v[2]];
+    const kneeL = rz(kneeRaw), ankleL = rz(ankleRaw);
+    const footOff = add(footRaw, sub(ankleL, ankleRaw));
+    const stand = -(footOff[1] + fb.min[1]);                                   // hip height above the sole
+    const toeL = [footOff[0] + fb.max[0], footOff[1] + fb.min[1] + 0.01, ankleL[2]];
+    const corners = (pt, sc, off, rot) => [0, 1].flatMap(i => [0, 1].map(j => { const v = [(i ? pt.max[0] : pt.min[0]) * sc[0] + off[0], (j ? pt.max[1] : pt.min[1]) * sc[1] + off[1], 0]; return (rot ? rz(v) : v)[0]; }));
+    const xs = [...corners(thigh, thSc, thighOff, true), ...corners(shin, shSc, shinOff, true), ...corners(foot, ftSc, footOff, false)];
+    return { thSc, shSc, ftSc, tBot, thighOff, shinOff, footOff, kneeL, ankleL, toeL, legRot, stand, span: Math.max(...xs) - Math.min(...xs) };
+  }
+  // front pair → hind pair proportions, middle pairs interpolated
+  const legLens = p => {
+    const t = g.pairs > 1 ? p / (g.pairs - 1) : 1, F = settings.legs.front, H = settings.legs.hind;
+    return { upper: F.upper + (H.upper - F.upper) * t, lower: F.lower + (H.lower - F.lower) * t, foot: F.foot + (H.foot - F.foot) * t };
+  };
+  const chains = Array.from({ length: g.pairs }, (_, p) => legChain(legLens(p)));
+  const groundDrop = chains[g.pairs - 1].stand;   // the hind legs set the hip height
   // body, stretched along x as leg pairs grow
   const body = blendPart('body');
   // front-to-back footprint of one leg (thigh, shin, foot as placed) – neighbouring legs must not overlap,
   // or the fused surface would weld them together
-  const corners = (pt, off, rot) => [0, 1].flatMap(i => [0, 1].map(j => { const v = [(i ? pt.max[0] : pt.min[0]) * legSc[0] + off[0], (j ? pt.max[1] : pt.min[1]) * legSc[1] + off[1], 0]; return (rot ? rz(v) : v)[0]; }));
-  const xs = [...corners(thigh, thighOff, true), ...corners(shin, shinOff, true), ...corners(foot, footOff, false)];
-  const legSpan = Math.max(...xs) - Math.min(...xs);
+  const legSpan = Math.max(...chains.map(c => c.span));
   const baseL = (body.max[0] - body.min[0]) * S * 1.15;
   const needL = g.pairs > 1 ? (g.pairs - 1) * (legSpan + settings.fuseR + 0.02) / 0.72 : 0;
   const stretch = Math.max([0.85, 1.0, 1.35, 1.7][g.pairs - 1], needL / baseL);
@@ -543,8 +651,10 @@ function assemble() {
   bones.push({ name: 'head', parent: 'neck', pos: headMid, tip: [hb.max[0] + headOff[0], headMid[1], 0], own: ['head'] });
 
   // tail at the rump socket, mirrored in x so the curl points backwards
-  const tail = blendPart('tail'), tailSc = [-S, S, S];
-  const tlb = { min: [-tail.max[0] * S, tail.min[1] * S, tail.min[2] * S], max: [-tail.min[0] * S, tail.max[1] * S, tail.max[2] * S] };
+  const tLen = settings.tailLen, tailSc = [-S * tLen, S * tLen, S * Math.sqrt(tLen)];   // longer tails stay slimmer
+  const tail = blendPart('tail');
+  const tlb = { min: [-tail.max[0] * -tailSc[0], tail.min[1] * tailSc[1], tail.min[2] * tailSc[2]], max: [-tail.min[0] * -tailSc[0], tail.max[1] * tailSc[1], tail.max[2] * tailSc[2]] };
+  const tailSegs = Math.round(settings.tailSegs);
   const tailL = tlb.max[0] - tlb.min[0];
   const rump = [-bodyL * 0.5 + tailL * 0.05, bodyCenter[1] + bodyH * 0.2, 0];
   const tailOff = [rump[0] - tlb.max[0] + tailL * (0.1 + ov * 0.3), rump[1] - tlb.max[1] + (tlb.max[1] - tlb.min[1]) * 0.2, -(tlb.min[2] + tlb.max[2]) / 2];
@@ -557,8 +667,10 @@ function assemble() {
     const dist = tv.map(p => Math.hypot(p[0] - rump[0], p[1] - rump[1], p[2] - rump[2]));
     const dmax = Math.max(...dist);
     const band = (a, b) => { const c = [0, 0, 0]; let n = 0; tv.forEach((p, i) => { if (dist[i] >= a * dmax && dist[i] <= b * dmax) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; n++; } }); return c.map(v => v / Math.max(n, 1)); };
-    const j = [rump, band(0.28, 0.4), band(0.6, 0.72), band(0.92, 1)];
-    for (let i = 0; i < 3; i++) bones.push({ name: 'tail' + i, parent: i ? 'tail' + (i - 1) : 'pelvis', pos: j[i], tip: j[i + 1], own: ['tail'] });
+    const j = [rump];
+    for (let i = 1; i < tailSegs; i++) { const c = i / tailSegs; j.push(band(c - 0.05, c + 0.05)); }
+    j.push(band(0.92, 1));
+    for (let i = 0; i < tailSegs; i++) bones.push({ name: 'tail' + i, parent: i ? 'tail' + (i - 1) : 'pelvis', pos: j[i], tip: j[i + 1], own: ['tail'] });
   }
 
   // leg pairs along the belly
@@ -572,23 +684,24 @@ function assemble() {
       const hip = [fx, hipY, hz];
       const mirror = side < 0;
       const W = l => [fx + l[0], hipY + l[1], hz + (mirror ? -l[2] : l[2])];   // leg-local → world
+      const C = chains[p], { thighOff, shinOff, footOff, kneeL, ankleL, toeL, legRot, tBot } = C;
       const knee = W(kneeL), ankle = W(ankleL), toe = W(toeL);
       // front thighs reach up into the shoulder-blade area: stretched upward from the knee, hip joint unchanged
       const raise = p === 0 && g.pairs > 1 ? settings.shoulder * bodyH : 0;
-      const tH = (thigh.max[1] - thigh.min[1]) * legSc[1], sy = (tH + raise) / tH;
-      const tOff = W(thighOff); tOff[1] += thigh.min[1] * legSc[1] * (1 - sy) + (tBot[1] - thigh.min[1] * legSc[1]) * (1 - sy);
-      addPart(buf, thigh, { scale: [legSc[0], legSc[1] * sy, legSc[2]], offset: tOff, rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'a', socket: hip });
-      addPart(buf, shin,  { scale: legSc, offset: W(shinOff), rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'b', socket: knee });
-      addPart(buf, foot,  { scale: legSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', socket: ankle });
+      const tH = (thigh.max[1] - thigh.min[1]) * C.thSc[1], sy = (tH + raise) / tH;
+      const tOff = W(thighOff); tOff[1] += thigh.min[1] * C.thSc[1] * (1 - sy) + (tBot[1] - thigh.min[1] * C.thSc[1]) * (1 - sy);
+      addPart(buf, thigh, { scale: [C.thSc[0], C.thSc[1] * sy, C.thSc[2]], offset: tOff, rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'a', socket: hip });
+      addPart(buf, shin,  { scale: C.shSc, offset: W(shinOff), rotZ: legRot, pivot: hip, mirrorZ: mirror, slot: id + 'b', socket: knee });
+      addPart(buf, foot,  { scale: C.ftSc, offset: W(footOff), mirrorZ: mirror, slot: id + 'c', socket: ankle });
       const ball = W([ankleL[0] + (toeL[0] - ankleL[0]) * 0.55, toeL[1] + 0.008, ankleL[2]]);
-      bones.push({ name: id + '_hip', parent: spineFor(fx), pos: hip, tip: knee, own: [id + 'a'], leg: { pair: p, side } });
+      bones.push({ name: id + '_hip', parent: spineFor(fx), pos: hip, tip: knee, own: [id + 'a'], leg: { pair: p, side, stand: C.stand, ankleH: ankleL[1] + C.stand } });
       bones.push({ name: id + '_knee', parent: id + '_hip', pos: knee, tip: ankle, own: [id + 'b'] });
       bones.push({ name: id + '_ankle', parent: id + '_knee', pos: ankle, tip: ball, own: [id + 'c'] });
       bones.push({ name: id + '_toe', parent: id + '_ankle', pos: ball, tip: toe, own: [id + 'c'] });
       legs.push(id);
     }
   }
-  return { buf, bones, legs, hipY, bodyCenterY: bodyCenter[1], bodyH };
+  return { buf, bones, legs, hipY, bodyCenterY: bodyCenter[1], bodyH, tailSegs, frontStand: chains[0].stand };
 }
 
 // ---------- Bind: proximity skinning (the "projection" step) ----------
@@ -1024,6 +1137,44 @@ function projectOntoFused(fused, asm, src, r) {
   return { bi, bw, colors };
 }
 
+// ---------- Skin pattern: painted into the vertex colours from rest-pose positions ----------
+function hash3(x, y, z) { let h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return h - Math.floor(h); }
+function vnoise(x, y, z) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), fx = x - ix, fy = y - iy, fz = z - iz;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+  const L = (a, b, t) => a + (b - a) * t;
+  return L(L(L(hash3(ix, iy, iz), hash3(ix + 1, iy, iz), u), L(hash3(ix, iy + 1, iz), hash3(ix + 1, iy + 1, iz), u), v),
+           L(L(hash3(ix, iy, iz + 1), hash3(ix + 1, iy, iz + 1), u), L(hash3(ix, iy + 1, iz + 1), hash3(ix + 1, iy + 1, iz + 1), u), v), w);
+}
+function worley(x, y, z) {   // distance to the nearest jittered feature point (spots)
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z); let d = 9;
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+    const cx = ix + a, cy = iy + b, cz = iz + c;
+    const px = cx + hash3(cx, cy, cz), py = cy + hash3(cy, cz, cx), pz = cz + hash3(cz, cx, cy);
+    d = Math.min(d, Math.hypot(x - px, y - py, z - pz));
+  }
+  return d;
+}
+function paintPattern(P, colors, asm) {
+  const hex = settings.patColor, pcol = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16));
+  const amt = settings.patAmount, f = 9 / (settings.patScale * settings.size), cy = asm.bodyCenterY, bh = asm.bodyH;
+  for (let v = 0; v < P.length / 3; v++) {
+    const x = P[v*3], y = P[v*3+1], z = P[v*3+2];
+    let m = 0;
+    if (settings.pattern === 'spots') m = 1 - pc.math.smoothstep(0.32, 0.42, worley(x * f, y * f, z * f));
+    else if (settings.pattern === 'stripes') { const w = Math.sin(x * f * 2.2 + 3 * vnoise(x * f * 0.6, y * f * 0.6, z * f * 0.6)); m = pc.math.smoothstep(0.45, 0.65, w) * pc.math.smoothstep(cy - bh * 0.6, cy + bh * 0.1, y); }
+    else if (settings.pattern === 'patches') { const n = vnoise(x * f * 0.5, y * f * 0.5, z * f * 0.5) * 0.65 + vnoise(x * f * 1.3, y * f * 1.3, z * f * 1.3) * 0.35; m = pc.math.smoothstep(0.52, 0.58, n); }
+    m *= amt;
+    // countershading: lighter underneath, as on most animals
+    const belly = settings.counter * pc.math.smoothstep(cy + bh * 0.1, cy - bh * 0.7, y);
+    for (let a = 0; a < 3; a++) {
+      let c = colors[v*4+a] * (1 - m) + pcol[a] * m;
+      c = c + (255 - c) * belly * 0.6;
+      colors[v*4+a] = clamp(c, 0, 255);
+    }
+  }
+}
+
 // ---------- Build entity: bones + skinned mesh ----------
 function build(reason) {
   const t0 = performance.now();
@@ -1066,6 +1217,7 @@ function build(reason) {
     positions = new Float32Array(asm.buf.pos); normals = new Float32Array(asm.buf.nrm);
     indices = Uint32Array.from(asm.buf.idx); ({ bi, bw, colors } = src);
   }
+  if (!settings.showWeights) paintPattern(positions, colors, asm);
   const t2b = performance.now();
 
   const device = app.graphicsDevice, n = positions.length / 3;
@@ -1101,6 +1253,7 @@ function build(reason) {
   log(steps.join('\n'));
   $('stat').innerHTML = `<b>${settings.fuse ? 'One fused mesh' : 'Composite parts'}</b> · <b>${n.toLocaleString()}</b> verts · <b>${asm.bones.length}</b> bones · <b>${asm.legs.length}</b> legs · rebuilt in <b>${(t3 - t0).toFixed(0)} ms</b> · drag to orbit, scroll to zoom`;
   renderMoves();
+  if (document.activeElement !== $('dna')) $('dna').value = dnaEncode();
 }
 
 // ---------- Locomotion: gait scheduler + planted feet + two-bone IK ----------
@@ -1127,10 +1280,13 @@ function initLegs() {
     l.l1 = Math.hypot(v1.x, v1.y); l.l2 = Math.hypot(v2.x, v2.y);
     l.a1 = Math.atan2(v1.y, v1.x); l.a2 = Math.atan2(v2.y, v2.x);
     l.bend = Math.sign(v1.x * v2.y - v1.y * v2.x) || 1;
+    // forelegs of most quadrupeds fold the other way (elbow back, wrist forward)
+    if (settings.elbow && b.leg.pair === 0 && genome.pairs > 1) l.bend = -l.bend;
     l.ankleZ = v1.z + v2.z;
     // how extended this leg already is at rest; reach is judged relative to it
     l.restRatio = Math.hypot(l.ankleRoot[0] - l.hipRoot[0], l.ankleRoot[1] - l.hipRoot[1], l.ankleRoot[2] - l.hipRoot[2]) / (l.l1 + l.l2);
     l.isArm = false;
+    l.ankleH = b.leg.ankleH;
     return l;
   });
 }
@@ -1140,7 +1296,8 @@ function homeOf(l, out) {
   const L = l.L, h = l.hipRoot, a = l.ankleRoot, hw = l.hip.getPosition();
   const ox = (a[0] - h[0]) * L, oz = a[2] - h[2];
   const c = Math.cos(loco.yaw), s = Math.sin(loco.yaw);
-  return out.set(hw.x + ox * c + oz * s, a[1] * L, hw.z - ox * s + oz * c);
+  const x = hw.x + ox * c + oz * s, z = hw.z - ox * s + oz * c;
+  return out.set(x, l.ankleH * L + groundY(x, z), z);
 }
 // leg length scale for a leg: front pair → hind pair interpolated
 const legScale = (l, pairs) => pairs > 1 ? settings.front + (settings.hind - settings.front) * l.pair / (pairs - 1) : settings.hind;
@@ -1248,8 +1405,10 @@ function animate(dt) {
   const crouchTarget = Math.max(settings.crouch, loco.held.has('squat') || (loco.squatUntil > time) ? 0.85 : 0);
   loco.crouch = (loco.crouch || 0) + (crouchTarget - (loco.crouch || 0)) * Math.min(1, dt * 5);
   const sink = 1 - loco.crouch * 0.45;
-  const hF = asm.hipY * settings.front * sink, hR = hipY * sink;
-  const legPitch = pairs > 1 ? Math.asin(clamp((hF - hR) / Math.max(frontX - rearX, 1e-3), -0.8, 0.8)) : 0;
+  const hF = asm.frontStand * settings.front * sink, hR = hipY * sink;
+  const fwX0 = Math.cos(loco.yaw), fwZ0 = -Math.sin(loco.yaw);
+  const gFront = groundY(loco.pos.x + fwX0 * frontX, loco.pos.z + fwZ0 * frontX), gRear = groundY(loco.pos.x + fwX0 * rearX, loco.pos.z + fwZ0 * rearX);
+  const legPitch = pairs > 1 ? Math.asin(clamp((hF + gFront - hR - gRear) / Math.max(frontX - rearX, 1e-3), -0.8, 0.8)) : 0;
   const upright = 1.33;   // ~76° when fully standing
   const bodyPitch = legPitch + settings.posture * (upright - legPitch);
   creature.bodyPitch = bodyPitch;
@@ -1331,7 +1490,7 @@ function animate(dt) {
   {
     const hind = legs.filter(l => l.pair === pairs - 1);
     const avgY = hind.reduce((sum, l) => sum + l.hip.getPosition().y, 0) / hind.length;
-    creature.root.translate(0, hR + jumpY - avgY, 0);
+    creature.root.translate(0, hR + gRear + jumpY - avgY, 0);
   }
   bones.chest.setLocalEulerAngles(-1.5 * Math.min(amt, 1) * Math.sin(cyc), bend * 0.6, 0.8 * breathe * (1 - Math.min(amt, 1)) + jumpPitch * 0.2 + stompLean * 6);
 
@@ -1412,18 +1571,20 @@ function animate(dt) {
   // --- tail: a wave travelling down the chain; wag is a fast, wide version
   const wag = activeShot(o => o.clip === 'wag');
   const wu = wag ? (time - wag.start) / wag.dur : 0;
-  for (let i = 0; i < 3; i++) {
+  const nT = asm.tailSegs, segK = 3 / nT;   // spread the same overall swing over however many segments
+  for (let i = 0; i < nT; i++) {
     const b = bones['tail' + i]; if (!b) continue;
     const yaw = wag ? 30 * Math.sin(time * 18 - i * 0.8) * (1 - wu * 0.6)
       : 9 * Math.min(amt, 1) * Math.sin(cyc - i * 0.9) + 6 * Math.sin(time * 2.1 - i * 0.9) - loco.yawRate * 10;
     const pitch = (i === 0 ? 6 * Math.min(amt, 1) + (wag ? 12 : 0) - bodyPitch * R2D * 0.55 : 0) + 3 * Math.sin(time * 1.3 - i);
-    b.setLocalEulerAngles(0, yaw, pitch - jumpPitch * 0.8);
+    b.setLocalEulerAngles(0, yaw * segK, (pitch - jumpPitch * 0.8) * (i === 0 ? 1 : segK));
   }
 
   // camera follows the creature
   orbit.target.x += (loco.pos.x - orbit.target.x) * Math.min(1, dt * 3);
   orbit.target.z += (loco.pos.z - orbit.target.z) * Math.min(1, dt * 3);
-  orbit.target.y += (hR * 0.8 + Math.sin(bodyPitch) * (frontX - rearX) * 0.5 - orbit.target.y) * Math.min(1, dt * 2);
+  updateGround(loco.pos.x, loco.pos.z);
+  orbit.target.y += (gRear + hR * 0.8 + Math.sin(bodyPitch) * (frontX - rearX) * 0.5 - orbit.target.y) * Math.min(1, dt * 2);
   if (time - (creature.lastPitchUi || 0) > 0.25) { creature.lastPitchUi = time; $('pitchOut').textContent = `body pitch ${(bodyPitch * R2D).toFixed(0)}° · ${groundLegs.length} legs on the ground, ${legs.length - groundLegs.length} arms`; }
 }
 
@@ -1446,8 +1607,8 @@ function drawBones() {
   }
   // IK targets: green = planted foot, orange = where a swinging foot will land
   for (const l of creature.legs) {
-    cross(tmpA.set(l.plant.x, 0.002, l.plant.z), 0.02, plantColor);
-    if (l.inSwing && !l.skip) cross(tmpA.set(l.target.x, 0.002, l.target.z), 0.02, swingColor);
+    cross(tmpA.set(l.plant.x, groundY(l.plant.x, l.plant.z) + 0.002, l.plant.z), 0.02, plantColor);
+    if (l.inSwing && !l.skip) cross(tmpA.set(l.target.x, groundY(l.target.x, l.target.z) + 0.002, l.target.z), 0.02, swingColor);
   }
 }
 
@@ -1492,6 +1653,14 @@ const bindSlider = (id, key, fmt, rebind) => {
   if (rebind) el.addEventListener('change', () => rebuild(`rebind: ${key} = ${el.value}`));
 };
 bindSlider('posture', 'posture', v => v < 0.05 ? 'all fours' : v > 0.95 ? 'upright' : `${Math.round(v * 100)}%`, false);
+for (const end of ['front', 'hind']) for (const part of ['upper', 'lower', 'foot']) {
+  const el = $(`seg-${end}-${part}`), out = $(`seg-${end}-${part}Out`);
+  const sync = () => { settings.legs[end][part] = +el.value; out.textContent = `×${(+el.value).toFixed(2)}`; };
+  sync(); el.addEventListener('input', sync);
+  el.addEventListener('change', () => rebuild(`legs: ${end} ${part} ×${el.value}`));
+}
+bindSlider('tailLen', 'tailLen', v => `×${v.toFixed(2)}`, true);
+bindSlider('tailSegs', 'tailSegs', v => `${v} bones`, true);
 bindSlider('crouch', 'crouch', v => v < 0.05 ? 'standing' : v > 0.9 ? 'squat' : `${Math.round(v * 100)}%`, false);
 bindSlider('front', 'front', v => `×${v.toFixed(2)}`, false);
 bindSlider('hind', 'hind', v => `×${v.toFixed(2)}`, false);
@@ -1510,6 +1679,61 @@ $('showBones').onchange = e => settings.showBones = e.target.checked;
 bindSlider('lift', 'lift', v => `×${v.toFixed(2)}`, false);
 bindSlider('speed', 'speed', v => `${v.toFixed(2)} m/s`, false);
 $('wander').onchange = e => settings.wander = e.target.checked;
+$('elbow').onchange = e => { settings.elbow = e.target.checked; if (creature) { initLegs(); } };
+bindSlider('terrain', 'terrain', v => v === 0 ? 'flat' : `${Math.round(v * 100)} cm`, false);
+$('terrain').addEventListener('input', () => { updateGround(loco.pos.x, loco.pos.z, true); if (creature) for (const l of creature.legs) l.needsPlant = true; });
+bindSlider('patAmount', 'patAmount', v => `${Math.round(v * 100)}%`, true);
+bindSlider('patScale', 'patScale', v => `×${v.toFixed(2)}`, true);
+bindSlider('counter', 'counter', v => `${Math.round(v * 100)}%`, true);
+function setPattern(p) { settings.pattern = p; document.querySelectorAll('#patSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.pat === p)); }
+setPattern(settings.pattern);
+$('patSeg').addEventListener('click', e => { const b = e.target.closest('[data-pat]'); if (b) { setPattern(b.dataset.pat); rebuild('skin: ' + b.dataset.pat); } });
+$('patColor').addEventListener('change', e => { settings.patColor = e.target.value; rebuild('skin colour ' + e.target.value); });
+
+// ---------- DNA: the whole creature as a portable code ----------
+const DNA_KEYS = ['posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'ref', 'gait', 'elbow', 'pattern', 'patColor', 'patAmount', 'patScale', 'counter', 'fuseR', 'legs', 'tailLen', 'tailSegs'];
+function dnaEncode() {
+  const d = { v: 1, pairs: genome.pairs, recipe, s: Object.fromEntries(DNA_KEYS.map(k => [k, settings[k]])) };
+  return 'HOG1.' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
+}
+function syncUi() {
+  for (const end of ['front', 'hind']) for (const part of ['upper', 'lower', 'foot']) { const el = $(`seg-${end}-${part}`); el.value = settings.legs[end][part]; el.dispatchEvent(new Event('input')); }
+  for (const id of ['tailLen', 'tailSegs', 'posture', 'front', 'hind', 'crouch', 'fat', 'size', 'shoulder', 'rearFwd', 'rake', 'overlap', 'speed', 'lift', 'patAmount', 'patScale', 'counter', 'terrain']) {
+    const el = $(id); if (el) { el.value = settings[id]; el.dispatchEvent(new Event('input')); }
+  }
+  $('ref').value = settings.ref; $('refInfo').textContent = refInfoText(settings.ref);
+  $('elbow').checked = settings.elbow; $('patColor').value = settings.patColor;
+  setGait(settings.gait); setPattern(settings.pattern); setPairs(genome.pairs); renderParts(); showManifest();
+}
+function dnaApply(code, label) {
+  const d = JSON.parse(decodeURIComponent(escape(atob(code.trim().replace(/^HOG1\./, '')))));
+  genome.pairs = d.pairs; for (const k in d.recipe) recipe[k] = d.recipe[k];
+  Object.assign(settings, d.s);
+  syncUi(); rebuild(label || 'DNA: loaded creature code');
+}
+const PRESETS = {
+  hog: { pairs: 2, recipe: RECIPE_DEFAULT, s: { posture: 0, front: 1, hind: 1, crouch: 0, fat: 0.45, size: 1, shoulder: 0.35, rearFwd: 0.08, rake: 0, ref: 'procedural', gait: 'trot', pattern: 'patches', patColor: '#7a4650', patAmount: 0.45, counter: 0.3 } },
+  raptor: { pairs: 2, recipe: { head: [0, 0, 1, 0], body: [0, 0.5, 0, 0.5], thigh: [0, 1, 0, 0], shin: [0, 0, 0, 1], foot: [0, 0, 1, 0], tail: [0, 0.6, 0.4, 0] }, s: { posture: 0.9, front: 0.7, hind: 1.3, crouch: 0.2, fat: 0.05, size: 1.1, shoulder: 0.2, rearFwd: 0.15, rake: -6, ref: 'Chicken', gait: 'trot', legs: { front: { upper: 0.8, lower: 0.7, foot: 0.8 }, hind: { upper: 1.25, lower: 0.85, foot: 1.2 } }, tailLen: 1.8, tailSegs: 6, pattern: 'stripes', patColor: '#5b3a46', patAmount: 0.7, counter: 0.5 } },
+  centipig: { pairs: 4, recipe: { head: [0.5, 0.5, 0, 0], body: [0, 0, 1, 0], thigh: [0, 0, 1, 0], shin: [0, 0, 1, 0], foot: [0, 0, 0, 1], tail: [1, 0, 0, 0] }, s: { posture: 0, front: 0.9, hind: 0.9, crouch: 0.15, fat: 0.2, size: 0.9, shoulder: 0.25, rearFwd: 0, rake: 0, ref: 'procedural', gait: 'wave', legs: { front: { upper: 0.8, lower: 0.75, foot: 0.9 }, hind: { upper: 0.8, lower: 0.75, foot: 0.9 } }, tailLen: 0.7, tailSegs: 4, pattern: 'spots', patColor: '#6a3c48', patAmount: 0.7, counter: 0.4 } },
+  sumo: { pairs: 2, recipe: { head: [0, 0, 0, 1], body: [0, 0, 0, 1], thigh: [1, 0, 0, 0], shin: [1, 0, 0, 0], foot: [0, 1, 0, 0], tail: [0, 0, 0, 1] }, s: { posture: 0.75, front: 0.8, hind: 0.85, crouch: 0.35, fat: 1, size: 1.2, shoulder: 0.5, rearFwd: 0.12, rake: 0, ref: 'Pinguin', gait: 'trot', pattern: 'none', counter: 0.45 } },
+  strider: { pairs: 2, recipe: { head: [0, 1, 0, 0], body: [0, 1, 0, 0], thigh: [0, 0.5, 0.5, 0], shin: [0, 0.5, 0, 0.5], foot: [0, 0, 1, 0], tail: [0, 1, 0, 0] }, s: { posture: 0, front: 1.45, hind: 1.4, crouch: 0, fat: 0, size: 1, shoulder: 0.45, rearFwd: 0.06, rake: 0, ref: 'Horse', gait: 'trot', legs: { front: { upper: 1, lower: 1.3, foot: 0.8 }, hind: { upper: 1.15, lower: 1.25, foot: 0.85 } }, tailLen: 1.3, tailSegs: 5, pattern: 'spots', patColor: '#5d4048', patAmount: 0.55, patScale: 1.6, counter: 0.3 } }
+};
+$('presets').addEventListener('click', e => {
+  const b = e.target.closest('[data-preset]'); if (!b) return;
+  const p = PRESETS[b.dataset.preset];
+  genome.pairs = p.pairs; for (const k in p.recipe) recipe[k] = p.recipe[k].slice();
+  Object.assign(settings, { patScale: 1, patAmount: 0.6, patColor: '#8a4f5a', elbow: true, lift: 0.7, tailLen: 1, tailSegs: 3, legs: { front: { upper: 1, lower: 1, foot: 1 }, hind: { upper: 1, lower: 1, foot: 1 } } }, JSON.parse(JSON.stringify(p.s)));
+  syncUi(); rebuild('preset: ' + b.textContent);
+});
+$('dnaCopy').onclick = async () => {
+  $('dna').value = dnaEncode();
+  try { await navigator.clipboard.writeText($('dna').value); $('dnaMsg').textContent = 'Copied'; }
+  catch { $('dna').select(); $('dnaMsg').textContent = 'Selected: press Ctrl/Cmd+C'; }
+};
+$('dnaApply').onclick = () => {
+  try { dnaApply($('dna').value); $('dnaMsg').textContent = 'Loaded'; }
+  catch { $('dnaMsg').textContent = 'That code could not be read. Copy a full code starting with HOG1.'; }
+};
 $('ref').onchange = e => { settings.ref = e.target.value; loco.refPhase = 0; $('refInfo').textContent = refInfoText(settings.ref); log(`── motion reference → ${e.target.selectedOptions[0].text}`); };
 function setGait(gk) { settings.gait = gk; document.querySelectorAll('#gaitSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.gait === gk)); log(`── gait → ${gk}`); }
 $('gaitSeg').addEventListener('click', e => { const b = e.target.closest('[data-gait]'); if (b) setGait(b.dataset.gait); });
