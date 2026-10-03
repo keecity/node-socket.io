@@ -599,7 +599,8 @@ function assemble() {
     const kneeRaw = add(kneeEnd, mul(thighAxis, ov * shinLen * 0.25));
     const ankleEnd = add(shinOff, sBot);
     const footRaw = add(sub(ankleEnd, fTop), mul(shinAxis, ov * footH * 0.6));
-    const ankleRaw = add(ankleEnd, mul(shinAxis, ov * footH * 0.3));
+    // ankle pivot where the shin visibly ends (slightly into the foot), not up inside the overlap
+    const ankleRaw = add(ankleEnd, mul(shinAxis, -footH * 0.08));
     const legRot = (-Math.PI / 2 + settings.rake * Math.PI / 180) - Math.atan2(ankleRaw[1], ankleRaw[0]);
     const rz = v => [v[0] * Math.cos(legRot) - v[1] * Math.sin(legRot), v[0] * Math.sin(legRot) + v[1] * Math.cos(legRot), v[2]];
     const kneeL = rz(kneeRaw), ankleL = rz(ankleRaw);
@@ -1279,9 +1280,11 @@ function initLegs() {
     const v1 = l.knee.restPos, v2 = l.ankle.restPos;     // rest bone vectors (hip and knee space)
     l.l1 = Math.hypot(v1.x, v1.y); l.l2 = Math.hypot(v2.x, v2.y);
     l.a1 = Math.atan2(v1.y, v1.x); l.a2 = Math.atan2(v2.y, v2.x);
-    l.bend = Math.sign(v1.x * v2.y - v1.y * v2.x) || 1;
-    // forelegs of most quadrupeds fold the other way (elbow back, wrist forward)
-    if (settings.elbow && b.leg.pair === 0 && genome.pairs > 1) l.bend = -l.bend;
+    // knee direction is explicit, not inherited from the kit's part shapes:
+    // bend +1 puts the middle joint behind the hip→ankle line, -1 in front of it.
+    // Hind legs: knee forward. Forelegs (elbow style): elbow back, like a cat or dog.
+    const fore = b.leg.pair === 0 && genome.pairs > 1;
+    l.bend = fore && settings.elbow ? 1 : -1;
     l.ankleZ = v1.z + v2.z;
     // how extended this leg already is at rest; reach is judged relative to it
     l.restRatio = Math.hypot(l.ankleRoot[0] - l.hipRoot[0], l.ankleRoot[1] - l.hipRoot[1], l.ankleRoot[2] - l.hipRoot[2]) / (l.l1 + l.l2);
