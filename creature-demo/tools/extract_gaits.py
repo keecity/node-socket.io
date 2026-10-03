@@ -1,12 +1,12 @@
 # Extract gait profiles from rigged animal GLBs (walk/run/idle clips).
 # usage: python3 extract_gaits.py <folder of .glb files>   -> gaits.json (embed in index.html #gaits)
-import sys,json,glob,re; sys.path.insert(0,'.')
+import sys,json,glob,re; sys.path.insert(0, __import__('os').path.dirname(__file__))
 from gltf_fk import *
 N=32
 def euler_yx(R):  # yaw about Y, pitch about X (deg) of a delta rotation
     f=R@np.array([0,0,1.0]); yaw=np.degrees(np.arctan2(f[0],f[2])); pitch=np.degrees(np.arcsin(np.clip(-f[1],-1,1))); return yaw,pitch
 out={}
-for f in sorted(glob.glob('sys.argv[1] + "/*.glb"')):
+for f in sorted(glob.glob(sys.argv[1] + '/*.glb')):
     animal=f.split('/')[-1].split('_')[0]
     j,acc,nodes,parent,name=setup(f)
     W0=world(nodes,parent,rest_trs(nodes))
