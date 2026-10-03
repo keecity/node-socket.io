@@ -1,5 +1,6 @@
 (async function () {
 'use strict';
+var NET = { role: null, peer: null, room: null, lobby: null, code: null, rdown: false, seq: 0, ev: [], evSeq: 0, lastCmd: 0, lastEv: 0, snap: null, cmds: [], sent: 0 };
 const $ = id => document.getElementById(id);
 try {
 // ====================================================================== scene (court from the PlayCanvas court page)
@@ -60,7 +61,7 @@ function makePlayer(team, idx) {
   model.anim.loadStateGraph({ layers: [{ name: 'Base', weight: 1, states: [{ name: 'START' }, ...Object.entries(CLIPS).map(([n, loop]) => ({ name: n, speed: 1, loop: !!loop }))], transitions: [{ from: 'START', to: 'Ready' }] }], parameters: {} });
   for (const a of playerAsset.resource.animations) model.anim.assignAnimation(a.resource.name, a.resource, undefined, 1, !!CLIPS[a.resource.name]);
   const label = document.createElement('div'); label.className = 'tag t' + team; label.textContent = NAMES[team][idx]; $('tags').appendChild(label);
-  const sb = document.createElement('i'); sb.className = 'sbar'; const sf = document.createElement('b'); sb.appendChild(sf); if (team === 0) label.appendChild(sb);
+  const sb = document.createElement('i'); sb.className = 'sbar'; const sf = document.createElement('b'); sb.appendChild(sf); label.appendChild(sb);
   return { id: P.length, team, idx, name: NAMES[team][idx], ent, model, label, ballNode: model.findByName('basketball'), rootBone: model.findByName('root'), head: model.findByName('head'),
     k, runClip: ['Run', 'RunB', 'RunC', 'RunC', 'Run', 'RunB'][P.length], spd: [1.0, 0.94, 1.07, 1.04, 0.97, 1.0][P.length],
     stamina: 1, drain: 0, pos: new pc.Vec3(), vel: new pc.Vec3(), yaw: 0, state: 'Ready', action: null, think: Math.random() * .3, timer: 0, cut: 0, juke: 0, stall: 0, react: 0, holdT: 0 };
@@ -128,7 +129,8 @@ function stepBall(dt) {
 }
 
 // ====================================================================== game flow
-function toast(text, big) { const t = $('toast'); t.textContent = text; t.className = big ? 'show big' : 'show'; clearTimeout(toast.h); toast.h = setTimeout(() => t.className = '', big ? 2400 : 1400); }
+function toast(text, big) { netEv('toast', text, big ? 1 : 0); toastL(text, big); }
+function toastL(text, big) { const t = $('toast'); t.textContent = text; t.className = big ? 'show big' : 'show'; clearTimeout(toast.h); toast.h = setTimeout(() => t.className = '', big ? 2400 : 1400); }
 function hud() {
   $('s0').textContent = game.score[0]; $('s1').textContent = game.score[1];
   $('clock').textContent = game.phase === 'live' || game.phase === 'air' || game.phase === 'loose' ? Math.max(0, Math.ceil(game.shotClock)) : '';
@@ -149,16 +151,16 @@ function inbound(t, spot) {
   for (const p of P) { p.rootBone.setLocalPosition(0, 0, 0); setAnim(p, p === h ? 'Idle' : p.team === t ? 'Ready' : 'Defend', 0.1); place(p); }
   give(h); hud();
 }
-function restart() { game.score = [0, 0]; $('banner').className = ''; toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
+function restart() { game.score = [0, 0]; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
 function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   if (s.ft) toast('Free throw good', false); else toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
-  sfx('net'); setTimeout(() => t === HUMAN ? cheer() : sfx('boo', 0.6), 150); game.phase = 'scored'; game.timer = 1.6;
+  sfx('net'); netEv('score', t); crowdReact(t); game.phase = 'scored'; game.timer = 1.6;
   if (s.ft) { game.phase = 'ftair'; game.ftMade = true; }   // the free-throw loop decides what comes next
   hud();
-  if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; }
+  if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; netEv('ban', $('banner').textContent, 'show t' + t); }
 }
 
 // ====================================================================== actions
@@ -424,7 +426,7 @@ function defenseAI(p, dt) {
   if (ball.holder === m) {
     const gap = (human.on && m.team === HUMAN) ? Math.max(0.8, Math.min(1.2, mr * 0.15)) : Math.max(0.95, Math.min(1.5, mr * 0.18));   // tighter on the player
     goal = mp.clone().add(toRim.mulScalar(gap));
-    if (!(human.on && p.team === HUMAN) && !p.action && !m.action && d2(p.pos, mp) < 1.35 && Math.random() < dt * (human.on && m.team === HUMAN ? 0.55 : 0.35)) startSteal(p);
+    if (!ctl(p.team) && !p.action && !m.action && d2(p.pos, mp) < 1.35 && Math.random() < dt * (human.on && m.team === HUMAN ? 0.55 : 0.35)) startSteal(p);
   } else if (ball.holder && ball.holder.team !== p.team && isHelper(p)) {
     const hp = bodyPos(ball.holder), hr = flat(hp.x - D.rim.x, hp.z - D.rim.z).normalize();
     goal = flat(D.rim.x + hr.x * 1.7, D.rim.z + hr.z * 1.7);
@@ -483,7 +485,8 @@ function updateCamera(dt) {
   if (camMode === 'arena') {
     // Clash Royale style: high above Purple's baseline, looking down the length of the court (court runs bottom to top on a phone)
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
-    pos = new pc.Vec3(-34 + drift, 19, 0); look = new pc.Vec3(0.8 + drift, -1.5, 0); fov = 40;
+    const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
+    pos = new pc.Vec3(side * -34 + drift, 19, 0); look = new pc.Vec3(side * 0.8 + drift, -1.5, 0); fov = 40;
     camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.7 / aspect, 12.6);
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
@@ -505,6 +508,7 @@ function updateCamera(dt) {
 
 // ====================================================================== main loop
 app.on('update', dt => {
+  if (NET.role === 'guest') return guestFrame(dt);
   if (game.paused) return;
   game.time += dt; game.timer -= dt;
   const live = game.phase === 'live' || game.phase === 'air' || game.phase === 'loose';
@@ -534,10 +538,10 @@ app.on('update', dt => {
     const crashers = ball.free && !ball.pass ? P.slice().sort((a, b) => d2(a.pos, ball.pos) - d2(b.pos, ball.pos)).slice(0, 3) : [];
     for (const p of P) {
       if (p.action) continue;
-      if (ball.holder === p) (human.on && p.team === HUMAN ? humanAI : handlerAI)(p, dt);
+      if (ball.holder === p) (ctl(p.team) ? humanAI : handlerAI)(p, dt);
       else if (ball.free && !ball.pass && (game.phase === 'loose' || (ball.pos.y < 2.6 && ball.vel.y < 0)) && crashers.includes(p)) chase(p, dt);
       else if (p.team === game.offense) offballAI(p, dt);
-      else if (human.on && p === myDefender()) humanDefAI(p, dt);
+      else if (ctl(p.team) && p === myDefender(p.team)) humanDefAI(p, dt);
       else defenseAI(p, dt);
     }
     if (ball.pass) {
@@ -553,35 +557,39 @@ app.on('update', dt => {
     }
     if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); sfx('whistle', 0.7); inbound(1 - game.offense, flat(0, 0)); }
   }
+  for (const q of P) if (ctl(q.team)) { if (q.drain > 0) q.drain -= dt; else q.stamina = Math.min(1, q.stamina + dt * 0.15); }   // each player has their own stamina
+  viewFrame(dt);
+  updateActions(dt);
+  for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
+  bodies();
+  for (const p of P) { if (!p.action || p.action.type !== 'dunk') { clamp(p.pos); place(p); } }
+  if (ball.free) stepBall(dt);
+  updateCamera(dt); hud(); netSend();
+});
+// HUD pieces every screen runs (host or guest): meters, stamina bars, ball ring, dribble sound
+function viewFrame(dt) {
+  meterTick();
   if (human.freeze > 0) {      // hold the marker where the player stopped it
     human.freeze -= dt;
     if (human.freeze <= 0) { human.mt = 0; if (human.after === 'hide') { human.meter = false; meterEl.className = ''; } human.after = null; }
   } else if (human.meter) { human.mt += dt * (human.mspeed || 1); markEl.style.left = (50 + 46 * meterPos()) + '%'; }
-  // defense: the steal meter stays on screen the whole time Teal has the ball
-  if (defMode()) {
+  if (defMode()) {   // defense: the steal meter shows while your closest defender is in range
     const d = closestDef(), near = d && d2(d.pos, bodyPos(ball.holder)) < 1.6;
     if (near) { if (!human.meter || !human.auto) { human.meter = true; human.auto = true; human.mt = 0; meterEl.className = 'show steal'; setZone(0.087); human.mspeed = 1; } $('mlabel').textContent = 'TAP TO STEAL'; }
     else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; }
     for (const q of team(HUMAN)) q.label.classList.toggle('near', q === d && near);
   } else if (human.auto && !(human.freeze > 0)) { human.meter = human.auto = false; meterEl.className = ''; for (const q of P) q.label.classList.remove('near'); }
   if (human.meter && !human.auto && !myBall() && !human.down && !(human.freeze > 0)) { human.meter = false; meterEl.className = ''; }
-  for (const q of team(HUMAN)) {   // each player has their own stamina
-    if (q.drain > 0) q.drain -= dt; else q.stamina = Math.min(1, q.stamina + dt * 0.15);
-    const f = q.label.querySelector('.sbar b'); if (f) { f.style.width = (q.stamina * 100).toFixed(0) + '%'; f.parentNode.classList.toggle('low', q.stamina < 0.25); f.parentNode.hidden = !human.on; }
-  }
-  // green ring under the ball handler
-  const bh = ball.holder; ballRing.enabled = !!bh; if (bh) { const bp = bodyPos(bh); ballRing.setPosition(bp.x, 0.03, bp.z); }
-  updateActions(dt);
-  for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
-  bodies();
-  for (const p of P) { if (!p.action || p.action.type !== 'dunk') { clamp(p.pos); place(p); } }
-  if (ball.free) stepBall(dt); else dribbleSound();
-  updateCamera(dt); hud();
-});
+  for (const q of P) { const f = q.label.querySelector('.sbar b'); if (f) { f.style.width = (q.stamina * 100).toFixed(0) + '%'; f.parentNode.classList.toggle('low', q.stamina < 0.25); f.parentNode.hidden = !(human.on && q.team === HUMAN); } }
+  const bh = ball.holder; ballRing.enabled = !!bh; if (bh) { const bp = bodyPos(bh); ballRing.setPosition(bp.x, 0.03, bp.z); }   // green ring under the ball handler
+  if (!ball.free) dribbleSound();
+}
 
 // ====================================================================== sound
 let actx = null, master = null, crowdSrc = null, crowdGain = null; const SND = {}, lastPlay = {};
-function sfx(kind, vol = 1) {
+function crowdReact(t) { setTimeout(() => t === HUMAN ? cheer() : sfxL('boo', 0.6), 150); }
+function sfx(kind, vol = 1) { netEv('sfx', kind, vol); sfxL(kind, vol); }
+function sfxL(kind, vol = 1) {
   if (!actx) return;
   if (SND[kind]) {                                   // recorded samples
     const now = actx.currentTime; if (now - (lastPlay[kind] || -9) < 0.1) return; lastPlay[kind] = now;
@@ -603,8 +611,8 @@ function startAudio() {
 }
 // a made basket: layered cheer clips over a crowd swell that fades back down over ~4 s
 function cheer() {
-  if (!actx) return; sfx('cheer', 0.9);
-  [0.75, 1.5, 2.3].forEach((d, i) => setTimeout(() => { lastPlay.cheer = -9; sfx('cheer', 0.7 - i * 0.18); }, d * 1000));
+  if (!actx) return; sfxL('cheer', 0.9);
+  [0.75, 1.5, 2.3].forEach((d, i) => setTimeout(() => { lastPlay.cheer = -9; sfxL('cheer', 0.7 - i * 0.18); }, d * 1000));
   if (crowdGain) { const t = actx.currentTime, gg = crowdGain.gain; gg.cancelScheduledValues(t); gg.setValueAtTime(gg.value, t); gg.linearRampToValueAtTime(1.0, t + 0.4); gg.setValueAtTime(1.0, t + 2.2); gg.linearRampToValueAtTime(0.35, t + 4.5); }
 }
 document.addEventListener('pointerdown', startAudio);
@@ -615,7 +623,7 @@ function dribbleSound() {
   const y = h.ballNode.getPosition().y;
   if (h !== dribP) { dribP = h; dribY = y; dribDown = false; return; }
   if (y < dribY - 0.002) dribDown = true;
-  else if (dribDown && y > dribY + 0.002) { if (dribY < 0.35) sfx('bounce', 0.55); dribDown = false; }
+  else if (dribDown && y > dribY + 0.002) { if (dribY < 0.35) sfxL('bounce', 0.55); dribDown = false; }
   dribY = y;
 }
 
@@ -629,7 +637,8 @@ $('restart').onclick = () => restart();
 $('mute').onclick = () => { $('mute').classList.toggle('on'); if (master) master.gain.value = $('mute').classList.contains('on') ? 0 : 1; };
 // ====================================================================== player controls (Purple)
 // tap court = move ball handler there, tap teammate = pass, hold 1 s = timing meter, release = shoot
-const HUMAN = 0;
+let HUMAN = 0;   // the team this screen controls (Teal when joined as a guest)
+const ctl = t => (human.on && t === HUMAN) || (NET.role === 'host' && NET.peer && t === 1);
 // marker position -1..1; starts at the left edge so the first pass through the centre is catchable
 function setZone(halfM) {   // halfM: perfect window half-width in marker units (marker spans 46% of the bar each side)
   human.zone = halfM; const w = halfM * 46 * 2, pf = meterEl.querySelector('.perfect');
@@ -650,7 +659,7 @@ canEl.addEventListener('pointerdown', e => {
   if (defMode()) {
     const d = closestDef();
     if (d && !d.action && d2(d.pos, bodyPos(ball.holder)) < 1.6) {     // in range: tap = steal now
-      const m = meterPos(); d.stealQ = Math.max(0, 1 - Math.abs(m)); d.moveTarget = null; startSteal(d); human.freeze = 0.3; human.after = null; return;
+      const m = meterPos(); act({ t: 'steal', p: d.id, q: Math.max(0, 1 - Math.abs(m)) }); human.freeze = 0.3; human.after = null; return;
     }
   }
   try { canEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -660,41 +669,41 @@ canEl.addEventListener('pointerdown', e => {
 function onRelease(e) {
   if (!human.down) return; human.down = false;
   if (defMode()) {           // defense: a short tap moves the closest defender (holding just chases)
-    const dd = myDefender(); if (dd && performance.now() - human.t0 < 250) { const g = groundAt(human.x, human.y); if (g) moveOrder(dd, g); } return;
+    const dd = myDefender(); if (dd && performance.now() - human.t0 < 250) { const g = groundAt(human.x, human.y); if (g) act({ t: 'move', p: dd.id, x: g.x, z: g.z }); } return;
   }
   if (!human.auto && !human.meter) meterEl.className = '';
   const h = ball.holder; if (!myBall()) { human.meter = false; return; }
   if (human.meter) {          // shoot with the meter reading
     const m = meterPos(); human.freeze = 0.7; human.after = 'hide';
-    const am = Math.abs(m); h.shotQ = am <= human.zone ? 1 : Math.max(0, 0.9 * (1 - am) / (1 - human.zone)); h.moveTarget = null; startShot(h); return;
+    const am = Math.abs(m); act({ t: 'shoot', p: h.id, q: am <= human.zone ? 1 : Math.max(0, 0.9 * (1 - am) / (1 - human.zone)) }); return;
   }
   // tap: teammate under the finger = pass, else move there
   let best = null, bd = 48;
   for (const q of team(HUMAN)) { if (q === h) continue; const s = screenOf(q), d = Math.hypot(s.x - human.x, s.y - human.y); if (d < bd) { bd = d; best = q; } }
-  if (best) { best.lastPasser = h; h.moveTarget = null; startPass(h, best); return; }
-  const g = groundAt(human.x, human.y); if (g) moveOrder(h, g);
+  if (best) { act({ t: 'pass', p: h.id, to: best.id }); return; }
+  const g = groundAt(human.x, human.y); if (g) act({ t: 'move', p: h.id, x: g.x, z: g.z });
 }
 window.addEventListener('pointerup', onRelease); canEl.addEventListener('contextmenu', e => e.preventDefault());
-function myDefender() {
-  const h = ball.holder; if (!human.on || !h || h.team === HUMAN || game.phase !== 'live') return null;
-  let d = null, bd = 1e9; for (const q of team(HUMAN)) { const dist = d2(q.pos, bodyPos(h)); if (dist < bd) { bd = dist; d = q; } }
+function myDefender(t = HUMAN) {
+  const h = ball.holder; if (!ctl(t) || !h || h.team === t || game.phase !== 'live') return null;
+  let d = null, bd = 1e9; for (const q of team(t)) { const dist = d2(q.pos, bodyPos(h)); if (dist < bd) { bd = dist; d = q; } }
   return d && !d.action ? d : null;
 }
 function defMode() { const h = ball.holder; return human.on && h && h.team !== HUMAN && game.phase === 'live'; }
 function closestDef() { const h = ball.holder; let d = null, bd = 1e9; for (const q of team(HUMAN)) { const x = d2(q.pos, bodyPos(h)); if (x < bd) { bd = x; d = q; } } return d; }
 function humanDefAI(p, dt) {
   const h = ball.holder, near = d2(p.pos, bodyPos(h)) < 1.6;
-  if (human.down) {
+  if (p.team === HUMAN ? human.down : NET.rdown) {
     const hp = bodyPos(h), D = defendHoop(p.team), toR = flat(D.rim.x - hp.x, D.rim.z - hp.z).normalize();
     p.moveTarget = null; steer(p, hp.clone().add(toR.mulScalar(0.9)), 4.0, dt, 16); animMove(p, dt, 'stance'); faceTo(p, hp.x, hp.z, 9, dt);
-    p.label.classList.toggle('near', near); return;
+    if (p.team === HUMAN) p.label.classList.toggle('near', near); return;
   }
   if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.6 * sprintMul(p, dt), dt, p.sprint ? 18 : 15); animMove(p, dt, 'stance'); faceTo(p, h.pos.x, h.pos.z, 7, dt);
     if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; p.sprintT = 0; }
   } else defenseAI(p, dt);            // no order: stay on your man
-  p.label.classList.toggle('near', near);
+  if (p.team === HUMAN) p.label.classList.toggle('near', near);
 }
 // sprint: tapping the same spot again (within 1.5 s) sprints there, burning stamina; empty bar = normal run
 function sprintMul(p, dt) {
@@ -708,19 +717,10 @@ function moveOrder(p, g) {
   const sameArea = p.moveTarget && d2(p.moveTarget, g) < 1.6;
   if (sameArea) p.sprintT = Math.min(3, (p.sprintT > 0 ? p.sprintT : 0) + 0.5);
   else p.sprintT = 0;
-  p.moveTarget = clamp(g); ring(g, p.sprintT > 0 && p.stamina > 0.05);
+  p.moveTarget = clamp(g); if (p.team === HUMAN) ring(g, p.sprintT > 0 && p.stamina > 0.05);
 }
 function humanAI(p, dt) {
   p.holdT += dt;
-  if (human.down && performance.now() - human.t0 > 250) {   // a 0.25 s hold brings up the shot meter
-    if (!human.meter && performance.now() - human.t0 > 250) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
-    // the more open the shooter, the wider the perfect (green) window
-    const op = openness(p), dr = d2(p.pos, attackHoop(p.team).rim);
-    const df = dr < 3 ? 1.3 : dr < 5 ? 1.1 : dr < ARC ? 0.9 : dr < 8 ? 0.75 : 0.6;   // closer shots get a wider window too
-    setZone(Math.min(0.45, (op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27) * df));
-    human.mspeed = op < 1.0 ? 1.15 : op < 1.6 ? 1.0 : op < 2.4 ? 0.88 : op < 3.5 ? 0.78 : 0.68;   // open shooters get a slower sweep
-    $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
-  }   // holding the meter does not stop the player: they keep travelling until the shot is released
   if (p.moveTarget) {
     steer(p, p.moveTarget, 3.4 * sprintMul(p, dt), dt, p.sprint ? 18 : 13);
     if (d2(p.pos, p.moveTarget) < 0.35) { p.moveTarget = null; p.sprint = false; p.sprintT = 0; }
@@ -728,10 +728,154 @@ function humanAI(p, dt) {
   animMove(p, dt, 'handler');
   if (!p.moveTarget && p.vel.length() < 0.5) { const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z, 5, dt); }
 }
+function meterTick() {   // a 0.25 s hold brings up the shot meter
+  const p = ball.holder; if (!myBall() || !human.down || performance.now() - human.t0 <= 250) return;
+    if (!human.meter && performance.now() - human.t0 > 250) { human.meter = true; human.mt = 0; meterEl.className = 'show'; }
+    // the more open the shooter, the wider the perfect (green) window
+    const op = openness(p), dr = d2(p.pos, attackHoop(p.team).rim);
+    const df = dr < 3 ? 1.3 : dr < 5 ? 1.1 : dr < ARC ? 0.9 : dr < 8 ? 0.75 : 0.6;   // closer shots get a wider window too
+    setZone(Math.min(0.45, (op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27) * df));
+    human.mspeed = op < 1.0 ? 1.15 : op < 1.6 ? 1.0 : op < 2.4 ? 0.88 : op < 3.5 ? 0.78 : 0.68;   // open shooters get a slower sweep
+    $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
+}
 const ringEl = $('ring');
 function ring(g, sprint) { ringEl.style.borderColor = sprint ? '#ff6a3d' : '#ffd27a'; const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
 $('mode').onclick = () => { human.on = !human.on; $('mode').textContent = human.on ? 'Watch AI' : 'Play'; $('hint').hidden = !human.on; };
-window.game = { callFoul, game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
+// ====================================================================== online head-to-head
+// The host's screen runs the whole game (Purple). A guest who joins controls Teal: their taps travel to the
+// host as commands, and the host streams the game state back. Both ride on the room's presence channel.
+const STATES = ['Idle', 'Dribble', 'Shoot', 'Dunk', 'Run', 'RunB', 'RunC', 'DribbleRun', 'Defend', 'Block', 'Ready', 'Pass', 'Steal', 'SlideL', 'SlideR'];
+const ACTS = ['', 'shoot', 'dunk', 'pass', 'block', 'steal'];
+function netEv(type, a, b) {   // host: queue something the guest should also see or hear
+  if (NET.role !== 'host' || !NET.peer) return;
+  NET.ev.push([++NET.evSeq, type, a, b]); if (NET.ev.length > 14) NET.ev.shift();
+}
+function act(c) {               // a command from this screen's player
+  if (NET.role === 'guest') {
+    c.n = ++NET.seq; NET.cmds.push(c); if (NET.cmds.length > 8) NET.cmds.shift();
+    if (c.t === 'move') ring(flat(c.x, c.z), false);
+    NET.room.presence({ cmds: NET.cmds, down: false }).catch(() => {});
+  } else apply(c, HUMAN);
+}
+function apply(c, t) {          // runs on the host only; t = the team the command came from
+  const p = P[c.p]; if (!p || p.team !== t || game.phase !== 'live' && c.t !== 'move') return;
+  const q = Math.max(0, Math.min(1, +c.q || 0));
+  if (c.t === 'move') { if (Number.isFinite(c.x) && Number.isFinite(c.z)) moveOrder(p, flat(c.x, c.z)); }
+  else if (c.t === 'steal') { const h = ball.holder; if (!p.action && h && h.team !== t && d2(p.pos, bodyPos(h)) < 1.9) { p.stealQ = q; p.moveTarget = null; startSteal(p); } }
+  else if (ball.holder !== p || p.action) return;
+  else if (c.t === 'shoot') { p.shotQ = q; p.moveTarget = null; startShot(p); }
+  else if (c.t === 'pass') { const r = P[c.to]; if (r && r !== p && r.team === t) { r.lastPasser = p; p.moveTarget = null; startPass(p, r); } }
+}
+const r2 = v => Math.round(v * 100) / 100;
+function netSend() {            // host: stream the state to the guest (presence is coalesced to ~30 Hz)
+  if (NET.role !== 'host' || !NET.peer) return;
+  const now = performance.now(); if (now - NET.sent < 40) return; NET.sent = now;
+  const s = {
+    ph: game.phase, sc: game.score, sk: Math.max(0, Math.ceil(game.shotClock)), of: game.offense,
+    bh: ball.holder ? ball.holder.id : -1, b: [r2(ball.pos.x), r2(ball.pos.y), r2(ball.pos.z)],
+    p: P.map(p => [r2(p.pos.x), r2(p.pos.z), r2(p.yaw), STATES.indexOf(p.state), r2(p.model.anim.speed), ACTS.indexOf(p.action ? p.action.type : ''), r2(p.stamina)])
+  };
+  NET.room.presence({ host: 1, s, ev: NET.ev }).catch(() => {});
+}
+function onHostState(pr) {      // guest: take in the host's latest state
+  if (!pr || !pr.s) return; NET.snap = pr.s;
+  for (const e of (Array.isArray(pr.ev) ? pr.ev : [])) {
+    if (!(e[0] > NET.lastEv)) continue; NET.lastEv = e[0];
+    if (e[1] === 'toast') toast(String(e[2]).slice(0, 80), !!e[3]);
+    else if (e[1] === 'sfx' && typeof e[2] === 'string') sfxL(e[2], +e[3] || 1);
+    else if (e[1] === 'score') crowdReact(e[2]);
+    else if (e[1] === 'ban') { $('banner').textContent = String(e[2]).slice(0, 40); $('banner').className = e[3] === 'show t0' || e[3] === 'show t1' ? e[3] : ''; }
+  }
+}
+function guestFrame(dt) {
+  const s = NET.snap;
+  if (s) {
+    game.phase = s.ph; game.score = s.sc; game.shotClock = s.sk; game.offense = s.of;
+    const k = Math.min(1, dt * 14);
+    P.forEach((p, i) => {
+      const v = s.p[i]; if (!v) return;
+      const tx = v[0], tz = v[1], far = Math.hypot(tx - p.pos.x, tz - p.pos.z) > 3;
+      p.pos.x += (tx - p.pos.x) * (far ? 1 : k); p.pos.z += (tz - p.pos.z) * (far ? 1 : k);
+      let dy = Math.atan2(Math.sin(v[2] - p.yaw), Math.cos(v[2] - p.yaw)); p.yaw += dy * (far ? 1 : k);
+      const st = STATES[v[3]]; if (st) { if (p.state === 'Dunk' && st !== 'Dunk') p.rootBone.setLocalPosition(0, 0, 0); setAnim(p, st, 0.12, v[4]); }
+      const a = ACTS[v[5]]; p.action = a ? { type: a } : null; p.stamina = v[6];
+      place(p);
+    });
+    const h = s.bh >= 0 ? P[s.bh] : null;
+    if (h !== ball.holder || (!h) !== ball.free) {
+      if (h) { ball.holder = h; ball.free = false; ball.ent.enabled = false; for (const q of P) q.ballNode.enabled = q === h; }
+      else { ball.holder = null; ball.free = true; ball.ent.enabled = true; for (const q of P) q.ballNode.enabled = false; ball.pos.set(s.b[0], s.b[1], s.b[2]); }
+    }
+    if (ball.free) {
+      const far = Math.hypot(s.b[0] - ball.pos.x, s.b[1] - ball.pos.y, s.b[2] - ball.pos.z) > 2.5, kb = far ? 1 : Math.min(1, dt * 20);
+      ball.pos.x += (s.b[0] - ball.pos.x) * kb; ball.pos.y += (s.b[1] - ball.pos.y) * kb; ball.pos.z += (s.b[2] - ball.pos.z) * kb;
+      ball.ent.setPosition(ball.pos);
+    }
+  }
+  if (NET.room) NET.room.presence({ down: !!(human.down && defMode()) }).catch(() => {});
+  viewFrame(dt); updateCamera(dt); hud();
+}
+
+// ---- lobby: "Online" opens a panel; hosts advertise a game in the lobby, guests pick one to join
+const panel = document.createElement('div'); panel.id = 'online'; panel.hidden = true;
+panel.innerHTML = '<b>Play online</b><p id="onmsg">Host a game, then send this page\'s link to a friend. When they open it and tap <i>Online</i>, your game shows up for them to join.</p><div id="onlist"></div><div class="onrow"><button id="onhost">Host a game</button><button id="onclose">Close</button></div>';
+document.body.appendChild(panel);
+const onBtn = document.createElement('button'); onBtn.id = 'online-btn'; onBtn.textContent = 'Online'; onBtn.hidden = true; $('controls').prepend(onBtn);
+onBtn.onclick = () => { panel.hidden = !panel.hidden; renderLobby(); };
+$('onclose').onclick = () => { panel.hidden = true; };
+function renderLobby() {
+  const list = $('onlist'); list.textContent = '';
+  if (NET.role) { $('onhost').textContent = 'Leave online game'; return; }
+  $('onhost').textContent = 'Host a game';
+  const open = NET.lobby ? NET.lobby.peers().filter(p => !p.sameTab && p.presence && typeof p.presence.open === 'string' && /^[a-z0-9]{4,8}$/.test(p.presence.open)) : [];
+  if (!open.length) { const i = document.createElement('i'); i.textContent = 'No open games yet.'; list.appendChild(i); }
+  for (const p of open) { const b = document.createElement('button'); b.textContent = 'Join game ' + p.presence.open.toUpperCase(); b.onclick = () => joinGame(p.presence.open); list.appendChild(b); }
+}
+function onlineMode(on, team) {
+  HUMAN = team; human.on = true; game.paused = false; app.timeScale = 1; speed = 1; $('speed').textContent = '1×'; $('pause').textContent = 'Pause';
+  for (const id of ['mode', 'pause', 'speed', 'restart']) $(id).hidden = on;
+  $('hint').innerHTML = 'You are <b>' + (team ? 'Teal' : 'Purple') + '</b>' + (on ? ' · online vs a friend' : '') + ' · tap court to move · tap a teammate to pass · keep tapping the spot to sprint · hold to shoot · on defense get close and tap to steal';
+  $('hint').hidden = false; human.meter = human.auto = false; meterEl.className = '';
+}
+async function leaveGame(msg) {
+  const r = NET.room; NET.role = NET.peer = NET.room = NET.snap = NET.code = null; NET.rdown = false;
+  if (r) r.leave().catch(() => {}); if (NET.lobby) NET.lobby.presence({ open: null }).catch(() => {});
+  onlineMode(false, 0); if (msg) toast(msg, true); restart(); renderLobby();
+}
+$('onhost').onclick = async () => {
+  if (NET.role) return leaveGame('Left the online game');
+  const code = Math.random().toString(36).slice(2, 7);
+  let room; try { room = await NET.api.join('cc-' + code); } catch (e) { $('onmsg').textContent = 'Could not open a game here (' + (e && e.code || 'error') + ').'; return; }
+  Object.assign(NET, { role: 'host', room, code, peer: null, ev: [], evSeq: 0, lastCmd: 0 });
+  NET.lobby.presence({ open: code }).catch(() => {});
+  $('onmsg').textContent = 'Game ' + code.toUpperCase() + ' is open. Waiting for your friend to join…'; renderLobby();
+  room.onPeers(ch => {
+    if (!NET.peer) { const g = ch.peers.find(p => !p.sameTab && p.presence && p.presence.guest); if (g) {
+      NET.peer = g.peer; NET.lobby.presence({ open: null }).catch(() => {}); panel.hidden = true; onlineMode(true, 0); restart(); toastL('Friend joined — you are Purple', true); } }
+    if (NET.peer && ch.left.some(p => p.peer === NET.peer)) return leaveGame('Your friend left');
+    const g = ch.peers.find(p => p.peer === NET.peer); if (!g) return;
+    const pr = g.presence; NET.rdown = !!pr.down;
+    for (const c of (Array.isArray(pr.cmds) ? pr.cmds : [])) if (c && c.n > NET.lastCmd) { NET.lastCmd = c.n; apply(c, 1); }
+  });
+};
+async function joinGame(code) {
+  let room; try { room = await NET.api.join('cc-' + code); } catch (e) { $('onmsg').textContent = 'Could not join (' + (e && e.code || 'error') + ').'; return; }
+  Object.assign(NET, { role: 'guest', room, code, seq: 0, cmds: [], lastEv: 0, snap: null, peer: null });
+  room.presence({ guest: 1, cmds: [], down: false }).catch(() => {});
+  onlineMode(true, 1); panel.hidden = true; toast('Joining game ' + code.toUpperCase() + '…', true);
+  room.onPeers(ch => {
+    const h = ch.peers.find(p => !p.sameTab && p.presence && p.presence.host);
+    if (h) { if (!NET.peer) { NET.peer = h.peer; toast('Connected — you are Teal', true); } if (h.peer === NET.peer) onHostState(h.presence); }
+    if (NET.peer && ch.left.some(p => p.peer === NET.peer)) leaveGame('The host left');
+  });
+}
+(async () => {   // light up the Online button only where the page can reach a room
+  try { if (!window.claude || !window.claude.use) return; const api = await window.claude.use('room'); if (!api) return;
+    NET.api = api; NET.lobby = api; onBtn.hidden = false; api.onPeers(() => { if (!panel.hidden) renderLobby(); });
+  } catch (e) {}
+})();
+
+window.game = { NET, callFoul, game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
 app.start(); $('loading').hidden = true;
 } catch (e) { $('loading').textContent = 'Unable to start: ' + (e && e.message || e); console.error(e); }
