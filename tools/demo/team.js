@@ -132,7 +132,7 @@ function drawTeam() {
     <div class="tn">${letters(TEAM.name, TEAM.font || 0)}</div><div class="tc"><i style="background:${col[1]}"></i>TEAM COLOR: ${col[0]}</div>
     <div class="tcount">${num(R.length)}<b>/</b>${num(ROSTER_MAX)}<small>PLAYERS</small></div>
     <div class="trate"><small>TEAM RATING</small>${num(teamRating(), 'g')}</div>
-    <button class="bgold tedit" data-act="go" data-val="edit"><i class="ic i-pencil"></i><span class="lbl">EDIT TEAM</span></button></div>
+    <button class="bgold tedit" data-act="go" data-val="edit"><span class="lbl">EDIT TEAM</span></button></div>
   <div class="sec"><i class="sec-start"></i><button class="bdark" data-act="editlineup"><span class="lbl">${T.classList.contains('swap') ? 'DONE' : 'EDIT LINEUP'}</span></button></div>
   <div class="cards">${R.slice(0, 3).map((r, i) => `<button class="card${LINEUP === i ? ' gold' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i}">${pic(r)}<span class="lv">${num(r.lv)}</span><span class="nm">${esc(r.name)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('')}</div>
   <div class="sec"><i class="sec-bench"></i></div>
