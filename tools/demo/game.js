@@ -91,13 +91,15 @@ const XMAX = 14.2, ZMAX = 7.2;
 
 // ====================================================================== players
 const CLIPS = { Idle: 1, Dribble: 1, Shoot: 0, Dunk: 0, Run: 1, RunB: 1, RunC: 1, DribbleRun: 1, Defend: 1, Block: 0, Ready: 1, Pass: 0, Steal: 0, SlideL: 1, SlideR: 1 };
-const RUN_NATIVE = 0.21 / (0.46 * 0.38) * S,      // ground speed the Run cycle covers at 1x (feet don't skate when matched)
-     DRUN_NATIVE = RUN_NATIVE, SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
+const MS = 0.9;                                    // the Mixamo player model is 1.0 tall (old rig 0.9)
+const RUN_NATIVE = 1.65 * MS * S,                  // ground speed the Run cycle covers at 1x (measured on the retargeted clip)
+     DRUN_NATIVE = 0.9 * MS * S,                   /* DribbleRun: copied from the reference video, a slower jog */
+     SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
 const NAMES = [['Jax', 'Rook', 'Blaze'], ['Kai', 'Nova', 'Ziggy']];
 const P = [];
 function makePlayer(team, idx) {
   const ent = new pc.Entity(NAMES[team][idx]); app.root.addChild(ent);
-  const model = playerAsset.resource.instantiateRenderEntity(); ent.addChild(model); const k = [1.0, 0.95, 1.05, 0.97, 1.04, 1.0][P.length]; model.setLocalScale(S * k, S * k, S * k);
+  const model = playerAsset.resource.instantiateRenderEntity(); ent.addChild(model); const k = [1.0, 0.95, 1.05, 0.97, 1.04, 1.0][P.length]; model.setLocalScale(S * k * MS, S * k * MS, S * k * MS);
   if (team === 1) for (const r of model.findComponents('render')) for (const mi of r.meshInstances)
     if (mi.material && mi.material.name === 'player') { const m = mi.material.clone(); m.diffuseMap = tealAsset.resource; m.update(); mi.material = m; }
   model.addComponent('anim', { activate: true });
@@ -391,7 +393,7 @@ function laneClear(a, b, pad, t) {   // no player of team t near segment a->b
 function animMove(p, dt, mode) {
   const sp = p.vel.length();
   if (mode === 'handler') {
-    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / (DRUN_NATIVE * p.k), 0.3, 1.6)); }
+    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / (DRUN_NATIVE * p.k), 0.3, 2.1)); }
     else { setAnim(p, 'Dribble', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else if (mode === 'stance') {
     if (sp > 2.4 || (p.goalDist || 0) > 1.8) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); return; }
