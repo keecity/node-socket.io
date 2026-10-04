@@ -79,7 +79,9 @@ function drawGym() {
     const done = Date.now() >= r.train.end, i = R.indexOf(r);
     return `<button class="gslot busy${done ? ' done' : ''}" data-act="${done ? 'gymget' : ''}" data-val="${i}">${pic(r)}<b>${esc(r.name)}</b><i class="bar"><b style="width:${Math.min(100, (1 - (r.train.end - Date.now()) / (GYM_MIN * 60000)) * 100)}%"></b></i><small>${done ? 'TAP TO COLLECT' : gymLeft(r) + ' left'}</small></button>`;
   };
-  s.innerHTML = `<div class="ghero gslots"><i class="groom"></i><div class="gsl">${[0, 1, 2].map(slot).join('')}</div><div class="gcap">ONE SESSION PAYS UP TO <em>${gymMax()} XP</em> · 20% CHANCE OF +1 STAT</div></div>
+  s.innerHTML = `<div class="ghero"><i class="groom"></i><i class="glogo mascot lg${TEAM.mascot}"></i><div class="gtt"><b>GYM TRAINING</b><em>UP TO ${gymMax()} XP</em><small>PER SESSION · 20% CHANCE OF +1 STAT</small></div><div class="gex"><small>SLOTS:</small><b>${busy.length} / <em>${slotsOwned()}</em> IN USE</b></div></div>
+  <div class="gsec"><b>TRAINING SLOTS</b><small>SEND BENCH PLAYERS TO TRAIN.</small></div>
+  <div class="gsl">${[0, 1, 2].map(slot).join('')}</div>
   <div class="gsec"><b>EQUIPMENT</b><small>RAISES THE XP A TRAINING SESSION CAN PAY.</small></div>
   ${EQUIP.map((n, i) => { const lv = TEAM.gym[i] || 0, max = lv >= EQ_MAX, c = eqCost(i, lv);
     return `<div class="geq"><i class="gimg" style="background-image:var(--g-eq${i});--gm:var(--gm-eq${i})"></i><div class="ginfo"><b>${n}</b><span class="glv">${lv ? 'LV ' + lv : 'NOT OWNED'}</span><small>${max ? `+${lv * eqXP(i)} XP · MAX` : lv ? `+${lv * eqXP(i)} → <em>+${(lv + 1) * eqXP(i)} XP</em>` : `UNLOCK <em>+${eqXP(i)} XP</em>`}</small></div>${max ? '<div class="gbtn max"><b>MAXED</b></div>' : `<button class="gbtn${TEAM.cash < c ? ' off' : ''}" data-act="gymbuy" data-val="${i}"><b>${lv ? 'UPGRADE' : 'BUY'}</b><span>${coin}${c.toLocaleString()}</span></button>`}</div>`; }).join('')}

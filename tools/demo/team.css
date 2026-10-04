@@ -286,3 +286,4 @@
 #ucf .gpk{display:flex;align-items:center;gap:10px;padding:6px 10px;border:2px solid #b8c3cc44;border-radius:8px;background:#0f1b2a;color:#e8eef4;text-align:left}
 #ucf .gpk .pt{width:40px;height:40px;border-radius:6px}#ucf .gpk b{font:400 13px 'Russo One',system-ui;flex:1}#ucf .gpk small{font-size:10px;color:#8fa3b5}
 #team .brow .trn{display:block;font:400 9px 'Russo One',system-ui;font-style:normal;color:#3fe060;letter-spacing:.5px}
+#team .gsl{display:flex;gap:3%;margin:0 0 10px;height:clamp(96px,30cqw,130px)}
