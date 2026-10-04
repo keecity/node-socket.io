@@ -52,6 +52,20 @@ function ctEnd(won, margin) {   // after a match: pay for the win/loss and any f
   TEAM.cash += pay; ensureContracts(); saveTeam(); CT = null;
   return { pay, done };
 }
+// ---- gym: buy and upgrade equipment with cash; every level adds +5% to all match XP (bonuses stack, max level 3)
+const EQUIP = ['SHOOTING MACHINE', 'WEIGHT BENCH', 'TREADMILL', 'RECOVERY STATION', 'SPIN BIKE', 'ROWING MACHINE', 'POWER RACK', 'DUMBBELL RACK', 'CABLE MACHINE', 'PLYO BOXES', 'MEDICINE BALLS', 'PUSH SLED'];
+const EQ_MAX = 3, EQ_PCT = 5;
+const eqCost = (i, lv) => Math.round((300 + 150 * i) * (1 + 0.6 * lv) / 50) * 50;   // buy (lv 0) or upgrade price
+const gymPct = () => EQUIP.reduce((a, _, i) => a + ((TEAM.gym || {})[i] || 0) * EQ_PCT, 0);
+function drawGym() {
+  ensureContracts(); TEAM.gym ??= {}; const s = T.querySelector('.scr[data-v="gym"] .body'), pct = gymPct(), coin = '<i class="gcoin"></i>';
+  T.querySelector('.scr[data-v="gym"] .gcash').innerHTML = coin + TEAM.cash.toLocaleString();
+  s.innerHTML = `<div class="ghero"><i class="groom"></i><i class="glogo mascot lg${TEAM.mascot}"></i><div class="gtt"><b>TEAM TRAINING</b><em>+${pct}% MATCH XP</em><small>APPLIES TO EVERY ROSTER PLAYER.</small></div><div class="gex"><small>EXAMPLE:</small><b>100 XP → <em>${100 + pct} XP</em></b></div></div>
+  <div class="gsec"><b>EQUIPMENT</b><small>PERMANENT XP BONUSES STACK.</small></div>
+  ${EQUIP.map((n, i) => { const lv = TEAM.gym[i] || 0, max = lv >= EQ_MAX, c = eqCost(i, lv);
+    return `<div class="geq"><i class="gimg" style="background-image:var(--g-eq${i})"></i><div class="ginfo"><b>${n}</b><span class="glv">${lv ? 'LV ' + lv : 'NOT OWNED'}</span><small>${max ? `+${lv * EQ_PCT}% XP · MAX` : lv ? `+${lv * EQ_PCT}% → <em>+${(lv + 1) * EQ_PCT}% XP</em>` : `UNLOCK <em>+${EQ_PCT}% XP</em>`}</small></div>${max ? '<div class="gbtn max"><b>MAXED</b></div>' : `<button class="gbtn${TEAM.cash < c ? ' off' : ''}" data-act="gymbuy" data-val="${i}"><b>${lv ? 'UPGRADE' : 'BUY'}</b><span>${coin}${c.toLocaleString()}</span></button>`}</div>`; }).join('')}
+  <p class="ginf"><i class="ginfo-i"></i>EARN COINS BY PLAYING MATCHES.</p>`;
+}
 const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
 const lvNeed = lv => 3 + 3 * lv;   // level points for the next level: 6, 9, 12 ... (each upgrade gives +3)
 const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once activated; icon order follows the skill sheet
@@ -143,7 +157,7 @@ function skillPick(r) {   // level up: choose one of two skills (replaces the cu
   m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} REACHED LEVEL ${r.lv}!</h3><div class="cst">Choose a new skill — it becomes active, and your other skills stay unlocked</div><div class="sks">${two.map(k => `<button class="sk" data-act="skill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b><small>${SKILLS[k][1]}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">SKIP</button></div></div>`;
   m.hidden = false;
 }
-function teamXP(n) { TEAM.xp += Math.round(n); saveTeam(); }
+function teamXP(n) { TEAM.xp += Math.round(n * (1 + gymPct() / 100)); saveTeam(); }   // gym equipment boosts all match XP
 // starters drive the Purple players on court: names, hairstyles, speed and shooting
 function jerseyTex(base, ci) {   // recolour the purple jersey texture to a team colour, keeping its shading
   const k = '_j' + ci; if (base[k]) return base[k];
@@ -220,7 +234,7 @@ function openTeam(view, arg) {
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
   T.querySelectorAll('.tnav button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'details' && b.dataset.go === 'details')));
   setTC(view === 'edit' && EDIT ? EDIT.color : TEAM.color);
-  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails, contracts: drawContracts })[view]();
+  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails, contracts: drawContracts, gym: drawGym })[view]();
   T.querySelector('.scr[data-v="' + view + '"] .body').scrollTop = 0;
 }
 function closeTeam() { T.hidden = true; $('home').hidden = false; applyRoster(); }
@@ -229,6 +243,11 @@ T.addEventListener('click', e => {
   if (a === 'back') { if (T.dataset.view === 'team') closeTeam(); else openTeam('team'); }
   else if (a === 'go') openTeam(v);
   else if (a === 'player') openTeam('details', +v);
+  else if (a === 'gymbuy') {
+    TEAM.gym ??= {}; const i = +v, lv = TEAM.gym[i] || 0, c = eqCost(i, lv); if (lv >= EQ_MAX) return;
+    if (TEAM.cash < c) return toastL('Need ' + c.toLocaleString() + ' coins — earn coins by playing matches', false);
+    TEAM.cash -= c; TEAM.gym[i] = lv + 1; saveTeam(); sfxL('cheer', 0.4); toastL(EQUIP[i] + (lv ? ' upgraded to LV ' + (lv + 1) : ' bought') + ' — team XP +' + gymPct() + '%', true); drawGym();
+  }
   else if (a === 'lineup') {                      // tap two players to swap them (starters <-> bench)
     if (LINEUP === null) { LINEUP = +v; toastL('Now tap a player to swap with ' + TEAM.roster[+v].name, false); drawTeam(); }
     else { const i = LINEUP, j = +v; LINEUP = null; [TEAM.roster[i], TEAM.roster[j]] = [TEAM.roster[j], TEAM.roster[i]]; saveTeam(); applyRoster(); drawTeam(); }
@@ -336,5 +355,5 @@ function drawDetails() {
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
-$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hnup').onclick = () => openTeam('details', 0); $('hnshop').onclick = () => openTeam('draft');
+$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hndraft').onclick = () => openTeam('draft'); $('hnup').onclick = () => openTeam('details', 0); $('hngym').onclick = () => openTeam('gym');
 applyRoster();

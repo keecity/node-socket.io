@@ -195,3 +195,63 @@
 #team .ctm .bar{position:relative!important;left:auto!important;top:auto!important;width:100%!important;height:7px;border-radius:4px;background:#1e2733;overflow:hidden;display:block}#team .ctm .bar b{display:block;height:100%;background:linear-gradient(90deg,#c98a12,#ffc233)}
 #team .ctp{font:400 16px 'Russo One',system-ui;color:#ffc233}
 #team .cth{margin:10px 2px 6px;font:400 14px 'Russo One',system-ui;letter-spacing:1px;color:#e8eef4}#team .cth small{font:400 10px system-ui;color:#8fa3b5;margin-left:6px;letter-spacing:0}
+#team .tnav [data-go=gym]::before,#home .nav.hn [data-go=gym]::before{background-image:var(--t-n_stats)}
+#team .cashbar .gslots{margin-left:auto;margin-right:6px;font:400 10px 'Russo One',system-ui;color:#c9d6e2}
+#team .gtiers{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+#team .gt{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;border:2px solid #b8c3cc44;border-radius:8px;background:linear-gradient(#152235,#0b1420);text-align:center}
+#team .gt b{font:400 13px 'Russo One',system-ui;color:#ffc233;font-weight:400}#team .gt span{font-size:11px;color:#e8eef4}#team .gt small{font-size:9px;color:#8fa3b5;line-height:1.3}
+#team .grow{display:flex;align-items:center;gap:10px;padding:8px 10px;margin-bottom:6px;border:2px solid #b8c3cc44;border-radius:10px;background:linear-gradient(#152235,#0b1420)}
+#team .grow .pt{position:static;width:46px;height:46px;flex:none;border-radius:8px;clip-path:none}
+#team .gm{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}#team .gm>b{font:400 14px 'Russo One',system-ui;font-weight:400}#team .gm small{font-size:10px;color:#8fa3b5}
+#team .gm .bar{position:relative!important;left:auto!important;top:auto!important;width:100%!important;height:7px;border-radius:4px;background:#1e2733;overflow:hidden;display:block}#team .gm .bar b{display:block;height:100%;background:linear-gradient(90deg,#1fa36a,#3fe060)}
+#team .gb{flex:none;width:30%;aspect-ratio:459/113}#team .gb .lbl{font-size:clamp(9px,2.6cqw,12px);color:#fff;text-shadow:0 1px 0 #000,0 0 3px #000}#team .gb.off{filter:grayscale(1) brightness(.6)}
+#ucf .sk.off{opacity:.45}
+#team .brow .trn{display:block;font:400 9px 'Russo One',system-ui;font-style:normal;color:#3fe060;letter-spacing:.5px}
+/* 4-tab nav (team / draft / upgrades / gym) */
+#team .tnav.n4,#home .nav.hn.n4{background:var(--g-nav4) center/100% 100% no-repeat;padding:0 1.4%;display:flex}
+#team .tnav.n4 button,#home .nav.hn.n4 button{flex:none;padding:0;color:transparent;font-size:0;position:relative}
+#team .tnav.n4 button:nth-child(1),#home .nav.hn.n4 button:nth-child(1){width:26.2%}#team .tnav.n4 button:nth-child(2),#home .nav.hn.n4 button:nth-child(2),#team .tnav.n4 button:nth-child(3),#home .nav.hn.n4 button:nth-child(3){width:22.5%}#team .tnav.n4 button:nth-child(4),#home .nav.hn.n4 button:nth-child(4){width:25.6%}
+#team .tnav.n4 button::before,#home .nav.hn.n4 button::before{content:'';position:absolute;left:50%;top:14%;transform:translateX(-50%);width:62%;height:72%;background:center/contain no-repeat;opacity:.85}
+#team .tnav.n4 [data-go=team]::before,#home .nav.hn.n4 [data-go=team]::before{background-image:var(--g-i_team)}#team .tnav.n4 [data-go=draft]::before,#home .nav.hn.n4 [data-go=draft]::before{background-image:var(--g-i_draft)}
+#team .tnav.n4 [data-go=details]::before,#home .nav.hn.n4 [data-go=details]::before{background-image:var(--g-i_up)}#team .tnav.n4 [data-go=gym]::before,#home .nav.hn.n4 [data-go=gym]::before{background-image:var(--g-i_gym)}
+#team .tnav.n4 button.on::before{opacity:1;filter:sepia(1) saturate(6) hue-rotate(-12deg) brightness(1.1)}
+#team .tnav.n4 button.on::after{bottom:7%;width:56%}
+/* gym page */
+#team .ghdr .gtitle{position:absolute;left:50%;transform:translateX(-50%);bottom:6px;height:44px;aspect-ratio:500/131;background:var(--g-title) center/contain no-repeat}
+#team .ghdr .bk{background-image:var(--g-back)}
+#team .ghdr .gcash{position:absolute;right:3%;bottom:10px;height:34px;padding:0 12px 0 8px;display:flex;align-items:center;gap:6px;background:var(--g-pill) center/100% 100% no-repeat;font:400 clamp(12px,3.6cqw,16px) 'Russo One',system-ui;color:#fff}
+.gcoin{display:inline-block;width:1.25em;height:1.25em;background:var(--g-coin) center/contain no-repeat;vertical-align:-.25em}
+#team .ghero{position:relative;width:100%;aspect-ratio:900/400;margin-bottom:8px;isolation:isolate}
+#team .ghero::after{content:'';position:absolute;inset:0;background:var(--g-hero) center/100% 100% no-repeat;pointer-events:none;z-index:2}
+#team .ghero .groom{position:absolute;left:2%;right:2%;top:4%;height:68%;background:var(--g-room) center/cover no-repeat;border-radius:6px}
+#team .ghero .glogo{position:absolute;left:44%;top:12%;width:14%;aspect-ratio:1;opacity:.85;filter:drop-shadow(0 0 8px #7b3cf0)}
+#team .ghero .gtt{position:absolute;left:5%;top:66%;z-index:3;display:flex;flex-direction:column;line-height:1}
+#team .ghero .gtt b{font:400 clamp(14px,4.6cqw,22px) 'Russo One',system-ui;color:#fff;text-shadow:0 2px 0 #000}#team .ghero .gtt em{font:400 clamp(17px,5.6cqw,28px) 'Russo One',system-ui;font-style:normal;color:#ffd53a;text-shadow:0 2px 0 #000,0 0 10px #ffb52e88;margin:2px 0}
+#team .ghero .gtt small{font-size:clamp(7px,2cqw,10px);color:#c9d6e2;letter-spacing:.5px}
+#team .ghero .gex{position:absolute;right:5%;top:72%;z-index:3;display:flex;flex-direction:column;line-height:1.1;border-left:1px solid #ffffff33;padding-left:4%}
+#team .ghero .gex small{font-size:clamp(7px,2cqw,10px);color:#c9d6e2}#team .ghero .gex b{font:400 clamp(11px,3.4cqw,16px) 'Russo One',system-ui;color:#fff;font-weight:400}#team .ghero .gex em{font-style:normal;color:#ffd53a}
+#team .gsec{position:relative;display:flex;align-items:center;justify-content:space-between;width:100%;aspect-ratio:900/56;background:var(--g-secbar) center/100% 100% no-repeat;padding:0 4% 0 7%;margin-bottom:6px}
+#team .gsec b{font:400 clamp(13px,4cqw,19px) 'Russo One',system-ui;color:#fff;font-weight:400}#team .gsec small{font:400 clamp(6px,1.9cqw,9px) 'Russo One',system-ui;color:#9fb0bf}
+#team .geq{position:relative;display:flex;align-items:center;width:100%;aspect-ratio:900/118;background:var(--g-row) center/100% 100% no-repeat;margin-bottom:6px;isolation:isolate}
+#team .geq .gimg{flex:none;width:23%;height:84%;margin-left:2.5%;background:center/contain no-repeat}
+#team .geq .ginfo{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding-left:4%;line-height:1}
+#team .geq .ginfo b{font:400 clamp(11px,3.4cqw,16px) 'Russo One',system-ui;color:#fff;font-weight:400}
+#team .geq .glv{font:400 clamp(8px,2.4cqw,11px) 'Russo One',system-ui;color:#c9d6e2;padding:2px 10px;border:1px solid #8fa3b566;border-radius:10px;background:#0b1420}
+#team .geq .ginfo small{font:400 clamp(9px,2.8cqw,13px) 'Russo One',system-ui;color:#e8eef4}#team .geq .ginfo em{font-style:normal;color:#ffd53a}
+#team .geq .gbtn{flex:none;width:27%;height:80%;margin-right:2.5%;background:var(--g-gold) center/100% 100% no-repeat;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;color:#fff;text-shadow:0 1px 0 #000,0 0 3px #000}
+#team .geq .gbtn b{font:400 clamp(10px,3.2cqw,15px) 'Russo One',system-ui;font-weight:400}#team .geq .gbtn span{font:400 clamp(10px,3.2cqw,15px) 'Russo One',system-ui;display:flex;align-items:center;gap:3px}
+#team .geq .gbtn.off{filter:grayscale(.8) brightness(.7)}#team .geq .gbtn.max{filter:grayscale(1) brightness(.6)}
+#team .ginf{display:flex;align-items:center;justify-content:center;gap:8px;font:400 clamp(8px,2.6cqw,12px) 'Russo One',system-ui;color:#c9d6e2;margin:8px 0 12px}
+#team .ginf .ginfo-i{width:18px;height:18px;background:var(--g-info) center/contain no-repeat}
+/* purple frame accents follow the team colour */
+#team .ghero::before,#team .gsec::before,#team .geq::before{content:'';position:absolute;inset:0;pointer-events:none;background:var(--tc,#7b3cf0);mix-blend-mode:color;z-index:4}
+#team .ghero::before{-webkit-mask:var(--gm-hero) center/100% 100% no-repeat;mask:var(--gm-hero) center/100% 100% no-repeat}
+#team .gsec::before{-webkit-mask:var(--gm-secbar) center/100% 100% no-repeat;mask:var(--gm-secbar) center/100% 100% no-repeat}
+#team .geq::before{-webkit-mask:var(--gm-row) center/100% 100% no-repeat;mask:var(--gm-row) center/100% 100% no-repeat}
+#team .geq::before,#team .gsec::before{z-index:0}#team .geq>*,#team .gsec>*{position:relative;z-index:1}
+#team .ghero::before{z-index:3}#team .ghero .gtt,#team .ghero .gex{z-index:5}
+#team .ghero{aspect-ratio:900/430}#team .ghero .groom{top:5%;height:66%}
+#team .ghero .gtt{top:71.5%}#team .ghero .gex{top:76%}
+#team .geq{aspect-ratio:900/150}#team .geq .ginfo{gap:4px}
+#team .ghero{aspect-ratio:900/480}#team .ghero .groom{height:63%}#team .ghero .gtt{top:69%}#team .ghero .gex{top:74%}
+#team .ghero .groom{height:60%}#team .ghero .gtt{top:66%}#team .ghero .gex{top:71%}
