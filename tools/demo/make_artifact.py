@@ -5,3 +5,4 @@ assert h.endswith('</body></html>'); h=h[:-len('</body></html>')]
 h=h.replace('html,body{margin:0;height:100%;background:#080e17;','html,body{margin:0;height:100%;background:#080e17;color-scheme:dark;',1)
 h=h.replace('canvas{width:100vw;height:100vh;display:block;touch-action:none}','canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}',1)
 assert h.startswith('<title>'); open('court-clash.html','w').write(h); print('artifact', len(h))
+import subprocess; subprocess.run(['python3', 'webopt.py', 'court-clash.html'], check=True)   # save-for-web pass
