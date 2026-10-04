@@ -103,7 +103,7 @@ body{font-family:'Rajdhani',system-ui,sans-serif}
 #meterwrap{position:absolute;left:0;right:0;bottom:0;height:170px;pointer-events:none;background:linear-gradient(180deg,transparent,#060a10cc 45%)}
 #toast{top:calc(max(8px,env(safe-area-inset-top)) + 140px);font-family:'Russo One',system-ui,sans-serif;font-weight:400}
 #toast.big{color:#ffc233}
-#tut{top:calc(max(8px,env(safe-area-inset-top)) + 136px)}
+#tut{top:auto!important;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 104px)}
 '''+open('ui_sprites.css').read()+open('home.css').read()+open('home_sprites.css').read()+'''</style></head><body><canvas id="scene"></canvas><div class="deco tl"></div><div class="deco tr"></div><div class="deco bl"></div><div class="deco br"></div><div id="meterwrap"></div>
 <div id="board"><div class="team t0"><i class="lbl"></i><b id="s0" class="num"></b><i class="dot" id="poss0"></i></div><div id="mid"><i class="lbl"></i><div id="clock" class="num"></div></div><div class="team t1"><i class="lbl"></i><b id="s1" class="num"></b><i class="dot" id="poss1"></i></div><div id="ft21"></div></div>
 <div id="home"><div class="bg"></div><div class="dl"></div><div class="dr"></div>

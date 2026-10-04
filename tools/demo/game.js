@@ -571,7 +571,7 @@ function updateCamera(dt) {
   let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
   if (camMode === 'arena') {
     const H = document.body.clientHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
-    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, mr.top - 40) - 4, h = Math.max(0.3, (bot - top) / H);
+    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), tr_ = $('tut').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, tr_.height > 0 ? tr_.top : 1e9, mr.top - 40) - 4, h = Math.max(0.3, (bot - top) / H);
     camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
   } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
   const portrait = aspect < 0.9;

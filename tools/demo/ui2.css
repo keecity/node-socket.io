@@ -58,4 +58,4 @@ body{font-family:'Rajdhani',system-ui,sans-serif}
 #meterwrap{position:absolute;left:0;right:0;bottom:0;height:170px;pointer-events:none;background:linear-gradient(180deg,transparent,#060a10cc 45%)}
 #toast{top:calc(max(8px,env(safe-area-inset-top)) + 140px);font-family:'Russo One',system-ui,sans-serif;font-weight:400}
 #toast.big{color:#ffc233}
-#tut{top:calc(max(8px,env(safe-area-inset-top)) + 136px)}
+#tut{top:auto!important;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 104px)}
