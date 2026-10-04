@@ -102,7 +102,7 @@ function setHair(model, k, tint, old) {   // put hairstyle k (0-19) on a model's
   if (old) old.destroy();
   const hairs = hairAsset.resource.instantiateRenderEntity(), h = hairs.findByName('hair' + k);
   if (h) { const c = HAIR_TINT[tint % HAIR_TINT.length];
-    for (const r of h.findComponents('render')) for (const mi of r.meshInstances) { const m = mi.material.clone(); m.diffuse = new pc.Color(...c.map(v => v * 3.2)); m.gloss = 0.35; m.update(); mi.material = m; }
+    for (const r of h.findComponents('render')) for (const mi of r.meshInstances) { const m = mi.material.clone(); m.diffuse = new pc.Color(...c.map(v => v * 3.2)); m.gloss = 0.12; m.useMetalness = false; m.metalness = 0; m.specular = new pc.Color(0.04, 0.035, 0.03); m.specularMap = null; m.glossMap = null; m.update(); mi.material = m; }   // matte hair
     h.reparent(model.findByName('head')); h.setLocalPosition(0, 0, 0); h.setLocalEulerAngles(0, 0, 0); h.setLocalScale(1, 1, 1); }
   hairs.destroy(); return h;
 }
