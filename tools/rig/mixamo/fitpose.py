@@ -37,6 +37,10 @@ def video_classes(k):
 # --- pose from parameters (degrees). limb angles measured from straight down, + = forward
 PN = ['tx', 'hy', 'lean', 'neck', 'head', 'thR', 'shR', 'ftR', 'thL', 'shL', 'ftL', 'uaR', 'abR', 'faR', 'hdR', 'uaL', 'faL']
 REST = M.fk()
+from rig import qaxis, qmul
+def qaxis_v(v, deg): a = np.radians(deg) / 2; return np.array([*(np.sin(a) * v), np.cos(a)])
+FIST = {f'LeftHand{f}{j}': a for f in ('Index', 'Middle', 'Ring', 'Pinky') for j, a in ((1, 65), (2, 80), (3, 55))}
+FIST.update({'LeftHandThumb1': 15, 'LeftHandThumb2': 30, 'LeftHandThumb3': 25})
 def pose_from(p):
     d = dict(zip(PN, p)); t = {}
     lean = np.radians(d['lean']); td = np.array([0, np.cos(lean), np.sin(lean)])
@@ -87,6 +91,16 @@ def pose_from(p):
         if aim is not None:
             cur = Wc[:3, :3] @ child_dir(nm); Rn = qmat(qbetween(cur, aim)) @ Wc[:3, :3]
             Ln = Wp[:3, :3].T @ Rn; local[nm] = matq(Ln); Wc = Wp @ M.mat(tr, local[nm], s)
+        if nm == 'LeftHand':
+            # off hand: loose fist with the palm turned in toward the hip (front/side reference), not a flat paddle
+            ax = Wc[:3, :3] @ child_dir(nm); ax /= np.linalg.norm(ax); n_loc = REST[i][:3, :3].T @ np.array([0, -1.0, 0])
+            want = np.array([-0.85, -0.2, 0.0]); want /= np.linalg.norm(want); best = None
+            for deg in range(-180, 180, 10):
+                R = qmat(qaxis_v(ax, deg)) @ Wc[:3, :3]; sc_ = (R @ n_loc) @ want
+                if best is None or sc_ > best[0]: best = (sc_, R)
+            Ln = Wp[:3, :3].T @ best[1]; local[nm] = matq(Ln); Wc = Wp @ M.mat(tr, local[nm], s)
+        if nm in FIST:
+            local[nm] = qmul(q, qaxis('x', -FIST[nm])); Wc = Wp @ M.mat(tr, local[nm], s)
         Wd[i] = Wc
     return local, Wd
 def points(Wd):

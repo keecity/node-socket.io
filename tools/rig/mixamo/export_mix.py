@@ -64,7 +64,7 @@ W0 = M.fk(); IBMn = np.stack([np.linalg.inv(W0[j]).T for j in M.JOINTS]).astype(
 g.skins = [G.Skin(name='rig', joints=[NEW[j] for j in M.JOINTS], skeleton=0, inverseBindMatrices=add(IBMn.reshape(-1, 16), 5126, 'MAT4'))]
 g.nodes.append(G.Node(name='player_mesh', mesh=0, skin=0)); g.nodes.append(G.Node(name='basketball', mesh=1))
 g.scenes = [G.Scene(nodes=[0, nb, nb + 1])]; g.scene = 0
-ANIM_BONES = [M.ID[b] for b in list(RO.MAP) + ['Spine1']]
+ANIM_BONES = [M.ID[b] for b in list(RO.MAP) + ['Spine1']] + [M.ID[b] for b in __import__('fitpose').FIST]
 def write(name, frames, fps=FPS):
     """frames: list of (local{name: q}, hips_t, root_t, ball)"""
     t = add(f32(np.arange(len(frames)) / fps), 5126, 'SCALAR', None, True); an = G.Animation(name=name)
