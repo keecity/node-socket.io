@@ -14,7 +14,7 @@ def frame(k):
     hips = M.REST[M.ID['Hips']][0] + np.array([0, p[1], 0])
     V = M.skinned(M.fk(local, hips)); hips[1] -= V[FOOTV, 1].min()
     Wd = M.fk(local, hips)
-    b = FP.BALL[K0 + k]; c = np.array([-0.20, (419.3 - b[2]) / SC, (b[1] - p[0]) / SC])
+    b = FP.BALL[K0 + k]; c = np.array([BALL_X, (419.3 - b[2]) / SC, (b[1] - p[0]) / SC])
     hand = Wd[M.ID['RightHand']][:3, 3]; mid = Wd[M.ID['RightHandMiddle2']][:3, 3]; palm = (hand + mid) / 2
     if CONTACT[k]:                                         # hand on the ball: keep the smaller ball under the palm
         dirv = (palm - c); dirv[0] = 0; dirv /= np.linalg.norm(dirv); c = palm - dirv * (BR + 0.025); c[0] = palm[0] - 0.01
@@ -22,8 +22,17 @@ def frame(k):
         c[1] = c[1] - (VR - BR) * np.clip(1 - (c[1] - VR) / 0.25, 0, 1)
     c[1] = max(BR, c[1])
     return local, hips, np.zeros(3), c
+def _palm_x():
+    xs = []
+    for k in range(N):
+        if CONTACT[k]:
+            l, Wd = FP.pose_from(Ps[k]); xs.append(((Wd[M.ID['RightHand']][:3, 3] + Wd[M.ID['RightHandMiddle2']][:3, 3]) / 2)[0])
+    return float(np.median(xs)) if xs else -0.25
+BALL_X = -0.25
 def frames():
     fr = [frame(k) for k in range(N)]; return fr + [fr[0]]
 if __name__ == '__main__':
     for k in range(0, N, 4):
         l, h, r, c = frame(k); print(k, 'hips', h.round(3), 'ball', c.round(3))
+
+BALL_X = _palm_x() - 0.01

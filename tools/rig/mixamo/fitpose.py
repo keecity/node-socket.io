@@ -45,10 +45,10 @@ def pose_from(p):
     hd = np.radians(d['head']); t['Head'] = np.array([0, np.cos(hd), np.sin(hd)])
     t['RightUpLeg'] = SAG(np.radians(d['thR']), -0.05); t['RightLeg'] = SAG(np.radians(d['shR']), -0.03)
     t['LeftUpLeg'] = SAG(np.radians(d['thL']), 0.05); t['LeftLeg'] = SAG(np.radians(d['shL']), 0.03)
-    t['RightArm'] = SAG(np.radians(d['uaR']), -np.sin(np.radians(d['abR']))); t['RightForeArm'] = SAG(np.radians(d['faR']), -0.15)
+    t['RightArm'] = SAG(np.radians(d['uaR']), -0.50); t['RightForeArm'] = SAG(np.radians(d['faR']), -0.35)   # front-view reference: elbow ~28 deg out, forearm reaching out to the ball
     t['RightHand'] = SAG(np.radians(d['hdR']), -0.05)
-    uaL = float(np.clip(-0.4 * (d['thL'] - d['thR']) + 5, -28, 24))          # hidden in the video: swings opposite the left leg (capped)
-    t['LeftArm'] = SAG(np.radians(uaL), 0.12); t['LeftForeArm'] = SAG(np.radians(min(uaL + 80, 85)), 0.05)   # ~80 deg elbow, hand stays below the chest
+    uaL = float(np.clip(-0.25 * (d['thL'] - d['thR']) - 6, -22, 12))       # off arm (front/side reference): hangs close, slightly back, small pump
+    t['LeftArm'] = SAG(np.radians(uaL), 0.22); t['LeftForeArm'] = SAG(np.radians(uaL + 90), -0.10)   # ~90 deg elbow, hand in at belly height
     foot = {'Left': np.radians(d['ftL']), 'Right': np.radians(d['ftR'])}
     local = {}; Wd = {}
     for i in M.ORDER:
@@ -70,7 +70,8 @@ def pose_from(p):
             # a real elbow: the forearm folds forward from the upper arm (5-140 deg), elbow pointing back and out
             sg = 1 if nm.startswith('Left') else -1
             a1 = Wp[:3, :3] @ child_dir(M.NAME[M.PARENT[i]]); a1 /= np.linalg.norm(a1)
-            pole = np.array([sg * 0.35, 0.0, -1.0]); f = -(pole - (pole @ a1) * a1); f /= np.linalg.norm(f)
+            pole = np.array([sg * 0.35 if sg > 0 else 0.12, 0.0, -1.0])         # off arm: elbow out, hand in; dribble arm: elbow back, hand out over the ball
+            f = -(pole - (pole @ a1) * a1); f /= np.linalg.norm(f)
             a2 = aim / np.linalg.norm(aim); phi = np.arccos(np.clip(a2 @ a1, -1, 1))
             phi = np.clip(phi if (a2 @ f) >= 0 else 0.1, np.radians(5), np.radians(140))
             aim = np.cos(phi) * a1 + np.sin(phi) * f
