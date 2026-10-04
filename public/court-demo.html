@@ -20046,7 +20046,7 @@ function updateCamera(dt) {
     const fit = portrait ? 1 : 0.8, drift = pc.math.clamp(f.x, -8, 8) * 0.12;
     const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
     const sh = side * 1.3;   // nudge the view toward the far basket so its backboard has room under the scoreboard
-    pos = new pc.Vec3(side * -34 + drift + sh, 19, 0); look = new pc.Vec3(side * 0.8 + drift + sh, -1.5, 0); fov = 40;
+    pos = new pc.Vec3(side * -30 + drift + sh, 27, 0); look = new pc.Vec3(side * 0.8 + drift + sh, -1.5, 0);   /* steeper look-down: less foreshortening, court reads taller */ fov = 40;
     const ab = aspect * band.H / band.bh;                                    // shape of the gap the court must fit
     camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / ab, 10.4) * band.H / band.bh;
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
