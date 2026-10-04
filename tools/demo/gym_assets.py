@@ -24,8 +24,8 @@ for i,b in enumerate(eq2):
   c=a64.crop(b); bb=c.getbbox(); crops[f'eq{12+i}']=(a64,(b[0]+bb[0],b[1]+bb[1],b[0]+bb[2],b[1]+bb[3]))
 css=':root{'
 for k,(im,b) in crops.items():
-  c=im.crop(b); c=fit(c, 700 if k in('hero','row','secbar','nav4','room') else 180 if k.startswith('eq') else 300)
+  c=im.crop(b); c=fit(c, 700 if k in('hero','row','secbar','nav4','room') else 140 if k.startswith('eq') else 300)
   css+=f'--g-{k}:{u(c, 72 if k=="room" else 80)};'; S[k]=c.size
-  if k in ('hero','row','secbar'): css+=f'--gm-{k}:{u(mask(c),70)};'
+  if k in ('hero','row','secbar') or k.startswith('eq'): css+=f'--gm-{k}:{u(mask(c),50)};'
 css+='}\n'
 open('gym_sprites.css','w').write(css); print(S)
