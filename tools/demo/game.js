@@ -11,7 +11,7 @@ app.maxDeltaTime = 1 / 20;                       // game logic and animation sha
 app.scene.ambientLight = new pc.Color(.35, .38, .43); app.scene.toneMapping = pc.TONEMAP_ACES;
 const fitCanvas = () => app.resizeCanvas(document.body.clientWidth, document.body.clientHeight);   // the game lives in a phone-shaped column
 window.addEventListener('resize', fitCanvas); fitCanvas();
-const camera = new pc.Entity('Camera'); camera.addComponent('camera', { clearColor: new pc.Color(.025, .04, .06), farClip: 160, fov: 40 }); app.root.addChild(camera);
+const camera = new pc.Entity('Camera'); camera.addComponent('camera', { clearColor: new pc.Color(.0196, .0314, .051), farClip: 160, fov: 40 }); app.root.addChild(camera);
 const light = new pc.Entity('Key'); light.addComponent('light', { type: 'directional', color: new pc.Color(1, .94, .84), intensity: 1.15, castShadows: true, shadowDistance: 45, shadowResolution: 2048, shadowBias: .15, normalOffsetBias: .025 }); light.setEulerAngles(52, 25, 0); app.root.addChild(light);
 const fill = new pc.Entity('Fill'); fill.addComponent('light', { type: 'directional', color: new pc.Color(.73, .84, 1), intensity: .45 }); fill.setEulerAngles(65, 210, 0); app.root.addChild(fill);
 function mat(name, color) { const m = new pc.StandardMaterial(); m.name = name; m.diffuse = new pc.Color(...color); m.metalness = 0; m.gloss = 20; m.update(); return m; }
@@ -574,13 +574,16 @@ function bodies1() {
 // ====================================================================== camera + name tags
 let camMode = 'arena'; const camPos = new pc.Vec3(-24, 30, 0), camLook = new pc.Vec3(0, 1, 0);
 function updateCamera(dt) {
-  // arena cam renders only into the gap between the scoreboard and the hint/meter, so the HUD never covers the court
-  let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
+  // arena cam: the whole screen is drawn (true proportions); the camera is zoomed and shifted so the court sits in the gap
+  // between the scoreboard and the hint/meter, so the HUD never covers it
+  let aspect = app.graphicsDevice.width / app.graphicsDevice.height, band = null;
+  camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; camera.camera.aspectRatioMode = pc.ASPECT_AUTO;
   if (camMode === 'arena') {
     const H = document.body.clientHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
-    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, mr.top - 40) - 4,   /* the tutorial card is allowed to overlap the bottom of the court */ h = Math.max(0.3, (bot - top) / H);
-    camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
-  } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
+    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, mr.top - 40) - 4;
+    const bh = Math.max(0.3 * H, bot - top); band = { H, bh, off: (top + bot) / 2 - H / 2 };
+    document.body.style.setProperty('--vt', top.toFixed(0) + 'px'); document.body.style.setProperty('--vb', bot.toFixed(0) + 'px');   // soft fades over the court's top/bottom edges
+  }
   const portrait = aspect < 0.9;
   const f = ball.holder ? bodyPos(ball.holder) : ball.pos, att = attackHoop(game.offense).rim.x > 0 ? 1 : -1;
   const fx = pc.math.clamp(f.x + att * 2, -10.5, 10.5), fz = pc.math.clamp(f.z, -4, 4);
@@ -591,15 +594,20 @@ function updateCamera(dt) {
     const side = HUMAN === 1 ? -1 : 1;   // always look from behind your own basket
     const sh = side * 1.3;   // nudge the view toward the far basket so its backboard has room under the scoreboard
     pos = new pc.Vec3(side * -34 + drift + sh, 19, 0); look = new pc.Vec3(side * 0.8 + drift + sh, -1.5, 0); fov = 40;
-    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / aspect, 10.4);
+    const ab = aspect * band.H / band.bh;                                    // shape of the gap the court must fit
+    camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / ab, 10.4) * band.H / band.bh;
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
   } else {
     pos = new pc.Vec3(fx - att * 7, 3.2, fz * 0.5 + (portrait ? 2.5 : 6)); look = new pc.Vec3(fx + att * 4, 1.3, fz * 0.6); fov = portrait ? 62 : 50;
   }
+  if (window.__snapCam) { camPos.copy(pos); camLook.copy(look); window.__snapCam = false; }   // start in place, no swoop
   camPos.lerp(camPos, pos, Math.min(1, dt * 2.2)); camLook.lerp(camLook, look, Math.min(1, dt * 3));
   camera.setPosition(camPos); camera.lookAt(camLook); camera.camera.fov = fov;
+  if (band && camMode === 'arena') {   // slide the view so the court's centre lands in the middle of the gap
+    const d = band.off * 2 * camera.camera.orthoHeight / band.H; camera.setPosition(camPos.clone().add(camera.up.clone().mulScalar(d)));
+  }
   const w = app.graphicsDevice.canvas.clientWidth, sp = new pc.Vec3();
   for (const p of P) {
     const bp = bodyPos(p), top = new pc.Vec3(bp.x, Math.max(2.3, p.head.getPosition().y + 0.75), bp.z);
@@ -1102,7 +1110,7 @@ function tutIdle(p, dt) {   // everyone the player isn't controlling waits in pl
 
 // ---- home screen: the match waits behind it until Play
 function showHome() { $('home').hidden = false; game.paused = true; if (TUT) endTutorial(true); $('controls').hidden = true; tutBtn.hidden = true; }
-function leaveHome() { $('home').hidden = true; game.paused = false; app.timeScale = speed; tutBtn.hidden = !!NET.role; }
+function leaveHome() { window.__snapCam = true; $('home').hidden = true; game.paused = false; app.timeScale = speed; tutBtn.hidden = !!NET.role; }
 $('hplay').onclick = () => { leaveHome(); restart(); };
 $('hprac').onclick = () => { leaveHome(); startTutorial(); };
 $('hgear').onclick = () => { $('controls').hidden = !$('controls').hidden; };

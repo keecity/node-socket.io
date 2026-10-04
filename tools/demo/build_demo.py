@@ -41,6 +41,12 @@ canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;widt
 #crowd{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(max(12px,env(safe-area-inset-bottom)) + 200px);width:min(240px,70cqw);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;font-family:'Russo One',system-ui,sans-serif}#crowd.show{opacity:1}#crowd span{font-size:12px;letter-spacing:3px;color:#ffcf5a}#crowd div{height:12px;margin:4px 0;border-radius:6px;background:#0b121b;border:2px solid #9aa6b2;overflow:hidden}#crowd b{display:block;height:100%;background:linear-gradient(90deg,#ff6a3d,#ffc233);transition:width .15s}#crowd small{font-size:10px;letter-spacing:2px;color:#c8d4de}#crowd.empty small{color:#e04a3a}#crowd.empty small::after{content:' — EMPTY'}
 body.shake{animation:shake .32s linear}@keyframes shake{0%,100%{transform:none}15%{transform:translate(-7px,3px) rotate(-.6deg)}30%{transform:translate(6px,-4px) rotate(.5deg)}45%{transform:translate(-5px,2px)}60%{transform:translate(4px,3px)}80%{transform:translate(-2px,-2px)}}
 #board #menu-btn{position:absolute;top:24%;right:1.2%;left:auto;width:9.5%;height:auto;aspect-ratio:118/131;z-index:5;pointer-events:auto}
+#topfade,#botfade{position:absolute;left:0;right:0;pointer-events:none;z-index:0}.deco{z-index:1}#board{z-index:3}
+#topfade{top:0;height:calc(var(--vt,120px) + 46px);background:linear-gradient(180deg,#05080d 0,#05080d calc(100% - 46px),#05080d00 100%)}
+#botfade{top:calc(var(--vb,700px) - 46px);bottom:0;background:linear-gradient(180deg,#05080d00 0,#05080d 46px,#05080d 100%)}
+.deco.tl,.deco.tr{-webkit-mask:linear-gradient(180deg,#000 35%,transparent 100%);mask:linear-gradient(180deg,#000 35%,transparent 100%)}
+#meterwrap{display:none}
+html,body{background:#05080d!important}
 #hint{position:absolute;top:calc(max(12px,env(safe-area-inset-top)) + 62px);width:100%;text-align:center;font-size:11px;color:#cfe0ea;text-shadow:0 1px 4px #000;pointer-events:none}
 #loading{position:absolute;top:45%;width:100%;text-align:center;color:#61d1c4;font-size:18px}#status{display:none}
 @media(max-width:520px){#controls{gap:4px;flex-wrap:nowrap;max-width:100cqw}#controls button{padding:6px 6px;font-size:10.5px;min-height:30px}.team{min-width:92px;padding:7px 10px}.team b{font-size:22px}#toast.big{font-size:24px}#banner{font-size:21px}}
@@ -105,7 +111,7 @@ body{font-family:'Rajdhani',system-ui,sans-serif}
 #toast{top:calc(max(8px,env(safe-area-inset-top)) + 140px);font-family:'Russo One',system-ui,sans-serif;font-weight:400}
 #toast.big{color:#ffc233}
 #tut{top:auto!important;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 178px)}
-'''+open('ui_sprites.css').read()+open('home.css').read()+open('home_sprites.css').read()+'''</style></head><body><canvas id="scene"></canvas><div class="deco tl"></div><div class="deco tr"></div><div class="deco bl"></div><div class="deco br"></div><div id="meterwrap"></div>
+'''+open('ui_sprites.css').read()+open('home.css').read()+open('home_sprites.css').read()+'''</style></head><body><canvas id="scene"></canvas><div class="deco tl"></div><div class="deco tr"></div><div class="deco bl"></div><div class="deco br"></div><div id="topfade"></div><div id="botfade"></div>
 <div id="board"><div class="team t0"><i class="lbl"></i><b id="s0" class="num"></b><i class="dot" id="poss0"></i></div><div id="mid"><i class="lbl"></i><div id="clock" class="num"></div></div><div class="team t1"><i class="lbl"></i><b id="s1" class="num"></b><i class="dot" id="poss1"></i></div><div id="ft21"></div></div>
 <div id="home"><div class="bg"></div><div class="dl"></div><div class="dr"></div>
 <div class="prof"><i class="av"></i><i class="nm"></i><i class="lv"></i></div><button class="gear" id="hgear" aria-label="Settings"></button>
