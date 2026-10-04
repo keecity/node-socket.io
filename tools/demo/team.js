@@ -38,8 +38,9 @@ const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once ac
   contact: ['CONTACT RESISTANCE', 'Defenders contesting your shot don\'t bother you'], footwork: ['BALANCED FOOTWORK', 'Steadier shot meter and a little extra speed'],
   allaround: ['ALL-AROUND BOOST', 'Faster, better shooting and better steals'],
 };
-// skills charge by playing (points, assists, steals, rebounds, passes, time on court); a full charge shows the button
-function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
+// skills charge only for the player you control: slowly while you have the ball, faster for shooting, running, passing and
+// rebounding; the one defensive action that charges is a steal. A full charge shows the button.
+function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || !ctl(0) || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
 function buffOn(p, k) { return !!p && p.buff === k && performance.now() < p.buffT; }
 let abilEl = null;
 function abilTick() {
@@ -49,7 +50,7 @@ function abilTick() {
     ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => abilEl.addEventListener(ev, e => e.stopPropagation()));
   }
   const inGame = $('home').hidden && T.hidden && game.phase !== 'over';
-  if (inGame && game.phase === 'live') team(0).forEach(q => skillCharge(q, 0.22));
+  const h = ball.holder; if (inGame && game.phase === 'live' && h && h.team === 0) skillCharge(h, 0.1 + (h.vel.length() > 2 ? 0.25 : 0));
   const ready = inGame ? team(0).filter(q => q.skill && q.chg >= 100) : [], p = ready.find(q => q === ball.holder) || ready[0] || null;
   if (p !== abilEl.p) { abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
   abilEl.hidden = !p;

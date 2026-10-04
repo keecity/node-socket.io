@@ -19904,7 +19904,7 @@ function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   if (TUT) { game.shot = null; sfx('net'); tutEvent('made'); return; }
-  stats.made++; if (typeof skillCharge === 'function') { skillCharge(s.shooter, 12 * s.pts); skillCharge(s.assist, 12); if (buffOn(s.shooter, 'hotstreak')) s.shooter.buffT += 3000; } game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
+  stats.made++; if (typeof skillCharge === 'function') { skillCharge(s.shooter, 10 * s.pts); if (buffOn(s.shooter, 'hotstreak')) s.shooter.buffT += 3000; } game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   if (s.ft) toast('Free throw good', false); else toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
   sfx('net'); netEv('score', t); crowdReact(t); game.phase = 'scored'; game.timer = 1.6;
   const pf = game.pendingFoul; game.pendingFoul = null;
@@ -19918,7 +19918,7 @@ function scored(H) {
 
 // ====================================================================== actions
 const stats = { pass: 0, shot: 0, dunk: 0, steal: 0, block: 0, made: 0 }; window.__stats = stats;
-function startShot(p) { stats.shot++;
+function startShot(p) { stats.shot++; skillCharge(p, 6);
   const A = attackHoop(p.team); faceTo(p, A.rim.x, A.rim.z); p.vel.set(0, 0, 0);
   p.action = { type: 'shoot', t: 0, done: false }; setAnim(p, 'Shoot', 0.1);
   const c = closestDefender(p); if (game.phase !== 'ftair' && c && d2(c.pos, p.pos) < 2.4 && !c.action && Math.random() < 0.75) c.pendingBlock = 0.1 + Math.random() * 0.15;
@@ -20864,8 +20864,9 @@ const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once ac
   contact: ['CONTACT RESISTANCE', 'Defenders contesting your shot don\'t bother you'], footwork: ['BALANCED FOOTWORK', 'Steadier shot meter and a little extra speed'],
   allaround: ['ALL-AROUND BOOST', 'Faster, better shooting and better steals'],
 };
-// skills charge by playing (points, assists, steals, rebounds, passes, time on court); a full charge shows the button
-function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
+// skills charge only for the player you control: slowly while you have the ball, faster for shooting, running, passing and
+// rebounding; the one defensive action that charges is a steal. A full charge shows the button.
+function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || !ctl(0) || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
 function buffOn(p, k) { return !!p && p.buff === k && performance.now() < p.buffT; }
 let abilEl = null;
 function abilTick() {
@@ -20875,7 +20876,7 @@ function abilTick() {
     ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => abilEl.addEventListener(ev, e => e.stopPropagation()));
   }
   const inGame = $('home').hidden && T.hidden && game.phase !== 'over';
-  if (inGame && game.phase === 'live') team(0).forEach(q => skillCharge(q, 0.22));
+  const h = ball.holder; if (inGame && game.phase === 'live' && h && h.team === 0) skillCharge(h, 0.1 + (h.vel.length() > 2 ? 0.25 : 0));
   const ready = inGame ? team(0).filter(q => q.skill && q.chg >= 100) : [], p = ready.find(q => q === ball.holder) || ready[0] || null;
   if (p !== abilEl.p) { abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
   abilEl.hidden = !p;
