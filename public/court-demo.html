@@ -20314,19 +20314,23 @@ function humanDefAI(p, dt) {
 }
 // sprint: tapping the same spot again (within 1.5 s) sprints there, burning stamina; empty bar = normal run
 function sprintMul(p, dt) {
-  // sprint while banked sprint time and stamina last
-  if (!(p.sprintT > 0) || p.stamina <= 0) { p.sprint = false; return 1; }
-  p.sprint = true; p.sprintT -= dt;
-  p.stamina = Math.max(0, p.stamina - dt * 0.35); p.drain = 0.25; return 1.45;
+  // tap-driven sprint: every tap on the same spot adds boost (more the faster you tap); boost always bleeds off,
+  // harder the higher it is (resistance), so top speed needs fast, steady tapping. Stop tapping and it eases away.
+  p.boost = Math.max(0, (p.boost || 0) - dt * (0.22 + 0.9 * (p.boost || 0) * (p.boost || 0)));
+  if (p.stamina <= 0) p.boost = Math.min(p.boost, 0);
+  p.sprint = p.boost > 0.12;
+  if (p.boost > 0) { p.stamina = Math.max(0, p.stamina - dt * 0.45 * p.boost); p.drain = 0.25; }
+  return 1 + 1.1 * p.boost;                                  // up to 2.1x run speed
 }
 function moveOrder(p, g) {
-  // first tap: run there. Every extra tap in the same area while still on the way banks +0.5 s of sprint (max 3 s)
-  g = clamp(g.clone());                                   // compare in-bounds spots: taps past the baseline used to never match
-  const sameArea = p.moveTarget && d2(p.moveTarget, g) < 2.5;
-  if (sameArea) p.sprintT = Math.min(3, (p.sprintT > 0 ? p.sprintT : 0) + 0.5);
-  else p.sprintT = 0;
-  if (p.team === HUMAN) tutEvent('move');
-  p.moveTarget = clamp(g); if (p.team === HUMAN) ring(g, p.sprintT > 0 && p.stamina > 0.05);
+  g = clamp(g.clone());                                       // compare in-bounds spots (taps past the baseline still count)
+  const sameArea = p.moveTarget && d2(p.moveTarget, g) < 2.5, now = performance.now() / 1000;
+  if (sameArea && p.stamina > 0.02) {
+    const gap = Math.max(0.06, now - (p.lastTap || 0));      // faster taps add more
+    p.boost = Math.min(1, (p.boost || 0) + Math.min(0.32, 0.075 / gap) * (1 - 0.55 * (p.boost || 0)));
+  } else if (!sameArea) p.boost = (p.boost || 0) * 0.5;      // new destination: keep some momentum
+  p.lastTap = now; p.sprintT = 0; if (p.team === HUMAN) tutEvent('move');
+  p.moveTarget = g; if (p.team === HUMAN) ring(g, p.boost > 0.12);
 }
 function humanAI(p, dt) {
   p.holdT += dt;
