@@ -104,10 +104,10 @@ function abilTick() {
 }
 setInterval(abilTick, 100);
 function skillPick(r) {   // level up: choose one of two skills (replaces the current one) or skip
-  const pool = Object.keys(SKILLS).filter(k => k !== r.skill), two = [];
+  const pool = Object.keys(SKILLS).filter(k => !(r.skills || []).includes(k)), two = [];
   while (two.length < 2) { const k = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; two.push(k); }
   let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
-  m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} REACHED LEVEL ${r.lv}!</h3><div class="cst">Choose a new skill${r.skill ? ' (replaces <b>' + SKILLS[r.skill][0] + '</b>)' : ''}</div><div class="sks">${two.map(k => `<button class="sk" data-act="skill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b><small>${SKILLS[k][1]}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">SKIP</button></div></div>`;
+  m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} REACHED LEVEL ${r.lv}!</h3><div class="cst">Choose a new skill — it becomes active, and your other skills stay unlocked</div><div class="sks">${two.map(k => `<button class="sk" data-act="skill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b><small>${SKILLS[k][1]}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">SKIP</button></div></div>`;
   m.hidden = false;
 }
 function teamXP(n) { TEAM.xp += Math.round(n); saveTeam(); }
@@ -217,7 +217,14 @@ T.addEventListener('click', e => {
     m.hidden = false;
   }
   else if (a === 'ucancel') T.querySelector('#ucf').hidden = true;
-  else if (a === 'skill') { const r = TEAM.roster[TSEL] || TEAM.roster[0]; r.skill = v; saveTeam(); applyRoster(); T.querySelector('#ucf').hidden = true; toastL(r.name.toUpperCase() + ' learned ' + SKILLS[v][0], true); drawDetails(); }
+  else if (a === 'viewskill') {
+    const r = TEAM.roster[TSEL] || TEAM.roster[0], u = SKILL_USE[v], how = u === 'shot' ? 'Powers up your next shot' : u === 'pass' ? 'Powers up your next pass' : v === 'crossover' ? 'Instant, with a 3 second burst' : u === 'now' ? 'Instant' : 'Lasts 8 seconds';
+    let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
+    m.innerHTML = `<div class="box"><i class="ski ski-${v} skbig"></i><h3>${SKILLS[v][0]}</h3><div class="cst">${SKILLS[v][1]}.</div><div class="cst"><b>${how}.</b> Charges while you control ${esc(r.name)}.</div><div class="bts"><button class="no" data-act="ucancel">CLOSE</button><button class="ok${v === r.skill ? ' off' : ''}" data-act="setskill" data-val="${v}">${v === r.skill ? 'EQUIPPED' : 'EQUIP'}</button></div></div>`;
+    m.hidden = false;
+  }
+  else if (a === 'setskill') { if (T.querySelector('#ucf')) T.querySelector('#ucf').hidden = true; if ((TEAM.roster[TSEL] || TEAM.roster[0]).skill === v) return; const r = TEAM.roster[TSEL] || TEAM.roster[0]; r.skill = v; saveTeam(); applyRoster(); toastL(SKILLS[v][0] + ' is now active', false); drawDetails(); }
+  else if (a === 'skill') { const r = TEAM.roster[TSEL] || TEAM.roster[0]; r.skills = [...new Set([...(r.skills || (r.skill ? [r.skill] : [])), v])]; r.skill = v; saveTeam(); applyRoster(); T.querySelector('#ucf').hidden = true; toastL(r.name.toUpperCase() + ' learned ' + SKILLS[v][0], true); drawDetails(); }
   else if (a === 'upgrade') {
     const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r); if (TEAM.xp < c) return toastL('Not enough XP — earn XP by playing games', false);
     T.querySelector('#ucf').hidden = true;
@@ -283,6 +290,7 @@ function drawDetails() {
   <p class="uskill">${r.skill ? `<i class="ski ski-${r.skill}"></i>SKILL: <b>${SKILLS[r.skill][0]}</b> — ${SKILLS[r.skill][1]}. Charges as you play; tap its button in a match.` : `No skill yet — reach level ${r.lv + 1} to choose one.`}</p>
   <div class="upan"><i class="uh"></i>${STATS.map((k, i) => `<div class="ug">${k.toUpperCase()}${i === 0 ? `<span class="lvn">LEVEL PTS ${r.lp || 0} / ${lvNeed(r.lv)}</span>` : ''}</div><div class="urow r${i}${r.stats[k] >= 99 ? ' max' : ''}" data-act="ustat" data-val="${k}"><i class="uic"></i><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}<i class="ug"></i><i class="uf"></i></div>
   <div class="cost"><div><small>UPGRADE COST</small>${num(c, 'g')}<b class="xpw">XP</b></div><div><small>XP AFTER UPGRADE</small>${TEAM.xp >= c ? num(TEAM.xp - c) : '<b class="no">NEED ' + (c - TEAM.xp) + '</b>'}</div></div>
+  <div class="skl"><h4>UNLOCKED SKILLS <small>tap a skill to view or equip it</small></h4>${(() => { const L = r.skills || (r.skill ? [r.skill] : []); return L.length ? '<div class="skg">' + L.map(k => `<button class="sko${k === r.skill ? ' on' : ''}" data-act="viewskill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b>${k === r.skill ? '<small>ACTIVE</small>' : ''}</button>`).join('') + '</div>' : `<p>No skills yet — level up to level ${r.lv + 1} to unlock your first.</p>`; })()}</div>
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
