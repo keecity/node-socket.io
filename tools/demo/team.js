@@ -52,23 +52,40 @@ function ctEnd(won, margin) {   // after a match: pay for the win/loss and any f
   TEAM.cash += pay; ensureContracts(); saveTeam(); CT = null;
   return { pay, done };
 }
-// ---- gym: buy and upgrade equipment with cash; every level adds +5% to all match XP (bonuses stack, max level 3)
+// ---- gym: send bench players to a training slot; equipment raises the most XP one session can pay
 const EQUIP = ['SHOOTING MACHINE', 'WEIGHT BENCH', 'TREADMILL', 'RECOVERY STATION', 'SPIN BIKE', 'ROWING MACHINE', 'POWER RACK', 'DUMBBELL RACK', 'CABLE MACHINE', 'PLYO BOXES', 'MEDICINE BALLS', 'PUSH SLED',
   'STAIR CLIMBER', 'ELLIPTICAL', 'LEG PRESS', 'LEG EXTENSION', 'LAT PULLDOWN', 'PULL-UP TOWER', 'KETTLEBELL RACK', 'REBOUNDER NET', 'HEAVY BAG', 'ICE BATH', 'MASSAGE TABLE', 'AGILITY HURDLES'];
-const EQ_MAX = 3;
-const eqPct = i => Math.round((0.5 + 1.5 * i / (EQUIP.length - 1)) * 2) / 2;   // % per level: 0.5% for the first machine up to 2% for the last (full gym about +90%)
-const fmtPct = v => +v.toFixed(1);
-const eqCost = (i, lv) => Math.round((300 + 150 * i) * (1 + 0.6 * lv) / 50) * 50;   // later machines cost more   // buy (lv 0) or upgrade price
-const gymPct = () => fmtPct(EQUIP.reduce((a, _, i) => a + ((TEAM.gym || {})[i] || 0) * eqPct(i), 0));
+const EQ_MAX = 3, GYM_BASE = 20, GYM_FEE = 100, GYM_MIN = 60, SLOT_COST = [0, 2000, 5000];
+const eqXP = i => 1 + Math.round(4 * i / (EQUIP.length - 1));   // XP per level: +1 for the first machine up to +5 for the last
+const eqCost = (i, lv) => Math.round((300 + 150 * i) * (1 + 0.6 * lv) / 50) * 50;   // buy (lv 0) or upgrade price; later machines cost more
+const gymMax = () => GYM_BASE + EQUIP.reduce((a, _, i) => a + ((TEAM.gym || {})[i] || 0) * eqXP(i), 0);   // most XP one session can pay
+const slotsOwned = () => TEAM.gslots || 1;
+function gymLeft(r) { const m = Math.max(0, Math.ceil((r.train.end - Date.now()) / 60000)); return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm'; }
+function gymCollect(r) {
+  const mx = gymMax(), xp = Math.round(mx * (0.5 + Math.random() * 0.5)); let stat = null;
+  if (Math.random() < 0.2) { const open = STATS.filter(k => r.stats[k] < 99); stat = open[Math.floor(Math.random() * open.length)]; if (stat) { r.stats[stat]++; r.lp = (r.lp || 0) + 3; } }
+  TEAM.xp += xp; r.train = null; let up = false; while ((r.lp || 0) >= lvNeed(r.lv)) { r.lp -= lvNeed(r.lv); r.lv++; up = true; }
+  saveTeam(); applyRoster(); sfxL(stat ? 'cheer' : 'net', 0.5);
+  let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
+  m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} FINISHED TRAINING</h3><div class="chg">+${xp} <b>XP</b></div><div class="cst">${stat ? `<b>+1 ${stat.toUpperCase()}</b> — now ${r.stats[stat]}` : 'No stat gain this time'}</div><div class="bts"><button class="ok" data-act="ucancel">NICE</button></div></div>`;
+  m.hidden = false; if (up) setTimeout(() => { TSEL = TEAM.roster.indexOf(r); skillPick(r); }, 1600);
+}
 function drawGym() {
-  ensureContracts(); TEAM.gym ??= {}; const s = T.querySelector('.scr[data-v="gym"] .body'), pct = gymPct(), coin = '<i class="gcoin"></i>';
+  ensureContracts(); TEAM.gym ??= {}; const s = T.querySelector('.scr[data-v="gym"] .body'), coin = '<i class="gcoin"></i>', R = TEAM.roster, busy = R.filter(r => r.train);
   T.querySelector('.scr[data-v="gym"] .gcash').innerHTML = coin + TEAM.cash.toLocaleString();
-  s.innerHTML = `<div class="ghero"><i class="groom"></i><i class="glogo mascot lg${TEAM.mascot}"></i><div class="gtt"><b>TEAM TRAINING</b><em>+${pct}% MATCH XP</em><small>APPLIES TO EVERY ROSTER PLAYER.</small></div><div class="gex"><small>EXAMPLE:</small><b>100 XP → <em>${Math.round(100 + pct)} XP</em></b></div></div>
-  <div class="gsec"><b>EQUIPMENT</b><small>PERMANENT XP BONUSES STACK.</small></div>
+  const slot = k => {
+    if (k >= slotsOwned()) return `<button class="gslot lock" data-act="gymslot" data-val="${k}"><b>🔒 SLOT ${k + 1}</b><span>${coin}${SLOT_COST[k].toLocaleString()}</span><small>UNLOCK</small></button>`;
+    const r = busy[k]; if (!r) return `<button class="gslot open" data-act="gympick"><b>+</b><span>SEND PLAYER</span><small>${coin}${GYM_FEE} · ${GYM_MIN / 60}h</small></button>`;
+    const done = Date.now() >= r.train.end, i = R.indexOf(r);
+    return `<button class="gslot busy${done ? ' done' : ''}" data-act="${done ? 'gymget' : ''}" data-val="${i}">${pic(r)}<b>${esc(r.name)}</b><i class="bar"><b style="width:${Math.min(100, (1 - (r.train.end - Date.now()) / (GYM_MIN * 60000)) * 100)}%"></b></i><small>${done ? 'TAP TO COLLECT' : gymLeft(r) + ' left'}</small></button>`;
+  };
+  s.innerHTML = `<div class="ghero gslots"><i class="groom"></i><div class="gsl">${[0, 1, 2].map(slot).join('')}</div><div class="gcap">ONE SESSION PAYS UP TO <em>${gymMax()} XP</em> · 20% CHANCE OF +1 STAT</div></div>
+  <div class="gsec"><b>EQUIPMENT</b><small>RAISES THE XP A TRAINING SESSION CAN PAY.</small></div>
   ${EQUIP.map((n, i) => { const lv = TEAM.gym[i] || 0, max = lv >= EQ_MAX, c = eqCost(i, lv);
-    return `<div class="geq"><i class="gimg" style="background-image:var(--g-eq${i});--gm:var(--gm-eq${i})"></i><div class="ginfo"><b>${n}</b><span class="glv">${lv ? 'LV ' + lv : 'NOT OWNED'}</span><small>${max ? `+${fmtPct(lv * eqPct(i))}% XP · MAX` : lv ? `+${fmtPct(lv * eqPct(i))}% → <em>+${fmtPct((lv + 1) * eqPct(i))}% XP</em>` : `UNLOCK <em>+${eqPct(i)}% XP</em>`}</small></div>${max ? '<div class="gbtn max"><b>MAXED</b></div>' : `<button class="gbtn${TEAM.cash < c ? ' off' : ''}" data-act="gymbuy" data-val="${i}"><b>${lv ? 'UPGRADE' : 'BUY'}</b><span>${coin}${c.toLocaleString()}</span></button>`}</div>`; }).join('')}
+    return `<div class="geq"><i class="gimg" style="background-image:var(--g-eq${i});--gm:var(--gm-eq${i})"></i><div class="ginfo"><b>${n}</b><span class="glv">${lv ? 'LV ' + lv : 'NOT OWNED'}</span><small>${max ? `+${lv * eqXP(i)} XP · MAX` : lv ? `+${lv * eqXP(i)} → <em>+${(lv + 1) * eqXP(i)} XP</em>` : `UNLOCK <em>+${eqXP(i)} XP</em>`}</small></div>${max ? '<div class="gbtn max"><b>MAXED</b></div>' : `<button class="gbtn${TEAM.cash < c ? ' off' : ''}" data-act="gymbuy" data-val="${i}"><b>${lv ? 'UPGRADE' : 'BUY'}</b><span>${coin}${c.toLocaleString()}</span></button>`}</div>`; }).join('')}
   <p class="ginf"><i class="ginfo-i"></i>EARN COINS BY PLAYING MATCHES.</p>`;
 }
+setInterval(() => { if (!T.hidden && T.dataset.view === 'gym' && TEAM.roster.some(r => r.train)) drawGym(); }, 15000);
 const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
 const lvNeed = lv => 3 + 3 * lv;   // level points for the next level: 6, 9, 12 ... (each upgrade gives +3)
 const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once activated; icon order follows the skill sheet
@@ -160,7 +177,7 @@ function skillPick(r) {   // level up: choose one of two skills (replaces the cu
   m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} REACHED LEVEL ${r.lv}!</h3><div class="cst">Choose a new skill — it becomes active, and your other skills stay unlocked</div><div class="sks">${two.map(k => `<button class="sk" data-act="skill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b><small>${SKILLS[k][1]}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">SKIP</button></div></div>`;
   m.hidden = false;
 }
-function teamXP(n) { TEAM.xp += Math.round(n * (1 + gymPct() / 100)); saveTeam(); }   // gym equipment boosts all match XP
+function teamXP(n) { TEAM.xp += Math.round(n); saveTeam(); }
 // starters drive the Purple players on court: names, hairstyles, speed and shooting
 function jerseyTex(base, ci) {   // recolour the purple jersey texture to a team colour, keeping its shading
   const k = '_j' + ci; if (base[k]) return base[k];
@@ -246,14 +263,23 @@ T.addEventListener('click', e => {
   if (a === 'back') { if (T.dataset.view === 'team') closeTeam(); else openTeam('team'); }
   else if (a === 'go') openTeam(v);
   else if (a === 'player') openTeam('details', +v);
+  else if (a === 'gymslot') { const k = +v, c = SLOT_COST[k]; if (k !== slotsOwned()) return toastL('Unlock slot ' + (slotsOwned() + 1) + ' first', false); if (TEAM.cash < c) return toastL('Need ' + c.toLocaleString() + ' coins', false); TEAM.cash -= c; TEAM.gslots = k + 1; saveTeam(); sfxL('cheer', 0.4); toastL('Gym slot ' + (k + 1) + ' unlocked', true); drawGym(); }
+  else if (a === 'gympick') {
+    const bench = TEAM.roster.slice(3).filter(r => !r.train); if (!bench.length) return toastL('No free bench players to train', false);
+    let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
+    m.innerHTML = `<div class="box"><h3>SEND TO GYM</h3><div class="cst">${GYM_FEE} coins · ${GYM_MIN / 60} hour · pays up to <b>${gymMax()} XP</b></div><div class="gpick">${bench.map(r => `<button class="gpk" data-act="gymgo" data-val="${TEAM.roster.indexOf(r)}">${pic(r)}<b>${esc(r.name)}</b><small>LV ${r.lv} · OVR ${ovr(r)}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">CANCEL</button></div></div>`;
+    m.hidden = false;
+  }
+  else if (a === 'gymgo') { const r = TEAM.roster[+v]; if (TEAM.cash < GYM_FEE) return toastL('Need ' + GYM_FEE + ' coins', false); TEAM.cash -= GYM_FEE; r.train = { end: Date.now() + GYM_MIN * 60000 }; saveTeam(); T.querySelector('#ucf').hidden = true; toastL(r.name.toUpperCase() + ' is training', true); drawGym(); }
+  else if (a === 'gymget') { const r = TEAM.roster[+v]; if (r && r.train && Date.now() >= r.train.end) { gymCollect(r); drawGym(); } }
   else if (a === 'gymbuy') {
     TEAM.gym ??= {}; const i = +v, lv = TEAM.gym[i] || 0, c = eqCost(i, lv); if (lv >= EQ_MAX) return;
     if (TEAM.cash < c) return toastL('Need ' + c.toLocaleString() + ' coins — earn coins by playing matches', false);
-    TEAM.cash -= c; TEAM.gym[i] = lv + 1; saveTeam(); sfxL('cheer', 0.4); toastL(EQUIP[i] + (lv ? ' upgraded to LV ' + (lv + 1) : ' bought') + ' — team XP +' + gymPct() + '%', true); drawGym();
+    TEAM.cash -= c; TEAM.gym[i] = lv + 1; saveTeam(); sfxL('cheer', 0.4); toastL(EQUIP[i] + (lv ? ' upgraded to LV ' + (lv + 1) : ' bought') + ' — sessions pay up to ' + gymMax() + ' XP', true); drawGym();
   }
   else if (a === 'lineup') {                      // tap two players to swap them (starters <-> bench)
     if (LINEUP === null) { LINEUP = +v; toastL('Now tap a player to swap with ' + TEAM.roster[+v].name, false); drawTeam(); }
-    else { const i = LINEUP, j = +v; LINEUP = null; [TEAM.roster[i], TEAM.roster[j]] = [TEAM.roster[j], TEAM.roster[i]]; saveTeam(); applyRoster(); drawTeam(); }
+    else { const i = LINEUP, j = +v; if ((i < 3) !== (j < 3) && (TEAM.roster[i].train || TEAM.roster[j].train)) { LINEUP = null; drawTeam(); return toastL((TEAM.roster[i].train ? TEAM.roster[i] : TEAM.roster[j]).name + ' is at the gym — collect first', false); } LINEUP = null; [TEAM.roster[i], TEAM.roster[j]] = [TEAM.roster[j], TEAM.roster[i]]; saveTeam(); applyRoster(); drawTeam(); }
   }
   else if (a === 'editlineup') { LINEUP = null; const on = T.classList.toggle('swap'); toastL(on ? 'Tap a player, then the player to swap with' : 'Lineup saved', false); drawTeam(); }
   else if (a === 'color') { EDIT.color = +v; setTC(EDIT.color); drawEdit(); }
@@ -301,7 +327,7 @@ function drawTeam() {
   <div class="sec"><i class="sec-start"></i><button class="bdark" data-act="editlineup"><span class="lbl">${T.classList.contains('swap') ? 'DONE' : 'EDIT LINEUP'}</span></button></div>
   <div class="cards">${R.slice(0, 3).map((r, i) => `<button class="card${LINEUP === i ? ' gold' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i}">${pic(r)}<span class="lv">${num(r.lv)}</span><span class="nm">${esc(r.name)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('')}</div>
   <div class="sec"><i class="sec-bench"></i></div>
-  ${R.slice(3).map((r, i) => `<button class="brow${LINEUP === i + 3 ? ' sel' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i + 3}">${pic(r)}<span class="nm">${esc(r.name)}</span><span class="lv">${num(r.lv)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('') || '<p class="empty">No bench players — draft one below.</p>'}
+  ${R.slice(3).map((r, i) => `<button class="brow${LINEUP === i + 3 ? ' sel' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i + 3}">${pic(r)}<span class="nm">${esc(r.name)}${r.train ? `<em class="trn">${Date.now() >= r.train.end ? 'GYM · READY' : 'GYM · ' + gymLeft(r)}</em>` : ''}</span><span class="lv">${num(r.lv)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('') || '<p class="empty">No bench players — draft one below.</p>'}
   <button class="bigbtn" data-act="go" data-val="draft"><i class="ball"></i><span>DRAFT NEW PLAYER</span><i class="ic i-chev"></i></button>`;
   fitNames();
 }

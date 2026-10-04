@@ -272,3 +272,17 @@
 #team .geq .gimg::after{content:'';position:absolute;inset:0;background:var(--tc,#7b3cf0);mix-blend-mode:color;-webkit-mask:var(--gm) center/contain no-repeat;mask:var(--gm) center/contain no-repeat;pointer-events:none}
 #team .ghero .groom{isolation:isolate}
 #team .ghero .groom::after{content:'';position:absolute;inset:0;background:var(--tc,#7b3cf0);mix-blend-mode:color;-webkit-mask:var(--gm-room) center/cover no-repeat;mask:var(--gm-room) center/cover no-repeat;border-radius:6px}
+#team .ghero.gslots .gsl{position:absolute;left:5%;right:5%;top:9%;height:58%;display:flex;gap:3%;z-index:5}
+#team .gslot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:2px solid #b8c3cc88;border-radius:8px;background:#0b1420d9;color:#e8eef4;padding:4px;min-width:0}
+#team .gslot b{font:400 clamp(9px,2.7cqw,13px) 'Russo One',system-ui;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#team .gslot span{font:400 clamp(8px,2.3cqw,11px) 'Russo One',system-ui;display:flex;align-items:center;gap:3px}#team .gslot small{font-size:clamp(7px,2cqw,9px);color:#9fb0bf;display:flex;align-items:center;gap:2px}
+#team .gslot.open b{font-size:clamp(20px,6cqw,30px);color:#ffd53a;line-height:1}#team .gslot.lock{filter:saturate(.4);opacity:.85}
+#team .gslot .pt{position:static;width:40%;aspect-ratio:1;border-radius:6px;clip-path:none}
+#team .gslot .bar{position:relative!important;left:auto!important;top:auto!important;width:86%!important;height:5px;border-radius:3px;background:#1e2733;overflow:hidden;display:block}#team .gslot .bar b{display:block;height:100%;max-width:none;background:linear-gradient(90deg,#1fa36a,#3fe060)}
+#team .gslot.done{border-color:#ffc233;box-shadow:0 0 10px #ffc23388}#team .gslot.done small{color:#ffc233}
+#team .ghero.gslots .gcap{position:absolute;left:5%;right:5%;top:66.5%;height:27%;display:flex;align-items:center;justify-content:center;text-align:center;z-index:5;font:400 clamp(8px,2.5cqw,12px) 'Russo One',system-ui;color:#e8eef4;transform:translateY(7px)}
+#team .ghero.gslots .gcap em{font-style:normal;color:#ffd53a;margin:0 4px}
+#ucf .gpick{display:flex;flex-direction:column;gap:6px;margin:8px 0 12px;max-height:45vh;overflow:auto}
+#ucf .gpk{display:flex;align-items:center;gap:10px;padding:6px 10px;border:2px solid #b8c3cc44;border-radius:8px;background:#0f1b2a;color:#e8eef4;text-align:left}
+#ucf .gpk .pt{width:40px;height:40px;border-radius:6px}#ucf .gpk b{font:400 13px 'Russo One',system-ui;flex:1}#ucf .gpk small{font-size:10px;color:#8fa3b5}
+#team .brow .trn{display:block;font:400 9px 'Russo One',system-ui;font-style:normal;color:#3fe060;letter-spacing:.5px}
