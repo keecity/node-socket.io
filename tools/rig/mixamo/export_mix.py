@@ -65,9 +65,9 @@ g.skins = [G.Skin(name='rig', joints=[NEW[j] for j in M.JOINTS], skeleton=0, inv
 g.nodes.append(G.Node(name='player_mesh', mesh=0, skin=0)); g.nodes.append(G.Node(name='basketball', mesh=1))
 g.scenes = [G.Scene(nodes=[0, nb, nb + 1])]; g.scene = 0
 ANIM_BONES = [M.ID[b] for b in list(RO.MAP) + ['Spine1']]
-def write(name, frames):
+def write(name, frames, fps=FPS):
     """frames: list of (local{name: q}, hips_t, root_t, ball)"""
-    t = add(f32(np.arange(len(frames)) / FPS), 5126, 'SCALAR', None, True); an = G.Animation(name=name)
+    t = add(f32(np.arange(len(frames)) / fps), 5126, 'SCALAR', None, True); an = G.Animation(name=name)
     def ch(node, path, data):
         an.samplers.append(G.AnimationSampler(input=t, output=add(f32(data), 5126, 'VEC4' if path == 'rotation' else 'VEC3'), interpolation='LINEAR'))
         an.channels.append(G.AnimationChannel(sampler=len(an.samplers) - 1, target=G.AnimationChannelTarget(node=node, path=path)))
@@ -80,21 +80,19 @@ def write(name, frames):
     B = np.array([fr[3] for fr in frames]); ch(nb + 1, 'translation', B)
     q = np.array([0, 0, 0, 1.]); w = np.zeros(3); qs = [q.copy()]
     for k in range(1, len(B)):
-        v = (B[k] - B[k - 1]) * FPS
+        v = (B[k] - B[k - 1]) * fps
         if name == 'Shoot' and abs(k / FPS - 0.69) < 0.5 / FPS: w = np.array([-16.0, 0, 0])
         if B[k][1] < BR + 1e-3: w = np.cross([0, 1, 0], np.array([v[0], 0, v[2]])) / BR
         if name in ('Idle', 'Dribble'): w = np.zeros(3)
-        a = np.linalg.norm(w) / FPS
+        a = np.linalg.norm(w) / fps
         if a > 1e-6: q = qmul(np.r_[w / np.linalg.norm(w) * np.sin(a / 2), np.cos(a / 2)], q)
         qs.append(q.copy())
     ch(nb + 1, 'rotation', qs); g.animations.append(an)
 for name, fn in clips.CLIPS.items():
     if name == 'DribbleRun': continue
     fr, balls = fn(); write(name, [RO.frame(p, b) for p, b in zip(fr, balls)]); print('clip', name, len(fr))
-# DribbleRun: copied from the reference video
-n = int(round(FD.PER / 24 * FPS)); frames = []
-for k in range(n + 1):
-    u = k / n; loc, hips = RV.pose(u); frames.append((loc, hips, np.zeros(3), RV.ballp(u)))
-write('DribbleRun', frames); print('clip DribbleRun (video)', n + 1)
+# DribbleRun: posed to the reference video frame by frame (one key per video frame, 24 fps)
+import dribble_fit as DF
+write('DribbleRun', DF.frames(), fps=24); print('clip DribbleRun (per-frame fit)', DF.N + 1)
 g.buffers = [G.Buffer(byteLength=len(blob))]; g.set_binary_blob(bytes(blob)); g.save_binary('player_rigged.glb')
 print('ok', len(blob))
