@@ -321,12 +321,27 @@ def dribble_run():
     from gait import Run
     r = Run(); period = r.T
     from drib import Dribble
-    d = Dribble(base=(-0.27, 0.17)); sc = d.T / period          # same physics as the standing dribble, retimed to the stride
+    # matched to the side-on reference: the ball is pushed out in front, bounces ahead of the lead foot, and is caught at
+    # waist height; the hand rides it for ~60% of the stride (17 of 28 frames) and the body leans well into the run
+    kw = dict(base=(-0.25, 0.25), rel_y=0.31, catch_y=0.41, bounce_fwd=0.085, bounce_out=-0.015, vrel_y=-2.1)
+    d0 = Dribble(Tc=0.1, **kw); air = d0.t1 + d0.t2
+    d = Dribble(Tc=1.5 * air, **kw); sc = d.T / period
+    from drib import herm as _herm
+    hold = d.catch + np.array([0, 0.015, 0.035])          # carried at the belly, a ball-width in front, barely rising
+    def carry(t, d=d, _b=d.ball):
+        t = t % d.T
+        if t > d.Tc: return _b(t)
+        u = t / d.Tc
+        if u < 0.45: return _herm(d.catch, d.vcatch * 0.22, hold, np.zeros(3), 0.45 * d.Tc, t), True     # absorb the catch
+        return _herm(hold, np.zeros(3), d.rel, d.vrel, 0.55 * d.Tc, t - 0.45 * d.Tc), True                  # push it down
+    d.ball = carry
     path = lambda t: d.ball(t * sc)[0]
     def ovr(t, c):
         run_body(t, c, r, arms=True)
         c['afkR'] = np.array([0, 0, 0, 0, 0.0])
         c['hipsR'][1] *= 0.5; c['chestR'][1] = c['chestR'][1] * 0.5 - 6; c['chestR'][2] += 6; c['spineR'][2] += 4; c['shR'] = np.array([0, 0, -6.0])
+        c['hipsR'][0] += 6; c['spineR'][0] += 6; c['chestR'][0] += 4; c['headR'][0] -= 14; c['neckR'][0] -= 2   # deeper lean, eyes stay up
+        c['hips'][1] -= 0.012
         p, n, f, _ = d.hand(t * sc)
         c['bw'] = np.array([1.0]); c['hspR'] = np.array([1.0]); c['hwR'] = np.array([0.0]); c['wmR'] = np.array([60.0])
         c['hpR'] = p; c['hnR'] = n; c['hfR'] = f; c['heR'] = np.array([-0.55, -0.35, -1.0])
