@@ -92,8 +92,8 @@ const XMAX = 14.2, ZMAX = 7.2;
 // ====================================================================== players
 const CLIPS = { Idle: 1, Dribble: 1, Shoot: 0, Dunk: 0, Run: 1, RunB: 1, RunC: 1, DribbleRun: 1, Defend: 1, Block: 0, Ready: 1, Pass: 0, Steal: 0, SlideL: 1, SlideR: 1 };
 const MS = 0.9;                                    // the Mixamo player model is 1.0 tall (old rig 0.9)
-const RUN_NATIVE = 1.65 * MS * S,                  // ground speed the Run cycle covers at 1x (measured on the retargeted clip)
-     DRUN_NATIVE = 0.9 * MS * S,                   /* DribbleRun: copied from the reference video, a slower jog */
+const RUN_NATIVE = 1.65 * MS * S / 1.4,           /* / 1.4: runs play 1.4x faster than the measured stride (requested) */                  // ground speed the Run cycle covers at 1x (measured on the retargeted clip)
+     DRUN_NATIVE = 0.9 * MS * S / 1.4,                   /* DribbleRun: copied from the reference video, a slower jog */
      SLIDE_NATIVE = 0.16 / (0.5 * 0.45) * S;
 const NAMES = [['Jax', 'Rook', 'Blaze'], ['Kai', 'Nova', 'Ziggy']];
 const P = [];
@@ -114,7 +114,14 @@ function makePlayer(team, idx) {
 for (let t = 0; t < 2; t++) for (let i = 0; i < 3; i++) P.push(makePlayer(t, i));
 const team = t => P.filter(p => p.team === t);
 const man = p => P[(1 - p.team) * 3 + p.idx];          // matchup: same index on the other team
-function setAnim(p, name, blend = 0.15, speed = 1) { p.model.anim.speed = speed; if (p.state === name) return; p.state = name; p.model.anim.baseLayer.transition(name, blend); }
+function setAnim(p, name, blend = 0.15, speed = 1) {
+  p.model.anim.speed = speed; if (p.state === name) return; p.state = name;
+  // looping clips start at each player's own phase (plus a little jitter) so teammates never move in lockstep
+  const off = CLIPS[name] ? ((p.phase === undefined ? (p.phase = Math.random()) : p.phase) + Math.random() * 0.25) % 1 : 0;
+  const L = p.model.anim.baseLayer;
+  if (L.activeState === name) { if (CLIPS[name]) L.activeStateCurrentTime = off * (L.activeStateDuration || 1); }   // already in it (e.g. the start pose): just shift the phase
+  else L.transition(name, blend, off);
+}
 function place(p) { p.ent.setPosition(p.pos.x, 0.012, p.pos.z); p.ent.setEulerAngles(0, p.yaw * 57.2958, 0); }
 function faceTo(p, x, z, rate, dt) { const want = Math.atan2(x - p.pos.x, z - p.pos.z); let d = want - p.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); p.yaw += rate ? Math.sign(d) * Math.min(Math.abs(d), rate * dt) : d; }
 const fwd = p => new pc.Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
@@ -208,7 +215,7 @@ function inboundPass(h, r) {   // throw it in; the clock and play start with the
   if (!r) { let bd = 1e9; for (const q of team(h.team)) { if (q === h) continue; const c = closestDefender(q), sc = d2(q.pos, h.pos) - (c ? Math.min(2, d2(c.pos, q.pos)) : 2) * 1.5; if (sc < bd) { bd = sc; r = q; } } }
   if (!r) return; r.lastPasser = null; game.phase = 'live'; game.inbounder = null; toast((h.team ? 'Teal' : 'Purple') + ' ball'); startPass(h, r);
 }
-function restart() { game.score = [0, 0]; game.crowd = [1, 1]; game.distract = 0; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
+function restart() { setTimeout(rephase, 50); game.score = [0, 0]; game.crowd = [1, 1]; game.distract = 0; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
 function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
@@ -393,15 +400,15 @@ function laneClear(a, b, pad, t) {   // no player of team t near segment a->b
 function animMove(p, dt, mode) {
   const sp = p.vel.length();
   if (mode === 'handler') {
-    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / (DRUN_NATIVE * p.k), 0.3, 2.1)); }
+    if (sp > 0.7) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 8, dt); setAnim(p, 'DribbleRun', 0.2, pc.math.clamp(sp / (DRUN_NATIVE * p.k), 0.42, 2.94)); }
     else { setAnim(p, 'Dribble', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else if (mode === 'stance') {
-    if (sp > 2.4 || (p.goalDist || 0) > 1.8) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); return; }
+    if (sp > 2.4 || (p.goalDist || 0) > 1.8) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.42, 2.24)); return; }
     const lat = p.vel.dot(left(p)), lv = left(p), fw = p.vel.clone().sub(lv.clone().mulScalar(lat));
     if (fw.length() > 0.25) p.vel.sub(fw.mulScalar(1 - 0.25 / fw.length()));   // stance moves sideways only (no gliding)
     if (lat > 0.45) setAnim(p, 'SlideL', 0.15, pc.math.clamp(lat / SLIDE_NATIVE, 0.3, 1.4)); else if (lat < -0.45) setAnim(p, 'SlideR', 0.15, pc.math.clamp(-lat / SLIDE_NATIVE, 0.3, 1.4)); else { setAnim(p, 'Defend', 0.2); p.vel.mulScalar(Math.pow(0.002, dt)); }
   } else {
-    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.3, 1.6)); }
+    if (sp > 1.0) { faceTo(p, p.pos.x + p.vel.x, p.pos.z + p.vel.z, 9, dt); setAnim(p, p.runClip, 0.2, pc.math.clamp(sp / (RUN_NATIVE * p.k), 0.42, 2.24)); }
     else { setAnim(p, 'Ready', 0.25); p.vel.mulScalar(Math.pow(0.002, dt)); }
   }
 }
@@ -604,7 +611,12 @@ function updateCamera(dt) {
 }
 
 // ====================================================================== main loop
+function rephase() {   // give every player their own point in whatever loop they are playing (the start pose is set before anim runs)
+  for (const p of P) { const L = p.model.anim.baseLayer; if (p.phase === undefined) p.phase = Math.random(); if (CLIPS[L.activeState]) L.activeStateCurrentTime = p.phase * (L.activeStateDuration || 1); }
+}
+let _phased = 0;
 app.on('update', dt => {
+  if (_phased < 3 && ++_phased === 3) rephase();
   if (NET.role === 'guest') return guestFrame(dt);
   if (game.paused) return;
   game.time += dt; game.timer -= dt;
@@ -1052,7 +1064,7 @@ function tutSetup() {
     at(pur[0], A.rim.x - dir * 5.2, 0.6); at(pur[1], A.rim.x - dir * 2, 4); at(pur[2], A.rim.x - dir * 2, -4);
     give(tea[0]); faceTo(tea[0], -A.rim.x, 0); place(tea[0]);
   }
-  for (const p of P) setAnim(p, p === ball.holder ? 'Dribble' : p.team === HUMAN ? 'Ready' : 'Defend', 0.1);
+  for (const p of P) setAnim(p, p === ball.holder ? 'Dribble' : p.team === HUMAN ? 'Ready' : 'Defend', 0.1, 0.9 + 0.2 * (p.phase || 0));
   game.phase = 'live'; game.shotClock = SHOT_CLOCK; game.shot = null; TUT.moved = false; TUT.wait = 0; TUT.done = false; TUT.passes = stats.pass;
   $('tdots').innerHTML = TSTEPS.map((_, i) => '<i class="' + (i < s ? 'd' : i === s ? 'c' : '') + '"></i>').join('');
   $('ttitle').textContent = (s + 1) + ' / ' + TSTEPS.length + ' · ' + TSTEPS[s].title; $('ttext').textContent = TSTEPS[s].text; $('tok').textContent = '';

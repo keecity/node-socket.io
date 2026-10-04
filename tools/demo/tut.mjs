@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=swiftshader','--enable-unsafe-swiftshader'] });
 const p = await b.newPage({ viewport: { width: 390, height: 844 } });
 p.on('pageerror', e => console.log('ERR', e.message));
-await p.goto('file:///home/user/node-socket.io/public/court-demo.html'); await p.waitForTimeout(8000);
+await p.goto('file:///home/user/node-socket.io/public/court-demo.html'); await p.waitForTimeout(8000); await p.click('#hprac'); await p.waitForTimeout(1500);
 const st = () => p.evaluate(() => { const T = window.game.TUTS(); return T ? `step=${T.step} done=${T.done} | ${document.getElementById('ttitle').textContent} | ${document.getElementById('tok').textContent}` : 'no tutorial'; });
 const waitStep = async n => { for (let i = 0; i < 40; i++) { const s = await st(); if (!s.startsWith('step=' + (n - 1))) return s; await p.waitForTimeout(500); } return 'TIMEOUT ' + await st(); };
 console.log(await st()); await p.screenshot({ path: 'tut0.png' });
