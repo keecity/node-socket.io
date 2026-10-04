@@ -20321,7 +20321,8 @@ function sprintMul(p, dt) {
 }
 function moveOrder(p, g) {
   // first tap: run there. Every extra tap in the same area while still on the way banks +0.5 s of sprint (max 3 s)
-  const sameArea = p.moveTarget && d2(p.moveTarget, g) < 1.6;
+  g = clamp(g.clone());                                   // compare in-bounds spots: taps past the baseline used to never match
+  const sameArea = p.moveTarget && d2(p.moveTarget, g) < 2.5;
   if (sameArea) p.sprintT = Math.min(3, (p.sprintT > 0 ? p.sprintT : 0) + 0.5);
   else p.sprintT = 0;
   if (p.team === HUMAN) tutEvent('move');
