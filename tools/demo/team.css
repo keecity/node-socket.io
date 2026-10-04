@@ -290,3 +290,7 @@
 #team .tnav.n4 [data-go=shop]::before,#home .nav.hn.n4 [data-go=shop]::before{background-image:var(--g-i_shop)}
 #team .ghdr .gcash{right:2.5%;min-width:72px;max-width:30%;justify-content:center;padding:0 10px 0 7px;gap:4px;font-size:clamp(10px,3.1cqw,13px);letter-spacing:-.2px;white-space:nowrap}
 #team .tnav.n4 [data-go=shop]::before,#home .nav.hn.n4 [data-go=shop]::before{background-size:100% 100%;width:50%}
+#team .tnav.n4 [data-go=team]::before,#home .nav.hn.n4 [data-go=team]::before{background-image:var(--n2-team)}
+#team .tnav.n4 [data-go=draft]::before,#home .nav.hn.n4 [data-go=draft]::before{background-image:var(--n2-draft)}
+#team .tnav.n4 [data-go=gym]::before,#home .nav.hn.n4 [data-go=gym]::before{background-image:var(--n2-gym)}
+#team .tnav.n4 [data-go=shop]::before,#home .nav.hn.n4 [data-go=shop]::before{background-image:var(--n2-shop);background-size:contain;width:62%}
