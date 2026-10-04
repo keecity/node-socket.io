@@ -20053,6 +20053,11 @@ function updateCamera(dt) {
     pos = new pc.Vec3(side * -30 + drift + sh, 27, 0); look = new pc.Vec3(side * 0.8 + drift + sh, -1.5, 0);   /* steeper look-down: less foreshortening, court reads taller */ fov = 40;
     const ab = aspect * band.H / band.bh;                                    // shape of the gap the court must fit
     camera.camera.projection = pc.PROJECTION_ORTHOGRAPHIC; camera.camera.orthoHeight = Math.max(8.5 / ab, 10.4) * band.H / band.bh;
+    // when the whole court can't fit (tall phones), keep the scale and pan along the court with the play
+    const vis = camera.camera.orthoHeight * band.bh / band.H, need = 15.6 * 0.68 + 1.6;   // half the court as seen at this angle, + backboard
+    const far = f.x * side > 0, panMax = Math.max(0, need + (far ? 2.6 : 0) - vis) / 0.68;   // the far backboard stands up toward the scoreboard
+    const pan = side * Math.min(1, Math.abs(f.x) / 10) * panMax * Math.sign(f.x * side);
+    pos.x += pan - drift - sh; look.x += pan - drift - sh;
   } else if ((camera.camera.projection = pc.PROJECTION_PERSPECTIVE) && camMode === 'broadcast') {
     if (portrait) { pos = new pc.Vec3(fx - att * 9.5, 9.5, fz * 0.3 + 3); look = new pc.Vec3(fx + att * 3, 0.8, fz * 0.4); fov = 58; }
     else { pos = new pc.Vec3(fx * 0.9, 9.2, 17.5); look = new pc.Vec3(fx, 0.6, fz * 0.3); fov = 40; }
