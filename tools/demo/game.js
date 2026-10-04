@@ -1161,7 +1161,31 @@ function saveTeam() { try { localStorage.setItem('cc_team', JSON.stringify(TEAM)
 const upCost = r => 50 * r.lv;
 function teamXP(n) { TEAM.xp += Math.round(n); saveTeam(); }
 // starters drive the Purple players on court: names, hairstyles, speed and shooting
+function jerseyTex(base, ci) {   // recolour the purple jersey texture to a team colour, keeping its shading
+  const k = '_j' + ci; if (base[k]) return base[k];
+  const src = base.getSource(); if (!src || !src.width) return base;
+  const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; const g = c.getContext('2d'); g.drawImage(src, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height), p = d.data, hx = COLORS[ci][1], T3 = [1, 3, 5].map(i => parseInt(hx.substr(i, 2), 16));
+  for (let i = 0; i < p.length; i += 4) {
+    const r = p[i], gg = p[i + 1], b = p[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), s = mx ? (mx - mn) / mx : 0; if (s < 0.2 || mx < 15) continue;
+    const dd = mx - mn; let h = mx === r ? ((gg - b) / dd + 6) % 6 : mx === gg ? (b - r) / dd + 2 : (r - gg) / dd + 4; h *= 60; if (h < 230 || h > 315) continue;
+    const w = Math.min(1, (s - 0.2) / 0.25), L = (0.3 * r + 0.59 * gg + 0.11 * b) / 99;
+    for (let j = 0; j < 3; j++) { const n = T3[j] * L + Math.max(0, L - 1) * 90; p[i + j] = p[i + j] * (1 - w) + Math.min(255, n) * w; }
+  }
+  g.putImageData(d, 0, 0);
+  const tex = new pc.Texture(app.graphicsDevice, { width: c.width, height: c.height, format: base.format, mipmaps: true, flipY: base.flipY, addressU: base.addressU, addressV: base.addressV, minFilter: base.minFilter, magFilter: base.magFilter, anisotropy: base.anisotropy });
+  tex.setSource(c); return (base[k] = tex);
+}
+function paintJersey(model, ci) {
+  for (const r of model.findComponents('render')) for (const mi of r.meshInstances) {
+    const m0 = mi.material; if (!m0 || (m0.name !== 'player' && !mi._jBase)) continue;
+    if (!mi._jBase) { mi._jBase = m0.diffuseMap; mi.material = m0.clone(); }
+    if (mi._jBase && mi._jCol !== ci) { mi._jCol = ci; mi.material.diffuseMap = jerseyTex(mi._jBase, ci); mi.material.update(); }
+  }
+}
 function applyRoster() {
+  T.style.setProperty('--tc', COLORS[TEAM.color][1]);
+  team(0).forEach(p => paintJersey(p.model, TEAM.color));
   team(0).forEach((p, i) => {
     const r = TEAM.roster[i]; if (!r) return;
     p.name = r.name.toUpperCase().slice(0, 1) + r.name.slice(1).toLowerCase(); if (p.label.firstChild) p.label.firstChild.nodeValue = p.name;
@@ -1173,7 +1197,7 @@ function applyRoster() {
 const PORTRAIT = {};
 let studio = null;
 function portrait(r) {
-  const key = r.hair + ':' + r.tint; if (PORTRAIT[key]) return PORTRAIT[key];
+  const key = r.hair + ':' + r.tint + ':' + TEAM.color; if (PORTRAIT[key]) return PORTRAIT[key];
   try {
     if (!studio) {
       studio = new pc.Entity('studio'); app.root.addChild(studio); studio.setPosition(0, -200, 0);
@@ -1182,6 +1206,7 @@ function portrait(r) {
       app.root.addChild(cam); studio.cam = cam;
       const key2 = new pc.Entity(); key2.addComponent('light', { type: 'omni', range: 6, intensity: 1.6, color: new pc.Color(1, 0.95, 0.9) }); app.root.addChild(key2); key2.setPosition(0.5, -198.9, 1.2); studio.light = key2;
     }
+    paintJersey(studio.model, TEAM.color); { const h = COLORS[TEAM.color][1], q = i => parseInt(h.substr(i, 2), 16) / 255 * 0.32; studio.cam.camera.clearColor = new pc.Color(q(1) + 0.02, q(3) + 0.02, q(5) + 0.04); }
     studio.hair = setHair(studio.model, r.hair, r.tint, studio.hair);
     const cam = studio.cam; cam.setPosition(0.22, -199.08, 1.45); cam.lookAt(0, -199.17, 0);
     const main = camera.camera, wasRect = main.enabled; main.enabled = false; cam.camera.enabled = true;
@@ -1209,6 +1234,7 @@ function openTeam(view, arg) {
   if (arg !== undefined) TSEL = arg; if (view === 'edit' && T.dataset.view !== 'edit') { EDIT = null; const o = T.querySelector('#tname'); if (o) o.remove(); } if (view !== 'team') T.classList.remove('swap'); T.hidden = false; $('home').hidden = true;
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
   T.querySelectorAll('.tnav button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'details' && b.dataset.go === 'details')));
+  T.style.setProperty('--tc', COLORS[view === 'edit' && EDIT ? EDIT.color : TEAM.color][1]);
   ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails })[view]();
   T.querySelector('.scr[data-v="' + view + '"] .body').scrollTop = 0;
 }
@@ -1223,10 +1249,10 @@ T.addEventListener('click', e => {
     else { const i = LINEUP, j = +v; LINEUP = null; [TEAM.roster[i], TEAM.roster[j]] = [TEAM.roster[j], TEAM.roster[i]]; saveTeam(); applyRoster(); drawTeam(); }
   }
   else if (a === 'editlineup') { LINEUP = null; const on = T.classList.toggle('swap'); toastL(on ? 'Tap a player, then the player to swap with' : 'Lineup saved', false); drawTeam(); }
-  else if (a === 'color') { EDIT.color = +v; drawEdit(); }
+  else if (a === 'color') { EDIT.color = +v; T.style.setProperty('--tc', COLORS[EDIT.color][1]); drawEdit(); }
   else if (a === 'font') { EDIT.font = +v; drawEdit(); }
   else if (a === 'mascot') { EDIT.mascot = +v; const sc = T.querySelector('.masc').scrollTop; drawEdit(); T.querySelector('.masc').scrollTop = sc; }
-  else if (a === 'saveteam') { TEAM.name = (T.querySelector('#tname').value || 'MY TEAM').toUpperCase().slice(0, 20); TEAM.color = EDIT.color; TEAM.mascot = EDIT.mascot; TEAM.font = EDIT.font; saveTeam(); toastL('Team saved', false); openTeam('team'); }
+  else if (a === 'saveteam') { TEAM.name = (T.querySelector('#tname').value || 'MY TEAM').toUpperCase().slice(0, 20); TEAM.color = EDIT.color; TEAM.mascot = EDIT.mascot; TEAM.font = EDIT.font; saveTeam(); applyRoster(); toastL('Team saved', false); openTeam('team'); }
   else if (a === 'pick') { DSEL = +v; drawDraft(); }
   else if (a === 'draftit') {
     if (TEAM.roster.length >= ROSTER_MAX) return toastL('Roster full (' + ROSTER_MAX + ' players)', true);
