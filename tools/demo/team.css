@@ -123,3 +123,18 @@
 #team .fnt small{font-size:9px;letter-spacing:1.5px;color:#9fb0bf;font-family:'Rajdhani',system-ui,sans-serif}#team .fnt.on{border-color:#ffc233!important;box-shadow:0 0 10px #ffb62788}
 #team .tpanel .tedit{background:none!important;right:2.7%;top:17%;width:26.7%;height:39.6%;aspect-ratio:auto;padding:0}
 #team .tpanel .tedit .lbl{color:#fff;text-shadow:0 1px 0 #000,0 0 3px #000,1px 0 0 #3a1a00,-1px 0 0 #3a1a00}
+#team .xpb .dg{left:26.7%;width:56.9%;top:54%;height:24%;justify-content:center}#team .xpb .dg i{height:78%}
+#team .upan .lvl{top:21.5%;font-size:8px;line-height:1}
+#team .urow{left:0;width:100%;height:8%}#team .urow.r0{top:26.5%}#team .urow.r1{top:40.5%}#team .urow.r2{top:54.5%}#team .urow.r3{top:68.5%}#team .urow.r4{top:82.7%}
+#team .ubar{left:17.6%;top:14%;width:31.4%;height:72%;border-radius:4px}
+#team .urow .a,#team .urow .b{top:50%;transform:translate(-50%,-50%);line-height:1;font-size:clamp(9px,2.6cqw,13px);left:69%}#team .urow .b{left:86%}
+#team .cost{display:block}#team .cost>div{position:absolute;top:23.6%;height:48.6%;padding:0;font-size:clamp(10px,3cqw,15px);align-items:center;justify-content:center}
+#team .cost>div:first-child{left:27.7%;width:11.1%}#team .cost>div:last-child{left:70.4%;width:20.1%}
+#team .cost .dg{height:.95em}
+#team .dhead .pt{left:5.8%;top:12%;width:8.3%;height:76%}
+#team .dhead .pn,#team .dhead .pl{top:14.5%;height:38.5%;display:flex;align-items:center;line-height:1}
+#team .dhead .pn{left:21%;font-size:clamp(11px,3.4cqw,17px)}
+#team .dhead .pl{left:auto;right:46.5%;font-size:9px}
+#team .dhead .bar{left:20.8%;top:63%;width:33.4%;height:15%}
+#team .dhead .lvb,#team .dhead .ovrb{top:19%;height:61%;display:flex;align-items:center;justify-content:center;font-size:clamp(11px,3.4cqw,17px)}
+#team .dhead .lvb{left:64.3%;width:9.7%}#team .dhead .ovrb{left:86%;width:10.5%}
