@@ -138,3 +138,4 @@
 #team .dhead .bar{left:20.8%;top:63%;width:33.4%;height:15%}
 #team .dhead .lvb,#team .dhead .ovrb{top:19%;height:61%;display:flex;align-items:center;justify-content:center;font-size:clamp(11px,3.4cqw,17px)}
 #team .dhead .lvb{left:64.3%;width:9.7%}#team .dhead .ovrb{left:86%;width:10.5%}
+#team .tnav{padding:0 1%}#team .tnav button{flex:none}#team .tnav button:nth-child(1){width:32.2%}#team .tnav button:nth-child(2){width:34.5%}#team .tnav button:nth-child(3){width:32.2%}
