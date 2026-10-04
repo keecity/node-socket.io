@@ -53,9 +53,10 @@ function ctEnd(won, margin) {   // after a match: pay for the win/loss and any f
   return { pay, done };
 }
 // ---- gym: buy and upgrade equipment with cash; every level adds +5% to all match XP (bonuses stack, max level 3)
-const EQUIP = ['SHOOTING MACHINE', 'WEIGHT BENCH', 'TREADMILL', 'RECOVERY STATION', 'SPIN BIKE', 'ROWING MACHINE', 'POWER RACK', 'DUMBBELL RACK', 'CABLE MACHINE', 'PLYO BOXES', 'MEDICINE BALLS', 'PUSH SLED'];
+const EQUIP = ['SHOOTING MACHINE', 'WEIGHT BENCH', 'TREADMILL', 'RECOVERY STATION', 'SPIN BIKE', 'ROWING MACHINE', 'POWER RACK', 'DUMBBELL RACK', 'CABLE MACHINE', 'PLYO BOXES', 'MEDICINE BALLS', 'PUSH SLED',
+  'STAIR CLIMBER', 'ELLIPTICAL', 'LEG PRESS', 'LEG EXTENSION', 'LAT PULLDOWN', 'PULL-UP TOWER', 'KETTLEBELL RACK', 'REBOUNDER NET', 'HEAVY BAG', 'ICE BATH', 'MASSAGE TABLE', 'AGILITY HURDLES'];
 const EQ_MAX = 3, EQ_PCT = 5;
-const eqCost = (i, lv) => Math.round((300 + 150 * i) * (1 + 0.6 * lv) / 50) * 50;   // buy (lv 0) or upgrade price
+const eqCost = (i, lv) => Math.round((300 + 150 * i) * (1 + 0.6 * lv) / 50) * 50;   // later machines cost more   // buy (lv 0) or upgrade price
 const gymPct = () => EQUIP.reduce((a, _, i) => a + ((TEAM.gym || {})[i] || 0) * EQ_PCT, 0);
 function drawGym() {
   ensureContracts(); TEAM.gym ??= {}; const s = T.querySelector('.scr[data-v="gym"] .body'), pct = gymPct(), coin = '<i class="gcoin"></i>';
