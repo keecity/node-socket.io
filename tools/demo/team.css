@@ -17,7 +17,7 @@
 #team .tnav [data-go=team]::before{background-image:var(--t-n_team)}#team .tnav [data-go=draft]::before{background-image:var(--t-n_ball)}#team .tnav [data-go=details]::before{background-image:var(--t-n_stats)}
 #team .tnav button.on{color:#ffc233}#team .tnav button.on::before{opacity:1;filter:sepia(1) saturate(6) hue-rotate(-12deg) brightness(1.1)}
 #team .tnav button.on::after{content:'';position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:62%;height:6px;background:var(--t-n_line) center/100% 100% no-repeat}
-#team .dg{display:inline-flex;align-items:center;height:1em;vertical-align:middle}#team .dg i{display:block;height:100%;aspect-ratio:3/4;background:center/contain no-repeat}#team .dg b{font-size:.6em;margin:0 .1em}
+#team .dg{display:inline-flex;align-items:center;height:1em;vertical-align:middle}#team .dg{gap:.03em}#team .dg i{display:block;height:100%;background-position:center;background-size:100% 100%;background-repeat:no-repeat}#team .dg b{font-size:.6em;margin:0 .1em}
 #team .pt{display:block;object-fit:cover;object-position:50% 22%;background:#2a1460}
 #team .ic{display:inline-block;background:center/contain no-repeat;vertical-align:middle}
 .i-pencil{background-image:var(--t-i_pencil)!important}.i-chev{background-image:var(--t-i_chev)!important}.i-play{background-image:var(--t-i_play)!important}.i-team{background-image:var(--t-i_team)!important}
