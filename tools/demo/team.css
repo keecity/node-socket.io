@@ -194,3 +194,4 @@
 #team .ctm{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}#team .ctm>b{font:400 13px 'Russo One',system-ui;color:#e8eef4;font-weight:400}#team .ctm small{font-size:10px;color:#8fa3b5}
 #team .ctm .bar{position:relative!important;left:auto!important;top:auto!important;width:100%!important;height:7px;border-radius:4px;background:#1e2733;overflow:hidden;display:block}#team .ctm .bar b{display:block;height:100%;background:linear-gradient(90deg,#c98a12,#ffc233)}
 #team .ctp{font:400 16px 'Russo One',system-ui;color:#ffc233}
+#team .cth{margin:10px 2px 6px;font:400 14px 'Russo One',system-ui;letter-spacing:1px;color:#e8eef4}#team .cth small{font:400 10px system-ui;color:#8fa3b5;margin-left:6px;letter-spacing:0}

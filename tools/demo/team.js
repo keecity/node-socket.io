@@ -24,16 +24,20 @@ const draftCost = () => 500 + 250 * Math.max(0, TEAM.roster.length - 6);
 const CT_KINDS = [   // [key, label, team target, team reward, matches allowed]
   ['pts', 'Score {n} points', 8, 120, 1], ['threes', 'Make {n} threes', 3, 100, 2], ['steals', 'Get {n} steals', 2, 100, 1],
   ['reb', 'Grab {n} rebounds', 4, 90, 1], ['skills', 'Use {n} skills', 3, 150, 3], ['wins', 'Win {n} games', 3, 400, 5], ['margin', 'Win a game by {n}+', 8, 250, 3]];
-function newContract(named) {
-  const used = (TEAM.ct || []).map(c => c.k), pool = CT_KINDS.filter(x => !used.includes(x[0])), k = pool[Math.floor(Math.random() * pool.length)], solo = k[0] === 'wins' || k[0] === 'margin';
+const nextMidnight = () => { const d = new Date(); d.setHours(24, 0, 0, 0); return +d; };
+const nextMonday = () => { const d = new Date(); d.setHours(24, 0, 0, 0); while (d.getDay() !== 1) d.setDate(d.getDate() + 1); if (+d - Date.now() < 2 * 864e5) d.setDate(d.getDate() + 7); return +d; };   // a fresh weekly always gets 2+ days
+function newContract(named, wk, list) {   // wk: weekly contracts ask for ~3x more and pay ~3.5x
+  const used = list.filter(c => c.wk === wk).map(c => c.k), pool = CT_KINDS.filter(x => !used.includes(x[0]) && (wk || x[0] !== 'wins') && !(named && (x[0] === 'wins' || x[0] === 'margin'))), k = pool[Math.floor(Math.random() * pool.length)], solo = k[0] === 'wins' || k[0] === 'margin';
   const who = named && !solo ? Math.floor(Math.random() * Math.min(3, TEAM.roster.length)) : null;
-  const n = who === null ? k[2] : Math.max(1, Math.round(k[2] * 0.75));
-  return { k: k[0], n, who, name: who === null ? null : TEAM.roster[who].name, got: 0, left: k[4], pay: Math.round(k[3] * (who === null ? 1 : 1.75) / 5) * 5 };
+  let n = who === null ? k[2] : Math.max(1, Math.round(k[2] * 0.75)); if (wk) n = k[0] === 'wins' ? 5 : k[0] === 'margin' ? 12 : n * 3;
+  return { k: k[0], n, who, name: who === null ? null : TEAM.roster[who].name, got: 0, wk, exp: wk ? nextMonday() : nextMidnight(), pay: Math.round(k[3] * (who === null ? 1 : 1.75) * (wk ? 3.5 : 1) / 5) * 5 };
 }
 function ctText(c) { const k = CT_KINDS.find(x => x[0] === c.k); return k[1].replace('{n}', c.n) + (c.name ? ' with ' + c.name : ''); }
-function ensureContracts() {
-  TEAM.cash ??= 500; TEAM.ct ??= [];
-  while (TEAM.ct.length < 3) TEAM.ct.push(newContract(TEAM.ct.length === 1 ? true : TEAM.ct.length === 0 ? false : Math.random() < 0.5));
+function ctLeft(c) { const m = Math.max(0, Math.round((c.exp - Date.now()) / 60000)), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60); return d ? d + 'd ' + h + 'h left' : h + 'h ' + (m % 60) + 'm left'; }
+function ensureContracts() {   // 3 daily contracts reset at midnight, 2 weekly reset Monday midnight; expired ones just disappear
+  TEAM.cash ??= 500; TEAM.ct = (TEAM.ct || []).filter(c => c.exp && c.exp > Date.now() && c.got < c.n);
+  const fill = (wk, max) => { let i = 0; while (TEAM.ct.filter(c => c.wk === wk).length < max) TEAM.ct.push(newContract(i++ === 1 || (i > 2 && Math.random() < 0.5), wk, TEAM.ct)); };
+  fill(false, 3); fill(true, 2);
 }
 let CT = null;   // this match's tallies: CT[stat][roster index]
 function ctStart() { CT = { pts: {}, threes: {}, steals: {}, reb: {}, skills: {} }; }
@@ -41,11 +45,11 @@ function ctAdd(stat, p, n = 1) {
   if (!CT || !p || p.team !== 0 || NET.role === 'guest') return; const i = team(0).indexOf(p); CT[stat][i] = (CT[stat][i] || 0) + n;
   ensureContracts(); for (const c of TEAM.ct) if (c.k === stat && (c.who === null || c.who === i)) { const was = c.got; c.got = Math.min(c.n, c.got + n); if (c.got > was && c.got < c.n) toastL('Contract: ' + c.got + '/' + c.n + ' — ' + ctText(c), false); if (c.got >= c.n && was < c.n) toastL('CONTRACT DONE: ' + ctText(c), true); }
 }
-function ctEnd(won, margin) {   // after a match: pay finished contracts, count down the rest, refill the slots
-  if (NET.role) return; ensureContracts(); let pay = won ? 300 : 75; const done = [];
-  for (const c of TEAM.ct) { if (c.k === 'wins' && won) c.got++; if (c.k === 'margin' && won && margin >= c.n) c.got = c.n; c.left--; }
-  TEAM.ct = TEAM.ct.filter(c => { if (c.got >= c.n) { pay += c.pay; done.push(c); return false; } return c.left > 0; });
-  ensureContracts(); TEAM.cash += pay; saveTeam(); CT = null;
+function ctEnd(won, margin) {   // after a match: pay for the win/loss and any finished contracts
+  if (NET.role) return { pay: 0, done: [] }; ensureContracts(); let pay = won ? 300 : 75; const done = [];
+  for (const c of TEAM.ct) { if (c.k === 'wins' && won) c.got++; if (c.k === 'margin' && won && margin >= c.n) c.got = c.n; }
+  TEAM.ct = TEAM.ct.filter(c => { if (c.got >= c.n) { pay += c.pay; done.push(c); return false; } return true; });
+  TEAM.cash += pay; ensureContracts(); saveTeam(); CT = null;
   return { pay, done };
 }
 const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
@@ -312,8 +316,8 @@ let NEXT = {};
 function drawContracts() {
   ensureContracts(); const s = T.querySelector('.scr[data-v="contracts"] .body');
   s.innerHTML = `<div class="cashbar"><i class="coin">$</i><b>${TEAM.cash.toLocaleString()}</b><span>CASH</span></div>
-  <p class="uhow">Finish contracts before they run out of matches to earn bonus cash. Contracts that name a player pay more — you must control that player.</p>
-  ${TEAM.ct.map(c => `<div class="ctc${c.name ? ' named' : ''}">${c.who !== null && TEAM.roster[c.who] ? pic(TEAM.roster[c.who]) : `<i class="mascot lg${TEAM.mascot}"></i>`}<div class="ctm"><b>${esc(ctText(c))}</b><i class="bar"><b style="width:${c.got / c.n * 100}%"></b></i><small>${c.k === 'margin' ? (c.got >= c.n ? 'Done' : 'Not yet') : c.got + ' / ' + c.n} · ${c.left} match${c.left === 1 ? '' : 'es'} left</small></div><div class="ctp">$${c.pay}</div></div>`).join('')}
+  <p class="uhow">Finish contracts before the timer runs out to earn bonus cash. Contracts that name a player pay more — you must control that player.</p>
+  ${[['DAILY', false, 'Resets every day at midnight'], ['WEEKLY', true, 'Resets every Monday']].map(([h, wk, sub]) => `<h4 class="cth">${h} <small>${sub}</small></h4>` + TEAM.ct.filter(c => c.wk === wk).map(c => `<div class="ctc${c.name ? ' named' : ''}">${c.who !== null && TEAM.roster[c.who] ? pic(TEAM.roster[c.who]) : `<i class="mascot lg${TEAM.mascot}"></i>`}<div class="ctm"><b>${esc(ctText(c))}</b><i class="bar"><b style="width:${c.got / c.n * 100}%"></b></i><small>${c.k === 'margin' ? (c.got >= c.n ? 'Done' : 'Not yet') : c.got + ' / ' + c.n} · ${ctLeft(c)}</small></div><div class="ctp">$${c.pay}</div></div>`).join('')).join('')}
   <p class="sub">Win: $300 · Loss: $75 · Draft pick: $${draftCost()}</p>
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>`;
 }
