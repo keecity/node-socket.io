@@ -1329,7 +1329,7 @@ function drawDetails() {
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
-$('hteam').onclick = () => openTeam('team'); $('hplayers').onclick = () => openTeam('team'); $('hstats').onclick = () => openTeam('details', 0);
+$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hnup').onclick = () => openTeam('details', 0); $('hnshop').onclick = () => openTeam('draft');
 applyRoster();
 
 { const hb = document.createElement('button'); hb.id = 'home-btn'; hb.textContent = 'Home'; $('controls').prepend(hb); hb.onclick = () => { if (NET.role) leaveGame(); showHome(); }; }

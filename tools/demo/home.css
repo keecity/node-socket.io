@@ -40,3 +40,8 @@
 #home .row{bottom:calc(94px + 3%)}
 #home .play{bottom:calc(13% + 94px)}
 #home .team{bottom:calc(27.5% + 30px)}
+#home .nav.hn{height:64px;background:var(--t-nav) center/100% 100% no-repeat;padding:0 1%}
+#home .nav.hn button{flex:none;font:400 12px 'Russo One',system-ui;letter-spacing:1px;color:#aab6c2;padding-top:30px}
+#home .nav.hn button:nth-child(1),#home .nav.hn button:nth-child(3){width:32.2%}#home .nav.hn button:nth-child(2){width:34.5%}
+#home .nav.hn button::before{content:'';position:absolute;left:50%;top:9px;transform:translateX(-50%);height:24px;width:30px;background:center/contain no-repeat;opacity:.85}
+#home .nav.hn [data-go=team]::before{background-image:var(--t-n_team)}#home .nav.hn [data-go=details]::before{background-image:var(--t-n_stats)}#home .nav.hn [data-go=draft]::before{background-image:var(--t-n_ball)}
