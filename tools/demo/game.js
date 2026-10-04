@@ -578,7 +578,7 @@ function updateCamera(dt) {
   let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
   if (camMode === 'arena') {
     const H = document.body.clientHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
-    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), tr_ = $('tut').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, tr_.height > 0 ? tr_.top : 1e9, mr.top - 40) - 4, h = Math.max(0.3, (bot - top) / H);
+    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, mr.top - 40) - 4,   /* the tutorial card is allowed to overlap the bottom of the court */ h = Math.max(0.3, (bot - top) / H);
     camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
   } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
   const portrait = aspect < 0.9;
@@ -1093,7 +1093,9 @@ function tutFrame(dt) {
 }
 function tutIdle(p, dt) {   // everyone the player isn't controlling waits in place
   p.vel.mulScalar(Math.pow(0.02, dt));
-  animMove(p, dt, ball.holder === p ? 'handler' : ball.holder && ball.holder.team === p.team ? 'offball' : 'stance');
+  const mode = ball.holder === p ? 'handler' : ball.holder && ball.holder.team === p.team ? 'offball' : 'stance';
+  if (p.vel.length() > 0.6) animMove(p, dt, mode);                 // only animate movement when actually moving
+  else setAnim(p, mode === 'handler' ? 'Dribble' : mode === 'offball' ? 'Ready' : 'Defend', 0.25);   // waiting: stand, no running in place
   const b = ball.holder ? bodyPos(ball.holder) : ball.pos; if (ball.holder !== p) faceTo(p, b.x, b.z, 4, dt);
 }
 
