@@ -167,3 +167,11 @@
 #abil .ski{width:30px;height:26px;filter:brightness(0) opacity(.8)}#abil b{font-size:8px}#abil{width:84px;height:84px}
 #team .uskill .ski{width:18px;height:18px;vertical-align:-4px;margin-right:5px}
 #abil{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 232px)}
+#abil.act{animation:none;cursor:default;background:radial-gradient(circle,#152235 58%,transparent 60%),conic-gradient(#ffc233 calc(var(--left,1) * 360deg),#ffffff22 0);color:#fff;box-shadow:0 0 0 3px #0008,0 0 14px #ffb52e88}
+#abil.act .ski{filter:none}#abil.act small{font:400 13px 'Russo One',system-ui;opacity:1;color:#ffc233}
+#abil.act.armed{background:radial-gradient(circle at 50% 35%,#ffd560,#f08c12 70%);color:#1a1206;animation:abp 1.4s ease-in-out infinite}#abil.act.armed .ski{filter:brightness(0) opacity(.8)}#abil.act.armed small{color:#1a1206;font-size:9px}
+.tag.fx-gold{box-shadow:0 0 0 2px #ffc233,0 0 12px #ffc233}.tag.fx-green{box-shadow:0 0 0 2px #3fe060,0 0 12px #3fe060}.tag.fx-red{box-shadow:0 0 0 2px #ff3b3b,0 0 12px #ff3b3b}
+.tag.fx-teal{box-shadow:0 0 0 2px #20e0ff,0 0 12px #20e0ff}.tag.fx-blue{box-shadow:0 0 0 2px #5aa0ff,0 0 14px #5aa0ff;animation:fxb .5s ease-in-out infinite alternate}
+.tag .fxb{position:absolute;left:50%;bottom:calc(100% + 3px);transform:translateX(-50%);font:400 9px 'Russo One',system-ui;font-style:normal;letter-spacing:.5px;padding:1px 6px;border-radius:6px;background:#000c;white-space:nowrap}
+.tag.fx-gold .fxb{color:#ffc233}.tag.fx-green .fxb{color:#5af07a}.tag.fx-red .fxb{color:#ff6a6a}.tag.fx-teal .fxb{color:#5ae8ff}.tag.fx-blue .fxb{color:#9cc4ff}
+@keyframes fxb{to{box-shadow:0 0 0 2px #9cc4ff,0 0 22px #5aa0ff}}

@@ -269,7 +269,7 @@ function shotRelease(p) {
     if (b('accuracy')) make *= 1.25; if (b('finishing') && dr < 4.5) make *= 1.4; if (b('allaround')) make *= 1.15;
     if (b('clutch')) make *= Math.abs(game.score[0] - game.score[1]) <= 3 || game.shotClock < 5 ? 1.35 : 1.1;
     if (b('contact')) make /= cdF; else if (b('footwork')) make /= Math.sqrt(cdF);
-    if (game.shot.assist && buffOn(game.shot.assist, 'teamassist')) make *= 1.3;
+    if (p.taBoost) make *= 1.3;
     if (buffOn(c, 'lockdown')) make *= 0.6;
     make = Math.min(0.97, make);
   }
@@ -279,6 +279,8 @@ function shotRelease(p) {
     make = q >= 1 ? 0.99 : make * (0.15 + 1.25 * q * q);
     toast(q >= 1 ? 'PERFECT release' : q > 0.7 ? 'Good release' : q > 0.4 ? 'Slightly off' : 'Way off', false);
   }
+  if (p.taBoost) { delete p.taBoost; setFx(p, null); }
+  useSkill(p, 'shot');
   const tgt = A.rim.clone(), made = Math.random() < make;
   if (!game.shot.ft && c && cd < 1.3 && Math.random() < (c.action && c.action.type === 'block' ? 0.2 : 0.1)) game.pendingFoul = { def: c, shooter: p, pts: game.shot.pts, made };
   if (made) { const a = Math.random() * 6.283, r = Math.random() * 0.07; tgt.x += Math.cos(a) * r; tgt.z += Math.sin(a) * r; }
@@ -304,11 +306,13 @@ function startPass(p, r) { stats.pass++;
 }
 function passRelease(p, r) {
   const p0 = p.ballNode.getPosition().clone(), dist = d2(p.pos, r.pos);
+  if (buffOn(p, 'teamassist')) { r.taBoost = true; setFx(r, 'teal', 10000, 'ASSIST BOOST'); }
   const T = (0.22 + dist / 11) * (buffOn(p, 'fastpass') ? 0.6 : 1), lead = r.pos.clone().add(r.vel.clone().mulScalar(T * 0.35));
   lead.x = Math.max(-13.4, Math.min(13.4, lead.x)); lead.z = Math.max(-6.4, Math.min(6.4, lead.z));
   r.catchAt = lead.clone();
   const tgt = new pc.Vec3(lead.x, 1.25, lead.z);
   release(p0, tgt.sub(p0).sub(new pc.Vec3(0, -0.5 * G * T * T, 0)).mulScalar(1 / T), false);
+  useSkill(p, 'pass');
   sfx('pass', 0.8); ball.pass = { from: p, to: r, t: 0, T, tried: new Set() }; ball.lastTouch = p.team; r.react = 0;
 }
 // ---- fouls and free throws
@@ -530,6 +534,7 @@ function isHelper(p) {
   return others[0] === p;
 }
 function defenseAI(p, dt) {
+  if (p.react > 0) { p.react -= dt; p.vel.mulScalar(Math.pow(0.05, dt)); animMove(p, dt, 'stance'); return; }   // frozen (crossover) or recovering
   const o = ball.holder;
   if (o && o.team !== p.team && o.action && o.action.type === 'shoot' && closestDefender(o) === p && d2(p.pos, o.pos) < 4) {
     // close out on the shooter, hand up
@@ -975,6 +980,7 @@ function onHostState(pr) {      // guest: take in the host's latest state
     if (e[1] === 'toast') toast(String(e[2]).slice(0, 80), !!e[3]);
     else if (e[1] === 'sfx' && typeof e[2] === 'string') sfxL(e[2], +e[3] || 1);
     else if (e[1] === 'score') crowdReact(e[2]);
+    else if (e[1] === 'fx') { const q = P.find(x => x.id === e[2]), [k, ms, lb] = String(e[3]).split('|'); if (q) setFx(q, k || null, +ms || 0, lb); }
     else if (e[1] === 'shake') shake(game.ft ? game.ft.shooter.team : -1);
     else if (e[1] === 'ban') { $('banner').textContent = String(e[2]).slice(0, 40); $('banner').className = e[3] === 'show t0' || e[3] === 'show t1' ? e[3] : ''; }
   }
@@ -1194,17 +1200,64 @@ const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once ac
 // rebounding; the one defensive action that charges is a steal. A full charge shows the button.
 function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || !ctl(0) || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
 function buffOn(p, k) { return !!p && p.buff === k && performance.now() < p.buffT; }
+// how each skill runs: 'shot' / 'pass' = armed until your next shot / pass, 'now' = instant, otherwise an 8 s timer
+const SKILL_USE = { longrange: 'shot', accuracy: 'shot', quickrelease: 'shot', clutch: 'shot', finishing: 'shot', powerdunk: 'shot', middunk: 'shot', contact: 'shot',
+  teamassist: 'pass', fastpass: 'pass', crossover: 'now', recovery: 'now' };
+const SKILL_FX = { gold: 'middunk powerdunk longrange accuracy quickrelease hotstreak clutch finishing contact', green: 'speedboost stamina footwork allaround superjump crossover recovery',
+  red: 'stealboost block lockdown rebound intercept', teal: 'fastpass teamassist dribble vision' };
+const fxOf = k => Object.keys(SKILL_FX).find(c => SKILL_FX[c].split(' ').includes(k)) || 'gold';
+const FX_RGB = { gold: [1, 0.7, 0.1], green: [0.2, 1, 0.35], red: [1, 0.15, 0.15], teal: [0.1, 0.9, 1], blue: [0.3, 0.6, 1] };
+function glowModel(p, c) {   // tint the whole 3D player (jersey, skin, hair) with an emissive colour; null clears it
+  for (const r of p.model.findComponents('render')) for (const mi of r.meshInstances) {
+    if (!mi.material) continue; if (!mi._own) { mi._own = true; mi.material = mi.material.clone(); }
+    const m = mi.material; m.emissive = c ? new pc.Color(c[0] * 0.55, c[1] * 0.55, c[2] * 0.55) : new pc.Color(0, 0, 0); m.update();
+  }
+}
+// visual effect on a player that both screens see: a glow on the model, a glowing name tag and a badge over it
+function setFx(p, kind, ms, label) {
+  if (!p) return; p.fx = kind ? { kind, until: performance.now() + ms, label } : null;
+  glowModel(p, kind ? FX_RGB[kind] : null); fxTag(p);
+  if (NET.role === 'host') netEv('fx', p.id, (kind || '') + '|' + ms + '|' + (label || ''));
+}
+function fxTag(p) {
+  const L = p.label; L.classList.remove('fx-gold', 'fx-green', 'fx-red', 'fx-teal', 'fx-blue');
+  let b = L.querySelector('.fxb'); if (!p.fx) { if (b) b.remove(); return; }
+  L.classList.add('fx-' + p.fx.kind); if (!b) { b = el('em', 'fxb'); L.appendChild(b); } b.textContent = p.fx.label;
+}
+function useSkill(p, kind) {   // an armed shot / pass skill is spent
+  if (p && p.buff && SKILL_USE[p.buff] === kind && performance.now() < p.buffT) { p.buffT = 0; setFx(p, null); }
+}
+function activate(p) {
+  const k = p.skill, use = SKILL_USE[k], now = performance.now(), c = fxOf(k); p.chg = 0; p.buff = k;
+  toast(p.name.toUpperCase() + ': ' + SKILLS[k][0] + '!', true); sfx('cheer', 0.4);
+  if (use === 'shot' || use === 'pass') { p.buffT = now + 60000; setFx(p, c, 60000, SKILLS[k][0] + ' • NEXT ' + use.toUpperCase()); }
+  else if (k === 'crossover') {
+    p.buffT = now + 3000; setFx(p, c, 3000, 'CROSSOVER');
+    team(1).forEach(q => { if (d2(q.pos, p.pos) < 3.2) { q.react = 1.5; q.vel.set(0, 0, 0); setFx(q, 'blue', 1500, 'FROZEN'); } });
+  } else if (k === 'recovery') { p.buffT = now + 8000; team(0).forEach(q => { q.stamina = 1; setFx(q, c, 1500, 'RECHARGED'); }); setTimeout(() => setFx(p, c, 6500, SKILLS[k][0]), 1500); }
+  else { p.buffT = now + 8000; setFx(p, c, 8000, SKILLS[k][0]); }
+}
 let abilEl = null;
 function abilTick() {
   if (!abilEl) {
     abilEl = el('button'); abilEl.id = 'abil'; abilEl.hidden = true; document.body.appendChild(abilEl);
-    abilEl.onclick = e => { e.stopPropagation(); const p = abilEl.p; if (!p || p.chg < 100) return; p.chg = 0; p.buff = p.skill; p.buffT = performance.now() + 8000; toastL(p.name.toUpperCase() + ': ' + SKILLS[p.skill][0] + '!', true); sfxL('cheer', 0.4); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); abilEl.hidden = true; abilEl.p = null; };
+    abilEl.onclick = e => { e.stopPropagation(); const p = abilEl.p; if (!p || p.chg < 100 || abilEl.classList.contains('act')) return; activate(p); abilEl.p = null; };
     ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => abilEl.addEventListener(ev, e => e.stopPropagation()));
   }
+  const now = performance.now();
+  for (const q of P) if (q.fx && now > q.fx.until) setFx(q, null);
   const inGame = $('home').hidden && T.hidden && game.phase !== 'over';
   const h = ball.holder; if (inGame && game.phase === 'live' && h && h.team === 0) skillCharge(h, 0.1 + (h.vel.length() > 2 ? 0.25 : 0));
   const ready = inGame ? team(0).filter(q => q.skill && q.chg >= 100) : [], p = ready.find(q => q === ball.holder) || ready[0] || null;
-  if (p !== abilEl.p) { abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
+  const on = inGame && NET.role !== 'guest' ? team(0).find(q => q.buff && now < q.buffT) : null;   // an active skill shows its timer / armed state
+  if (on) {
+    const use = SKILL_USE[on.buff], armed = use === 'shot' || use === 'pass', left = (on.buffT - now) / 1000;
+    const k = 'on' + on.id + on.buff + (armed ? 'a' : Math.ceil(left));
+    if (abilEl.k !== k) { abilEl.k = k; abilEl.p = null; abilEl.innerHTML = '<i class="ski ski-' + on.buff + '"></i><b>' + SKILLS[on.buff][0] + '</b><small>' + (armed ? 'NEXT ' + use.toUpperCase() : Math.ceil(left) + 's') + '</small>'; }
+    abilEl.classList.add('act'); abilEl.classList.toggle('armed', armed); abilEl.style.setProperty('--left', armed ? 1 : Math.min(1, left / (on.buff === 'crossover' ? 3 : 8))); abilEl.hidden = false; return;
+  }
+  abilEl.classList.remove('act', 'armed');
+  if (p !== abilEl.p || abilEl.k) { abilEl.k = null; abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
   abilEl.hidden = !p;
 }
 setInterval(abilTick, 100);

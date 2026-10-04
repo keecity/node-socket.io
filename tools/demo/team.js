@@ -42,17 +42,64 @@ const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once ac
 // rebounding; the one defensive action that charges is a steal. A full charge shows the button.
 function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || !ctl(0) || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
 function buffOn(p, k) { return !!p && p.buff === k && performance.now() < p.buffT; }
+// how each skill runs: 'shot' / 'pass' = armed until your next shot / pass, 'now' = instant, otherwise an 8 s timer
+const SKILL_USE = { longrange: 'shot', accuracy: 'shot', quickrelease: 'shot', clutch: 'shot', finishing: 'shot', powerdunk: 'shot', middunk: 'shot', contact: 'shot',
+  teamassist: 'pass', fastpass: 'pass', crossover: 'now', recovery: 'now' };
+const SKILL_FX = { gold: 'middunk powerdunk longrange accuracy quickrelease hotstreak clutch finishing contact', green: 'speedboost stamina footwork allaround superjump crossover recovery',
+  red: 'stealboost block lockdown rebound intercept', teal: 'fastpass teamassist dribble vision' };
+const fxOf = k => Object.keys(SKILL_FX).find(c => SKILL_FX[c].split(' ').includes(k)) || 'gold';
+const FX_RGB = { gold: [1, 0.7, 0.1], green: [0.2, 1, 0.35], red: [1, 0.15, 0.15], teal: [0.1, 0.9, 1], blue: [0.3, 0.6, 1] };
+function glowModel(p, c) {   // tint the whole 3D player (jersey, skin, hair) with an emissive colour; null clears it
+  for (const r of p.model.findComponents('render')) for (const mi of r.meshInstances) {
+    if (!mi.material) continue; if (!mi._own) { mi._own = true; mi.material = mi.material.clone(); }
+    const m = mi.material; m.emissive = c ? new pc.Color(c[0] * 0.55, c[1] * 0.55, c[2] * 0.55) : new pc.Color(0, 0, 0); m.update();
+  }
+}
+// visual effect on a player that both screens see: a glow on the model, a glowing name tag and a badge over it
+function setFx(p, kind, ms, label) {
+  if (!p) return; p.fx = kind ? { kind, until: performance.now() + ms, label } : null;
+  glowModel(p, kind ? FX_RGB[kind] : null); fxTag(p);
+  if (NET.role === 'host') netEv('fx', p.id, (kind || '') + '|' + ms + '|' + (label || ''));
+}
+function fxTag(p) {
+  const L = p.label; L.classList.remove('fx-gold', 'fx-green', 'fx-red', 'fx-teal', 'fx-blue');
+  let b = L.querySelector('.fxb'); if (!p.fx) { if (b) b.remove(); return; }
+  L.classList.add('fx-' + p.fx.kind); if (!b) { b = el('em', 'fxb'); L.appendChild(b); } b.textContent = p.fx.label;
+}
+function useSkill(p, kind) {   // an armed shot / pass skill is spent
+  if (p && p.buff && SKILL_USE[p.buff] === kind && performance.now() < p.buffT) { p.buffT = 0; setFx(p, null); }
+}
+function activate(p) {
+  const k = p.skill, use = SKILL_USE[k], now = performance.now(), c = fxOf(k); p.chg = 0; p.buff = k;
+  toast(p.name.toUpperCase() + ': ' + SKILLS[k][0] + '!', true); sfx('cheer', 0.4);
+  if (use === 'shot' || use === 'pass') { p.buffT = now + 60000; setFx(p, c, 60000, SKILLS[k][0] + ' • NEXT ' + use.toUpperCase()); }
+  else if (k === 'crossover') {
+    p.buffT = now + 3000; setFx(p, c, 3000, 'CROSSOVER');
+    team(1).forEach(q => { if (d2(q.pos, p.pos) < 3.2) { q.react = 1.5; q.vel.set(0, 0, 0); setFx(q, 'blue', 1500, 'FROZEN'); } });
+  } else if (k === 'recovery') { p.buffT = now + 8000; team(0).forEach(q => { q.stamina = 1; setFx(q, c, 1500, 'RECHARGED'); }); setTimeout(() => setFx(p, c, 6500, SKILLS[k][0]), 1500); }
+  else { p.buffT = now + 8000; setFx(p, c, 8000, SKILLS[k][0]); }
+}
 let abilEl = null;
 function abilTick() {
   if (!abilEl) {
     abilEl = el('button'); abilEl.id = 'abil'; abilEl.hidden = true; document.body.appendChild(abilEl);
-    abilEl.onclick = e => { e.stopPropagation(); const p = abilEl.p; if (!p || p.chg < 100) return; p.chg = 0; p.buff = p.skill; p.buffT = performance.now() + 8000; toastL(p.name.toUpperCase() + ': ' + SKILLS[p.skill][0] + '!', true); sfxL('cheer', 0.4); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); abilEl.hidden = true; abilEl.p = null; };
+    abilEl.onclick = e => { e.stopPropagation(); const p = abilEl.p; if (!p || p.chg < 100 || abilEl.classList.contains('act')) return; activate(p); abilEl.p = null; };
     ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => abilEl.addEventListener(ev, e => e.stopPropagation()));
   }
+  const now = performance.now();
+  for (const q of P) if (q.fx && now > q.fx.until) setFx(q, null);
   const inGame = $('home').hidden && T.hidden && game.phase !== 'over';
   const h = ball.holder; if (inGame && game.phase === 'live' && h && h.team === 0) skillCharge(h, 0.1 + (h.vel.length() > 2 ? 0.25 : 0));
   const ready = inGame ? team(0).filter(q => q.skill && q.chg >= 100) : [], p = ready.find(q => q === ball.holder) || ready[0] || null;
-  if (p !== abilEl.p) { abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
+  const on = inGame && NET.role !== 'guest' ? team(0).find(q => q.buff && now < q.buffT) : null;   // an active skill shows its timer / armed state
+  if (on) {
+    const use = SKILL_USE[on.buff], armed = use === 'shot' || use === 'pass', left = (on.buffT - now) / 1000;
+    const k = 'on' + on.id + on.buff + (armed ? 'a' : Math.ceil(left));
+    if (abilEl.k !== k) { abilEl.k = k; abilEl.p = null; abilEl.innerHTML = '<i class="ski ski-' + on.buff + '"></i><b>' + SKILLS[on.buff][0] + '</b><small>' + (armed ? 'NEXT ' + use.toUpperCase() : Math.ceil(left) + 's') + '</small>'; }
+    abilEl.classList.add('act'); abilEl.classList.toggle('armed', armed); abilEl.style.setProperty('--left', armed ? 1 : Math.min(1, left / (on.buff === 'crossover' ? 3 : 8))); abilEl.hidden = false; return;
+  }
+  abilEl.classList.remove('act', 'armed');
+  if (p !== abilEl.p || abilEl.k) { abilEl.k = null; abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
   abilEl.hidden = !p;
 }
 setInterval(abilTick, 100);
