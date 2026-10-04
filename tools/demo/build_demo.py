@@ -10,7 +10,8 @@ assets['player'] = base64.b64encode(open('player_rigged.glb', 'rb').read()).deco
 assets['color'] = base64.b64encode(open('color.jpg', 'rb').read()).decode()
 assets['height'] = base64.b64encode(open('height.jpg', 'rb').read()).decode()
 for _s in ['bounce','net','cheer','crowd','boo','rim','whistle','catch','pass']: assets['snd_'+_s] = base64.b64encode(open('snd/'+_s+'.mp3','rb').read()).decode()
-assets['hair'] = base64.b64encode(open('hair_styles.glb', 'rb').read()).decode()
+assets['hair'] = base64.b64encode(open('hair_small.glb', 'rb').read()).decode()   # 512px texture (glbtex.py)
+assets['hoop'] = base64.b64encode(open('hoop_small.glb', 'rb').read()).decode()
 assets['teal'] = base64.b64encode(open('tex_teal.jpg', 'rb').read()).decode()
 head = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Court Clash 3v3</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet"><style>
 *{box-sizing:border-box}html{background:#05080c}body{position:relative;max-width:calc(100vh * 0.52);margin:0 auto!important;container-type:size;box-shadow:0 0 0 1px #1c2a38,0 0 60px #000}html,body{margin:0;height:100%;background:#080e17;font-family:system-ui,sans-serif;color:#eaf1f7;overflow:hidden}

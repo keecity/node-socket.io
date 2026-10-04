@@ -20,8 +20,8 @@ eq=sorted([(23,10,346,364),(362,80,721,371),(736,90,1062,371),(19,377,354,692),(
 for i,b in enumerate(eq): crops[f'eq{i}']=(a62,b)
 css=':root{'
 for k,(im,b) in crops.items():
-  c=im.crop(b); c=fit(c, 900 if k in('hero','row','secbar','nav4','room') else 300 if k.startswith('eq') else 500)
-  css+=f'--g-{k}:{u(c, 80 if k=="room" else 86)};'; S[k]=c.size
+  c=im.crop(b); c=fit(c, 700 if k in('hero','row','secbar','nav4','room') else 180 if k.startswith('eq') else 300)
+  css+=f'--g-{k}:{u(c, 72 if k=="room" else 80)};'; S[k]=c.size
   if k in ('hero','row','secbar'): css+=f'--gm-{k}:{u(mask(c),70)};'
 css+='}\n'
 open('gym_sprites.css','w').write(css); print(S)
