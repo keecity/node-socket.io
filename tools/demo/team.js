@@ -70,6 +70,7 @@ function gymCollect(r) {
   m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} FINISHED TRAINING</h3><div class="chg">+${xp} <b>XP</b></div><div class="cst">${stat ? `<b>+1 ${stat.toUpperCase()}</b> — now ${r.stats[stat]}` : 'No stat gain this time'}</div><div class="bts"><button class="ok" data-act="ucancel">NICE</button></div></div>`;
   m.hidden = false; if (up) setTimeout(() => { TSEL = TEAM.roster.indexOf(r); skillPick(r); }, 1600);
 }
+function drawShop() { T.querySelector('.scr[data-v="shop"] .body').innerHTML = '<p class="uhow" style="margin-top:40px">The shop is coming soon.</p>'; }
 function drawGym() {
   ensureContracts(); TEAM.gym ??= {}; const s = T.querySelector('.scr[data-v="gym"] .body'), coin = '<i class="gcoin"></i>', R = TEAM.roster, busy = R.filter(r => r.train);
   T.querySelector('.scr[data-v="gym"] .gcash').innerHTML = coin + TEAM.cash.toLocaleString();
@@ -256,7 +257,7 @@ function openTeam(view, arg) {
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
   T.querySelectorAll('.tnav button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'details' && b.dataset.go === 'details')));
   setTC(view === 'edit' && EDIT ? EDIT.color : TEAM.color);
-  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails, contracts: drawContracts, gym: drawGym })[view]();
+  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails, contracts: drawContracts, gym: drawGym, shop: drawShop })[view]();
   T.querySelector('.scr[data-v="' + view + '"] .body').scrollTop = 0;
 }
 function closeTeam() { T.hidden = true; $('home').hidden = false; applyRoster(); }
@@ -386,5 +387,5 @@ function drawDetails() {
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
-$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hndraft').onclick = () => openTeam('draft'); $('hnup').onclick = () => openTeam('details', 0); $('hngym').onclick = () => openTeam('gym');
+$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hndraft').onclick = () => openTeam('draft'); $('hnshop').onclick = () => openTeam('shop'); $('hngym').onclick = () => openTeam('gym');
 applyRoster();
