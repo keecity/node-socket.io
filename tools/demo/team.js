@@ -1,7 +1,7 @@
 // ====================================================================== team management (My Team / Edit Team / Draft / Player Details)
 const STATS = ['speed', 'shooting', 'passing', 'defense', 'rebounding'];
 const COLORS = [['PURPLE', '#7b3cf0'], ['TEAL', '#19c6c0'], ['RED', '#e0283a'], ['BLUE', '#2a7de8'], ['ORANGE', '#f5821f'], ['GREEN', '#22a83a'], ['WHITE', '#f2f2f2'], ['BLACK', '#1a1a1a']];
-const MASCOTS = ['wolf', 'bull', 'falcon', 'panther', 'bear', 'shark'];
+const MASCOTS = ["wolf", "bull", "falcon", "panther", "bear", "shark", "lion", "tiger", "eagle", "cobra", "rhino", "gorilla", "fox", "ram", "stag", "gator", "dragon", "scorpion", "stallion", "howler", "owl", "bat", "hornet", "boar", "kraken", "bolts", "fireball", "kings", "shield", "comets", "bison", "elephant", "hippo", "doberman", "raccoon", "crab", "mantis", "spider", "beetle", "lobster", "rooster", "peacock", "penguin", "hawk", "pelican", "hyena", "badger", "wolverine", "porcupine", "jackrabbit", "gargoyle", "knight", "mech", "alien", "pirate", "volcano", "wave", "cyclone", "summit", "rocket", "lightning", "shooting star", "crown", "diamond", "flame", "guardian", "sun", "moon", "peaks", "tornado", "axes", "hammers", "swords", "anchor", "tower", "chevrons", "links", "infinity", "delta", "compass", "power", "hourglass", "chain", "target", "planet", "fastbreak", "launch", "hex", "apex", "trident"];   // 90 logos; the first six keep the original order
 const DRAFT_NAMES = ['Malik', 'Theo', 'Cruz', 'Dex', 'Remy', 'Zane', 'Omar', 'Luka', 'Ty', 'Niko', 'Ace', 'Jett', 'Rio', 'Sol', 'Bo', 'Kofi', 'Ezra', 'Max'];
 const ROSTER_MAX = 9;
 const ovr = r => Math.round(STATS.reduce((a, k) => a + r.stats[k], 0) / STATS.length);
@@ -78,7 +78,7 @@ T.addEventListener('click', e => {
   }
   else if (a === 'editlineup') { LINEUP = null; const on = T.classList.toggle('swap'); toastL(on ? 'Tap a player, then the player to swap with' : 'Lineup saved', false); drawTeam(); }
   else if (a === 'color') { EDIT.color = +v; drawEdit(); }
-  else if (a === 'mascot') { EDIT.mascot = +v; drawEdit(); }
+  else if (a === 'mascot') { EDIT.mascot = +v; const sc = T.querySelector('.masc').scrollTop; drawEdit(); T.querySelector('.masc').scrollTop = sc; }
   else if (a === 'saveteam') { TEAM.name = (T.querySelector('#tname').value || 'MY TEAM').toUpperCase().slice(0, 20); TEAM.color = EDIT.color; TEAM.mascot = EDIT.mascot; saveTeam(); toastL('Team saved', false); openTeam('team'); }
   else if (a === 'pick') { DSEL = +v; drawDraft(); }
   else if (a === 'draftit') {
@@ -94,7 +94,7 @@ T.addEventListener('click', e => {
 function drawTeam() {
   const s = T.querySelector('.scr[data-v="team"] .body'), R = TEAM.roster, col = COLORS[TEAM.color], swap = T.classList.contains('swap');
   s.innerHTML = `
-  <div class="tpanel"><i class="mascot m-${MASCOTS[TEAM.mascot]}"></i>
+  <div class="tpanel"><i class="mascot lg${TEAM.mascot}"></i>
     <div class="tn">${esc(TEAM.name)}</div><div class="tc"><i style="background:${col[1]}"></i>TEAM COLOR: ${col[0]}</div>
     <div class="tcount">${num(R.length)}<b>/</b>${num(ROSTER_MAX)}<small>PLAYERS</small></div>
     <div class="trate"><small>TEAM RATING</small>${num(teamRating(), 'g')}</div>
@@ -112,12 +112,12 @@ function drawEdit() {
   const s = T.querySelector('.scr[data-v="edit"] .body'); if (!EDIT) EDIT = { color: TEAM.color, mascot: TEAM.mascot };
   const typed = s.querySelector('#tname') ? s.querySelector('#tname').value : TEAM.name;
   s.innerHTML = `
-  <div class="hero"><i class="mascot big m-${MASCOTS[EDIT.mascot]}"></i><div class="hn" style="border-color:${COLORS[EDIT.color][1]}">${esc(typed)}</div>${pic(TEAM.roster[0])}</div>
+  <div class="hero"><i class="mascot big lg${EDIT.mascot}"></i><div class="hn" style="border-color:${COLORS[EDIT.color][1]}">${esc(typed)}</div>${pic(TEAM.roster[0])}</div>
   <div class="namef"><input id="tname" maxlength="20" value="${esc(typed)}" spellcheck="false"><span class="cnt">${typed.length} / 20</span></div>
   <div class="row-lbl"><i class="lbl-color"></i></div>
   <div class="dots">${COLORS.map((c, i) => `<button class="dot d${i}${EDIT.color === i ? ' on' : ''}" data-act="color" data-val="${i}" aria-label="${c[0]}"></button>`).join('')}</div>
   <div class="row-lbl"><i class="lbl-mascot"></i></div>
-  <div class="masc">${MASCOTS.map((m, i) => `<button class="ms${EDIT.mascot === i ? ' on' : ''}" data-act="mascot" data-val="${i}"><i class="mascot m-${m}"></i><span>${m.toUpperCase()}</span></button>`).join('')}</div>
+  <div class="masc">${MASCOTS.map((m, i) => `<button class="ms${EDIT.mascot === i ? ' on' : ''}" data-act="mascot" data-val="${i}"><i class="mascot lg${i}"></i><span>${m.toUpperCase()}</span></button>`).join('')}</div>
   <div class="two"><button class="bdark" data-act="go" data-val="team"><span class="lbl">CANCEL</span></button><button class="bgold" data-act="saveteam"><span class="lbl">SAVE TEAM</span></button></div>`;
   const inp = s.querySelector('#tname'); inp.oninput = () => { s.querySelector('.cnt').textContent = inp.value.length + ' / 20'; s.querySelector('.hn').textContent = inp.value; };
 }

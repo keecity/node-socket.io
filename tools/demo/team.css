@@ -74,9 +74,9 @@
 #team .dots{display:flex;gap:1.5%;justify-content:space-between;align-items:center;margin-bottom:8px}
 #team .dot{flex:0 0 11%;height:auto;aspect-ratio:1;background-size:contain!important;background:center/contain no-repeat;position:relative;border-radius:50%}
 #team .dot.on{box-shadow:0 0 0 3px #ffc233,0 0 12px #ffc233}#team .dot.on::after{content:'✓';position:absolute;inset:0;display:grid;place-items:center;font-size:clamp(14px,4cqw,20px);text-shadow:0 1px 3px #000}
-#team .masc{display:grid;grid-template-columns:repeat(3,1fr);gap:2.5%;margin-bottom:10px}
+#team .masc{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;max-height:clamp(220px,62cqw,330px);overflow-y:auto;padding:4px 2px;-webkit-overflow-scrolling:touch;border-radius:8px;background:#0006}
 #team .ms{position:relative;aspect-ratio:1/0.82;background:var(--t-slot) center/100% 100% no-repeat}#team .ms.on{background-image:var(--t-slot_sel)}
-#team .ms .mascot{position:absolute;left:18%;top:8%;width:64%;height:62%}#team .ms span{position:absolute;left:0;right:0;bottom:9%;text-align:center;font-size:clamp(9px,2.8cqw,14px)}
+#team .ms .mascot{position:absolute;left:20%;top:12%;width:60%;height:56%}#team .ms span{position:absolute;left:0;right:0;bottom:9%;text-align:center;font-size:clamp(7px,2.1cqw,11px);white-space:nowrap;overflow:hidden}
 #team .two{display:flex;gap:4%}#team .two button{flex:1;aspect-ratio:183/46}#team .two .bgold .tx{filter:brightness(0)}
 /* draft */
 #team .dcards{display:flex;gap:2.5%;align-items:flex-end;margin-bottom:6px}#team .dcards .card.gold{flex:1.2}
