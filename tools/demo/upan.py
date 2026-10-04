@@ -30,3 +30,15 @@ css+='''#team .upan{aspect-ratio:auto;background:none;display:flex;flex-directio
 #ucf .no{background:var(--t-btn_dark) center/100% 100% no-repeat}
 '''
 open('upan.css','w').write(css)
+import numpy as np
+h=np.asarray(im.crop((0,0,700,64))).astype(float)/255
+mx=h[...,:3].max(-1); mn=h[...,:3].min(-1); s=np.where(mx>0,(mx-mn)/np.maximum(mx,1e-6),0); d=np.maximum(mx-mn,1e-6)
+r,g,b=h[...,0],h[...,1],h[...,2]
+hue=np.where(mx==r,((g-b)/d)%6,np.where(mx==g,(b-r)/d+2,(r-g)/d+4))*60
+w=np.clip((s-.2)/.25,0,1)*((hue>230)&(hue<315))*np.clip((mx-.06)/.1,0,1)*h[...,3]
+m=np.zeros((64,700,4),np.uint8); m[...,:3]=255; m[...,3]=(w*255).astype(np.uint8)
+css2=':root{--u-headm:'+u(Image.fromarray(m))+'}\n'
+css2+="""#team .upan .uh{position:relative;isolation:isolate}#team .upan .uh::before{content:'';position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--tc,#7b3cf0);-webkit-mask:var(--u-headm) center/100% 100% no-repeat;mask:var(--u-headm) center/100% 100% no-repeat;mix-blend-mode:color}
+#team .urow .ubar b{background:var(--tcb,#8b4cf6)}
+"""
+open('upan.css','a').write(css2)

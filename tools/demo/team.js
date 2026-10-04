@@ -44,8 +44,9 @@ function paintJersey(model, ci) {
     if (mi._jBase && mi._jCol !== ci) { mi._jCol = ci; mi.material.diffuseMap = jerseyTex(mi._jBase, ci); mi.material.update(); }
   }
 }
+function setTC(i) { T.style.setProperty('--tc', COLORS[i][1]); T.style.setProperty('--tcb', i >= 6 ? '#ffc233' : COLORS[i][1]); }   // bars fall back to gold for white/black teams
 function applyRoster() {
-  T.style.setProperty('--tc', COLORS[TEAM.color][1]);
+  setTC(TEAM.color);
   team(0).forEach(p => paintJersey(p.model, TEAM.color));
   team(0).forEach((p, i) => {
     const r = TEAM.roster[i]; if (!r) return;
@@ -95,7 +96,7 @@ function openTeam(view, arg) {
   if (arg !== undefined) TSEL = arg; if (view === 'edit' && T.dataset.view !== 'edit') { EDIT = null; const o = T.querySelector('#tname'); if (o) o.remove(); } if (view !== 'team') T.classList.remove('swap'); T.hidden = false; $('home').hidden = true;
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
   T.querySelectorAll('.tnav button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'details' && b.dataset.go === 'details')));
-  T.style.setProperty('--tc', COLORS[view === 'edit' && EDIT ? EDIT.color : TEAM.color][1]);
+  setTC(view === 'edit' && EDIT ? EDIT.color : TEAM.color);
   ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails })[view]();
   T.querySelector('.scr[data-v="' + view + '"] .body').scrollTop = 0;
 }
@@ -110,7 +111,7 @@ T.addEventListener('click', e => {
     else { const i = LINEUP, j = +v; LINEUP = null; [TEAM.roster[i], TEAM.roster[j]] = [TEAM.roster[j], TEAM.roster[i]]; saveTeam(); applyRoster(); drawTeam(); }
   }
   else if (a === 'editlineup') { LINEUP = null; const on = T.classList.toggle('swap'); toastL(on ? 'Tap a player, then the player to swap with' : 'Lineup saved', false); drawTeam(); }
-  else if (a === 'color') { EDIT.color = +v; T.style.setProperty('--tc', COLORS[EDIT.color][1]); drawEdit(); }
+  else if (a === 'color') { EDIT.color = +v; setTC(EDIT.color); drawEdit(); }
   else if (a === 'font') { EDIT.font = +v; drawEdit(); }
   else if (a === 'mascot') { EDIT.mascot = +v; const sc = T.querySelector('.masc').scrollTop; drawEdit(); T.querySelector('.masc').scrollTop = sc; }
   else if (a === 'saveteam') { TEAM.name = (T.querySelector('#tname').value || 'MY TEAM').toUpperCase().slice(0, 20); TEAM.color = EDIT.color; TEAM.mascot = EDIT.mascot; TEAM.font = EDIT.font; saveTeam(); applyRoster(); toastL('Team saved', false); openTeam('team'); }
