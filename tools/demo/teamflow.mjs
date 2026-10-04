@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=swiftshader','--enable-unsafe-swiftshader'] });
+const ctx = await b.newContext({ viewport: { width: 390, height: 844 } }); const p = await ctx.newPage();
+p.on('pageerror', e => console.log('ERR', e.message));
+await p.goto('file:///home/user/node-socket.io/public/court-demo.html'); await p.waitForTimeout(8000);
+const T = () => p.evaluate(() => { const t = JSON.parse(localStorage.getItem('cc_team') || 'null'); return t ? `${t.name} color=${t.color} mascot=${t.mascot} xp=${t.xp} roster=${t.roster.map(r => r.name + ':L' + r.lv).join(',')}` : 'none'; });
+await p.click('#hteam'); await p.waitForTimeout(800);
+await p.click('.tedit'); await p.fill('#tname', 'Night Owls'); await p.click('.dot.d3'); await p.click('.ms:nth-child(6)'); await p.click('[data-act=saveteam]'); await p.waitForTimeout(500);
+console.log('after save:', await T());
+await p.click('.scr[data-v="team"] .tnav [data-go=draft]'); await p.waitForTimeout(800); await p.click('[data-act=draftit]'); await p.waitForTimeout(500);
+console.log('after draft:', await T());
+await p.click('.scr[data-v="team"] .card'); await p.waitForTimeout(500); await p.click('[data-act=upgrade]'); await p.waitForTimeout(500);
+console.log('after upgrade:', await T());
+await p.reload(); await p.waitForTimeout(8000); console.log('after reload:', await T());
+await p.click('#hplay'); await p.waitForTimeout(1500);
+console.log('court names:', await p.evaluate(() => window.game.P.filter(q => q.team === 0).map(q => q.name + ' spd' + q.spd.toFixed(2)).join(', ')));
+await b.close();
