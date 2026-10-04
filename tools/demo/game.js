@@ -1258,9 +1258,17 @@ T.addEventListener('click', e => {
     if (TEAM.roster.length >= ROSTER_MAX) return toastL('Roster full (' + ROSTER_MAX + ' players)', true);
     const p = TEAM.draft[DSEL]; TEAM.roster.push(p); TEAM.draft = null; saveTeam(); toastL(p.name.toUpperCase() + ' drafted!', true); sfxL('cheer', 0.6); openTeam('team');
   }
+  else if (a === 'ustat') {   // ask before spending XP on one stat
+    const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r), to = Math.min(99, r.stats[v] + NEXT[v]); if (r.stats[v] >= 99) return toastL(v.toUpperCase() + ' is maxed', false);
+    let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
+    m.innerHTML = `<div class="box"><h3>UPGRADE ${v.toUpperCase()}?</h3><div class="chg">${r.stats[v]} ▸ <b>${to}</b></div><div class="cst">Cost <b>${c} XP</b> · you have ${TEAM.xp} XP</div><div class="bts"><button class="no" data-act="ucancel">CANCEL</button><button class="ok${TEAM.xp < c ? ' off' : ''}" data-act="upgrade" data-val="${v}">UPGRADE</button></div></div>`;
+    m.hidden = false;
+  }
+  else if (a === 'ucancel') T.querySelector('#ucf').hidden = true;
   else if (a === 'upgrade') {
-    const r = TEAM.roster[TSEL], c = upCost(r); if (TEAM.xp < c) return toastL('Not enough XP — earn XP by playing games', false);
-    TEAM.xp -= c; r.lv++; for (const k of STATS) r.stats[k] = Math.min(99, r.stats[k] + NEXT[k]); saveTeam(); applyRoster(); sfxL('net', 0.6); toastL(r.name.toUpperCase() + ' is now level ' + r.lv, true); drawDetails();
+    const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r); if (TEAM.xp < c) return toastL('Not enough XP — earn XP by playing games', false);
+    T.querySelector('#ucf').hidden = true;
+    TEAM.xp -= c; r.stats[v] = Math.min(99, r.stats[v] + NEXT[v]); r.lv++; saveTeam(); applyRoster(); sfxL('net', 0.6); toastL(v.toUpperCase() + ' upgraded to ' + r.stats[v], true); drawDetails();
   }
   else if (a === 'prevp' || a === 'nextp') { TSEL = (TSEL + (a === 'nextp' ? 1 : -1) + TEAM.roster.length) % TEAM.roster.length; drawDetails(); }
 });
@@ -1315,10 +1323,9 @@ function drawDetails() {
   s.innerHTML = `
   <div class="dhead"><button class="arrow l" data-act="prevp">‹</button>${pic(r)}<div class="pn">${esc(r.name)}</div><div class="pl">LEVEL ${r.lv}</div>
     <i class="bar"><b style="width:${Math.min(100, TEAM.xp / c * 100)}%"></b></i><div class="lvb">${num(r.lv)}</div><div class="ovrb">${num(ovr(r))}</div><button class="arrow r" data-act="nextp">›</button></div>
-  <div class="xpb">${num(TEAM.xp)}</div>
-  <div class="upan"><div class="lvl">LEVEL ${r.lv} → LEVEL ${r.lv + 1}</div>${STATS.map((k, i) => `<div class="urow r${i}"><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}</div>
+  <div class="xpb"><i class="xpfill" style="width:${Math.min(100, TEAM.xp / c * 100) * 0.559}%"></i><b class="need">${TEAM.xp} / ${c} XP</b></div>
+  <div class="upan"><i class="uh"></i>${STATS.map((k, i) => `<div class="ug">${k.toUpperCase()}${i === 0 ? `<span class="lvn">NEXT UPGRADE: LEVEL ${r.lv + 1}</span>` : ''}</div><div class="urow r${i}${r.stats[k] >= 99 ? ' max' : ''}" data-act="ustat" data-val="${k}"><i class="uic"></i><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}<i class="ug"></i><i class="uf"></i></div>
   <div class="cost"><div><small>UPGRADE COST</small>${num(c, 'g')}<b class="xpw">XP</b></div><div><small>XP AFTER UPGRADE</small>${TEAM.xp >= c ? num(TEAM.xp - c) : '<b class="no">NEED ' + (c - TEAM.xp) + '</b>'}</div></div>
-  <button class="bigbtn${TEAM.xp < c ? ' off' : ''}" data-act="upgrade"><span>UPGRADE • ${c} XP</span></button>
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
