@@ -155,3 +155,15 @@
 #team .card .nm{top:66.3%;padding-top:.08em}
 #team .tnav{margin-bottom:calc(max(0px,env(safe-area-inset-bottom)) + 30px)}
 #team .uhow{margin:2px 4% 6px;text-align:center;font-size:clamp(10px,3cqw,13px);line-height:1.35;color:#c9d6e2}
+#abil{position:fixed;right:14px;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 120px);z-index:30;width:76px;height:76px;border-radius:50%;border:3px solid #fff3;background:radial-gradient(circle at 50% 35%,#ffd560,#f08c12 70%);box-shadow:0 0 0 3px #0008,0 0 18px #ffb52e;color:#1a1206;font:400 11px 'Russo One',system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;animation:abp 1s ease-in-out infinite}
+#abil[hidden]{display:none}#abil small{font-size:9px;opacity:.8}
+@keyframes abp{50%{transform:scale(1.07);box-shadow:0 0 0 3px #0008,0 0 28px #ffd560}}
+#team .uskill{margin:0 4% 8px;text-align:center;font-size:clamp(10px,3cqw,12px);color:#9fb0bf}#team .uskill b{color:#ffc233;font-weight:400}
+#ucf .sks{display:flex;gap:4%;margin:4px 0 12px}#ucf .sk{flex:1;border:2px solid #b8c3cc66;border-radius:8px;background:#0f1b2a;padding:10px 6px;color:#e8eef4;display:flex;flex-direction:column;gap:5px}
+#ucf .sk b{font:400 14px 'Russo One',system-ui;color:#ffc233}#ucf .sk small{font-size:11px;color:#c9d6e2;line-height:1.3}#ucf .sk:active{border-color:#ffc233}
+#ucf .bts{justify-content:center}#ucf .bts button{max-width:48%}
+.ski{display:inline-block;background:center/contain no-repeat;flex:none}
+#ucf .sk .ski{width:46px;height:46px;align-self:center}
+#abil .ski{width:30px;height:26px;filter:brightness(0) opacity(.8)}#abil b{font-size:8px}#abil{width:84px;height:84px}
+#team .uskill .ski{width:18px;height:18px;vertical-align:-4px;margin-right:5px}
+#abil{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 232px)}

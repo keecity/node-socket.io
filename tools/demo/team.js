@@ -19,7 +19,49 @@ function defaultTeam() {
 let TEAM;
 try { TEAM = JSON.parse(localStorage.getItem('cc_team')) || defaultTeam(); } catch (e) { TEAM = defaultTeam(); }
 function saveTeam() { try { localStorage.setItem('cc_team', JSON.stringify(TEAM)); } catch (e) {} }
-const upCost = r => 50 * r.lv;
+const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
+const lvNeed = lv => 3 + 3 * lv;   // level points for the next level: 6, 9, 12 ... (each upgrade gives +3)
+const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once activated; icon order follows the skill sheet
+  middunk: ['MID-COURT DUNK', 'Shots inside the arc go in far more often'], speedboost: ['SPEED BOOST', 'Runs 35% faster'],
+  stamina: ['HIGH STAMINA', 'Sprinting uses no stamina'], superjump: ['SUPER JUMP', 'Higher blocks and longer reach for rebounds'],
+  powerdunk: ['POWER DUNK', 'Shots at the rim can\'t be blocked and rarely miss'],
+  longrange: ['LONG RANGE', '3-pointers go in 40% more often'], accuracy: ['SHOT ACCURACY', 'Every shot is 25% more accurate'],
+  quickrelease: ['QUICK RELEASE', 'Shot meter sweeps much slower'], hotstreak: ['HOT STREAK', 'Wider perfect window; each make adds 3 seconds'],
+  clutch: ['CLUTCH SHOOTING', 'Big accuracy boost in close games and late in the shot clock'],
+  stealboost: ['STEAL BOOST', 'Steals succeed far more often'], block: ['SHOT BLOCKING', 'Blocks almost every shot you contest'],
+  lockdown: ['LOCKDOWN DEFENSE', 'The player you guard shoots far worse'], rebound: ['REBOUND BOOST', 'Grabs rebounds from much further away'],
+  intercept: ['PASS INTERCEPTION', 'Picks off passes near you twice as often'],
+  fastpass: ['FAST PASSING', 'Passes fly much faster'], teamassist: ['TEAM ASSIST', 'Teammates shoot 30% better off your passes'],
+  dribble: ['DRIBBLE MASTERY', 'The ball can\'t be stolen from you'], crossover: ['CROSSOVER', 'Freezes nearby defenders and gives a burst of speed'],
+  vision: ['COURT VISION', 'Your passes can\'t be picked off'],
+  recovery: ['STAMINA RECOVERY', 'Refills the whole team\'s stamina and speeds recovery'], finishing: ['STRONG FINISHING', 'Close shots go in 40% more often'],
+  contact: ['CONTACT RESISTANCE', 'Defenders contesting your shot don\'t bother you'], footwork: ['BALANCED FOOTWORK', 'Steadier shot meter and a little extra speed'],
+  allaround: ['ALL-AROUND BOOST', 'Faster, better shooting and better steals'],
+};
+// skills charge by playing (points, assists, steals, rebounds, passes, time on court); a full charge shows the button
+function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
+function buffOn(p, k) { return !!p && p.buff === k && performance.now() < p.buffT; }
+let abilEl = null;
+function abilTick() {
+  if (!abilEl) {
+    abilEl = el('button'); abilEl.id = 'abil'; abilEl.hidden = true; document.body.appendChild(abilEl);
+    abilEl.onclick = e => { e.stopPropagation(); const p = abilEl.p; if (!p || p.chg < 100) return; p.chg = 0; p.buff = p.skill; p.buffT = performance.now() + 8000; toastL(p.name.toUpperCase() + ': ' + SKILLS[p.skill][0] + '!', true); sfxL('cheer', 0.4); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); abilEl.hidden = true; abilEl.p = null; };
+    ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => abilEl.addEventListener(ev, e => e.stopPropagation()));
+  }
+  const inGame = $('home').hidden && T.hidden && game.phase !== 'over';
+  if (inGame && game.phase === 'live') team(0).forEach(q => skillCharge(q, 0.22));
+  const ready = inGame ? team(0).filter(q => q.skill && q.chg >= 100) : [], p = ready.find(q => q === ball.holder) || ready[0] || null;
+  if (p !== abilEl.p) { abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
+  abilEl.hidden = !p;
+}
+setInterval(abilTick, 100);
+function skillPick(r) {   // level up: choose one of two skills (replaces the current one) or skip
+  const pool = Object.keys(SKILLS).filter(k => k !== r.skill), two = [];
+  while (two.length < 2) { const k = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; two.push(k); }
+  let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
+  m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} REACHED LEVEL ${r.lv}!</h3><div class="cst">Choose a new skill${r.skill ? ' (replaces <b>' + SKILLS[r.skill][0] + '</b>)' : ''}</div><div class="sks">${two.map(k => `<button class="sk" data-act="skill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b><small>${SKILLS[k][1]}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">SKIP</button></div></div>`;
+  m.hidden = false;
+}
 function teamXP(n) { TEAM.xp += Math.round(n); saveTeam(); }
 // starters drive the Purple players on court: names, hairstyles, speed and shooting
 function jerseyTex(base, ci) {   // recolour the purple jersey texture to a team colour, keeping its shading
@@ -52,7 +94,7 @@ function applyRoster() {
     const r = TEAM.roster[i]; if (!r) return;
     p.name = r.name.toUpperCase().slice(0, 1) + r.name.slice(1).toLowerCase(); if (p.label.firstChild) p.label.firstChild.nodeValue = p.name;
     if (p.hairKey !== r.hair + ':' + r.tint) { p.hairEnt = setHair(p.model, r.hair, r.tint, p.hairEnt); p.hairKey = r.hair + ':' + r.tint; }
-    if (p.spd0 === undefined) p.spd0 = p.spd; p.spd = p.spd0 * (0.86 + r.stats.speed / 300); p.rat = r.stats;
+    if (p.spd0 === undefined) p.spd0 = p.spd; p.spd = p.spd0 * (0.86 + r.stats.speed / 300); p.rat = r.stats; p.skill = r.skill || null;
   });
 }
 // ---- portraits: photograph the real 3D player (with their hairstyle) once, then reuse the picture
@@ -127,10 +169,13 @@ T.addEventListener('click', e => {
     m.hidden = false;
   }
   else if (a === 'ucancel') T.querySelector('#ucf').hidden = true;
+  else if (a === 'skill') { const r = TEAM.roster[TSEL] || TEAM.roster[0]; r.skill = v; saveTeam(); applyRoster(); T.querySelector('#ucf').hidden = true; toastL(r.name.toUpperCase() + ' learned ' + SKILLS[v][0], true); drawDetails(); }
   else if (a === 'upgrade') {
     const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r); if (TEAM.xp < c) return toastL('Not enough XP — earn XP by playing games', false);
     T.querySelector('#ucf').hidden = true;
-    TEAM.xp -= c; r.stats[v] = Math.min(99, r.stats[v] + NEXT[v]); r.lv++; saveTeam(); applyRoster(); sfxL('net', 0.6); toastL(v.toUpperCase() + ' upgraded to ' + r.stats[v], true); drawDetails();
+    TEAM.xp -= c; r.stats[v] = Math.min(99, r.stats[v] + NEXT[v]); r.ups = (r.ups ?? r.lv) + 1; r.lp = (r.lp || 0) + 3; let up = false;
+    while (r.lp >= lvNeed(r.lv)) { r.lp -= lvNeed(r.lv); r.lv++; up = true; }
+    saveTeam(); applyRoster(); sfxL('net', 0.6); toastL(v.toUpperCase() + ' upgraded to ' + r.stats[v], true); drawDetails(); if (up) skillPick(r);
   }
   else if (a === 'prevp' || a === 'nextp') { TSEL = (TSEL + (a === 'nextp' ? 1 : -1) + TEAM.roster.length) % TEAM.roster.length; drawDetails(); }
 });
@@ -184,13 +229,14 @@ function drawDetails() {
   NEXT = {}; for (const k of STATS) NEXT[k] = 2 + ((r.lv + k.length) % 2);   // +2 or +3 each level
   s.innerHTML = `
   <div class="dhead"><button class="arrow l" data-act="prevp">‹</button>${pic(r)}<div class="pn">${esc(r.name)}</div><div class="pl">LEVEL ${r.lv}</div>
-    <i class="bar"><b style="width:${Math.min(100, TEAM.xp / c * 100)}%"></b></i><div class="lvb">${num(r.lv)}</div><div class="ovrb">${num(ovr(r))}</div><button class="arrow r" data-act="nextp">›</button></div>
+    <i class="bar"><b style="width:${Math.min(100, (r.lp || 0) / lvNeed(r.lv) * 100)}%"></b></i><div class="lvb">${num(r.lv)}</div><div class="ovrb">${num(ovr(r))}</div><button class="arrow r" data-act="nextp">›</button></div>
   <div class="xpb"><i class="xpfill" style="width:${Math.min(100, TEAM.xp / c * 100) * 0.559}%"></i><b class="need">${TEAM.xp} / ${c} XP</b></div>
-  <p class="uhow">Tap a stat to upgrade it. Each upgrade raises one stat and costs more XP than the last.</p>
-  <div class="upan"><i class="uh"></i>${STATS.map((k, i) => `<div class="ug">${k.toUpperCase()}${i === 0 ? `<span class="lvn">NEXT UPGRADE: LEVEL ${r.lv + 1}</span>` : ''}</div><div class="urow r${i}${r.stats[k] >= 99 ? ' max' : ''}" data-act="ustat" data-val="${k}"><i class="uic"></i><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}<i class="ug"></i><i class="uf"></i></div>
+  <p class="uhow">Tap a stat to upgrade it. Each upgrade raises one stat, adds +3 level points and costs more XP than the last. Level up to choose a skill.</p>
+  <p class="uskill">${r.skill ? `<i class="ski ski-${r.skill}"></i>SKILL: <b>${SKILLS[r.skill][0]}</b> — ${SKILLS[r.skill][1]}. Charges as you play; tap its button in a match.` : `No skill yet — reach level ${r.lv + 1} to choose one.`}</p>
+  <div class="upan"><i class="uh"></i>${STATS.map((k, i) => `<div class="ug">${k.toUpperCase()}${i === 0 ? `<span class="lvn">LEVEL PTS ${r.lp || 0} / ${lvNeed(r.lv)}</span>` : ''}</div><div class="urow r${i}${r.stats[k] >= 99 ? ' max' : ''}" data-act="ustat" data-val="${k}"><i class="uic"></i><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}<i class="ug"></i><i class="uf"></i></div>
   <div class="cost"><div><small>UPGRADE COST</small>${num(c, 'g')}<b class="xpw">XP</b></div><div><small>XP AFTER UPGRADE</small>${TEAM.xp >= c ? num(TEAM.xp - c) : '<b class="no">NEED ' + (c - TEAM.xp) + '</b>'}</div></div>
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
-$('hteam').onclick = () => openTeam('team'); $('hplayers').onclick = () => openTeam('team'); $('hstats').onclick = () => openTeam('details', 0);
+$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hnup').onclick = () => openTeam('details', 0); $('hnshop').onclick = () => openTeam('draft');
 applyRoster();

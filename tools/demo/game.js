@@ -230,7 +230,7 @@ function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   if (TUT) { game.shot = null; sfx('net'); tutEvent('made'); return; }
-  stats.made++; game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
+  stats.made++; if (typeof skillCharge === 'function') { skillCharge(s.shooter, 12 * s.pts); skillCharge(s.assist, 12); if (buffOn(s.shooter, 'hotstreak')) s.shooter.buffT += 3000; } game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   if (s.ft) toast('Free throw good', false); else toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
   sfx('net'); netEv('score', t); crowdReact(t); game.phase = 'scored'; game.timer = 1.6;
   const pf = game.pendingFoul; game.pendingFoul = null;
@@ -253,7 +253,7 @@ function shotRelease(p) {
   const A = attackHoop(p.team), p0 = p.ballNode.getPosition().clone(), dr = d2(p.pos, A.rim);
   const c = closestDefender(p), cd = c ? d2(c.pos, p.pos) : 9;
   game.shot = { shooter: p, pts: game.phase === 'ftair' ? 1 : dr > ARC ? 3 : 2, ft: game.phase === 'ftair', assist: p.lastPasser && p.holdT < 3 ? p.lastPasser : null };
-  if (!game.shot.ft && c && c.action && c.action.type === 'block' && c.action.t > 0.2 && c.action.t < 0.75 && cd < 1.35 && Math.random() < 0.38) {
+  if (!game.shot.ft && c && c.action && c.action.type === 'block' && c.action.t > 0.2 && c.action.t < 0.75 && cd < 1.35 && !(buffOn(p, 'powerdunk') && dr < 3) && Math.random() < (buffOn(c, 'block') ? 0.85 : buffOn(c, 'superjump') ? 0.6 : 0.38)) {
     const away = flat(p.pos.x - A.rim.x, p.pos.z - A.rim.z).normalize();
     const inC = flat(-p0.x, -p0.z).normalize(), dir2 = away.mulScalar(0.6).add(inC.mulScalar(0.4)).normalize();
     release(p0, new pc.Vec3(dir2.x * 2.6 + (Math.random() - .5) * 1.2, 1.6, dir2.z * 2.6 + (Math.random() - .5) * 1.2), false);
@@ -263,6 +263,16 @@ function shotRelease(p) {
   make = Math.max(0.18, make) * (cd < 1.0 ? 0.55 : cd < 1.6 ? 0.75 : cd < 2.4 ? 0.9 : 1);
   if (game.shotClock < 1) make *= 0.8;
   if (p.rat) make *= 0.8 + p.rat.shooting / 250;   // roster shooting rating (60 = +4%)
+  if (!game.shot.ft) {   // active skills
+    const cdF = cd < 1.0 ? 0.55 : cd < 1.6 ? 0.75 : cd < 2.4 ? 0.9 : 1, b = k => buffOn(p, k);
+    if (b('middunk') && dr < ARC) make *= 1.35; if (b('powerdunk') && dr < 3) make *= 1.5; if (b('longrange') && dr > ARC) make *= 1.4;
+    if (b('accuracy')) make *= 1.25; if (b('finishing') && dr < 4.5) make *= 1.4; if (b('allaround')) make *= 1.15;
+    if (b('clutch')) make *= Math.abs(game.score[0] - game.score[1]) <= 3 || game.shotClock < 5 ? 1.35 : 1.1;
+    if (b('contact')) make /= cdF; else if (b('footwork')) make /= Math.sqrt(cdF);
+    if (game.shot.assist && buffOn(game.shot.assist, 'teamassist')) make *= 1.3;
+    if (buffOn(c, 'lockdown')) make *= 0.6;
+    make = Math.min(0.97, make);
+  }
   if (game.shot.ft) make = 0.76 - 0.3 * Math.min(1, game.ftDistract || 0);   // a rattled shooter
   if (p.shotQ !== undefined) {   // player's timed release: 1 = dead centre, 0 = edge of the meter
     const q = p.shotQ; delete p.shotQ;
@@ -294,7 +304,7 @@ function startPass(p, r) { stats.pass++;
 }
 function passRelease(p, r) {
   const p0 = p.ballNode.getPosition().clone(), dist = d2(p.pos, r.pos);
-  const T = 0.22 + dist / 11, lead = r.pos.clone().add(r.vel.clone().mulScalar(T * 0.35));
+  const T = (0.22 + dist / 11) * (buffOn(p, 'fastpass') ? 0.6 : 1), lead = r.pos.clone().add(r.vel.clone().mulScalar(T * 0.35));
   lead.x = Math.max(-13.4, Math.min(13.4, lead.x)); lead.z = Math.max(-6.4, Math.min(6.4, lead.z));
   r.catchAt = lead.clone();
   const tgt = new pc.Vec3(lead.x, 1.25, lead.z);
@@ -356,7 +366,7 @@ function updateActions(dt) {
       if (!a.done && a.t >= 1.06 && ball.holder === p) { a.done = true; game.phase = 'air'; dunkRelease(p); }
       if (a.t >= 2.9) { const r = p.rootBone.getPosition(); p.pos.set(r.x, 0, r.z); place(p); p.rootBone.setLocalPosition(0, 0, 0); p.action = null; setAnim(p, 'Ready', 0); }
     }
-    else if (a.type === 'pass') { if (!a.done && a.t >= 0.30 && ball.holder === p) { a.done = true; passRelease(p, a.to); } if (a.t >= 0.62) p.action = null; }
+    else if (a.type === 'pass') { if (!a.done && a.t >= 0.30 && ball.holder === p) { a.done = true; passRelease(p, a.to); skillCharge(p, 4); } if (a.t >= 0.62) p.action = null; }
     else if (a.type === 'block') { if (a.t >= 1.15) p.action = null; }
     else if (a.type === 'steal') {
       if (!a.done && a.t >= 0.2) {
@@ -367,8 +377,9 @@ function updateActions(dt) {
           if (q < 0.15) p.react = 0.4;
           if (q < 0.25 && h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < 0.7) { callFoul(p, h); continue; } }
         if (aiReach && h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < 0.14) { callFoul(p, h); continue; }   // the computer reaches in too
+        chance = buffOn(h, 'dribble') ? 0 : Math.min(1, chance + (buffOn(p, 'stealboost') ? 0.35 : buffOn(p, 'allaround') ? 0.15 : 0));
         if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < chance) {
-          if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
+          if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, skillCharge(p, 30), toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
           else {
             const to = flat(p.pos.x - h.pos.x, p.pos.z - h.pos.z).normalize();
             release(h.ballNode.getPosition().clone(), new pc.Vec3(to.x * 2.2 + (Math.random() - .5), 0.8, to.z * 2.2 + (Math.random() - .5)), false);
@@ -385,7 +396,7 @@ function updateActions(dt) {
 // ====================================================================== AI helpers
 function clamp(v) { v.x = Math.max(-XMAX, Math.min(XMAX, v.x)); v.z = Math.max(-ZMAX, Math.min(ZMAX, v.z)); return v; }
 function steer(p, target, maxSpeed, dt, accel = 13) {
-  maxSpeed *= p.spd;
+  maxSpeed *= p.spd * (buffOn(p, 'speedboost') ? 1.35 : buffOn(p, 'crossover') || buffOn(p, 'allaround') ? 1.15 : buffOn(p, 'footwork') ? 1.1 : 1);
   const want = flat(target.x - p.pos.x, target.z - p.pos.z), l = want.length(), sp = Math.min(maxSpeed, l * 3);
   p.goalDist = l;
   if (l > 1e-3) want.mulScalar(sp / l);
@@ -551,7 +562,7 @@ function defenseAI(p, dt) {
     const dB = ball.pos.distance(new pc.Vec3(p.pos.x, 1.2, p.pos.z));
     if (dB < 0.9 && ball.pos.y < 2.3) {
       ball.pass.tried.add(p.id);
-      if (Math.random() < 0.45) { give(p); setAnim(p, 'Dribble', 0.1); game.phase = 'live'; stats.steal++, toast(p.name + ' picks it off!', true); sfx('block'); }
+      if (Math.random() < (buffOn(ball.pass.from, 'vision') ? 0 : buffOn(p, 'intercept') ? 0.9 : 0.45)) { give(p); setAnim(p, 'Dribble', 0.1); game.phase = 'live'; stats.steal++, skillCharge(p, 30), toast(p.name + ' picks it off!', true); sfx('block'); }
       else { ball.vel.x *= 0.25; ball.vel.z *= 0.25; ball.vel.y = 1.2; ball.pass = null; ball.lastTouch = p.team; game.phase = 'loose'; toast('Deflected by ' + p.name); }
     }
   }
@@ -562,8 +573,8 @@ function chase(p, dt) {
   const t = ball.pos.y > 2.2 ? 0.45 : 0.15, tgt = clamp(flat(ball.pos.x + ball.vel.x * t, ball.pos.z + ball.vel.z * t));
   steer(p, tgt, 4.0, dt, 13); animMove(p, dt, 'offball');
   if (p.vel.length() < 1.0) faceTo(p, ball.pos.x, ball.pos.z, 8, dt);
-  if (d2(p.pos, ball.pos) < 0.85 && ball.pos.y < 1.8) {
-    const was = game.offense; give(p); game.phase = 'live';
+  if (d2(p.pos, ball.pos) < (buffOn(p, 'rebound') ? 1.6 : buffOn(p, 'superjump') ? 1.25 : 0.85) && ball.pos.y < 1.8) {
+    const was = game.offense; give(p); game.phase = 'live'; skillCharge(p, 15);
     toast(p.team === was ? 'Offensive board — ' + p.name : p.name + ' rebounds'); setAnim(p, 'Dribble', 0.1);
   }
 }
@@ -698,7 +709,7 @@ app.on('update', dt => {
     }
     if (game.phase === 'live' && game.shotClock <= 0 && ball.holder && !ball.holder.action) { toast('Shot clock violation'); sfx('whistle', 0.7); inbound(1 - game.offense, flat(0, 0)); }
   }
-  for (const q of P) if (ctl(q.team)) { if (q.drain > 0) q.drain -= dt; else q.stamina = Math.min(1, q.stamina + dt * 0.15); }   // each player has their own stamina
+  for (const q of P) if (ctl(q.team)) { if (q.drain > 0) q.drain -= dt; else q.stamina = Math.min(1, q.stamina + dt * 0.15 * (buffOn(q, 'recovery') ? 4 : 1)); }   // each player has their own stamina
   viewFrame(dt);
   updateActions(dt);
   for (const p of P) if (!p.action || p.action.type === 'steal' || p.action.type === 'pass') p.pos.add(p.vel.clone().mulScalar(dt));
@@ -880,7 +891,7 @@ function sprintMul(p, dt) {
   p.boost = Math.max(0, (p.boost || 0) - dt * (0.22 + 0.9 * (p.boost || 0) * (p.boost || 0)));
   if (p.stamina <= 0) p.boost = Math.min(p.boost, 0);
   p.sprint = p.boost > 0.12;
-  if (p.boost > 0) { p.stamina = Math.max(0, p.stamina - dt * 0.45 * p.boost); p.drain = 0.25; }
+  if (p.boost > 0 && !buffOn(p, 'stamina')) { p.stamina = Math.max(0, p.stamina - dt * 0.45 * p.boost); p.drain = 0.25; }
   return 1 + 1.1 * p.boost;                                  // up to 2.1x run speed
 }
 function moveOrder(p, g) {
@@ -910,6 +921,8 @@ function meterTick() {   // a 0.25 s hold brings up the shot meter
     const df = dr < 3 ? 1.3 : dr < 5 ? 1.1 : dr < ARC ? 0.9 : dr < 8 ? 0.75 : 0.6;   // closer shots get a wider window too
     setZone(Math.min(0.45, (op < 1.0 ? 0.06 : op < 1.6 ? 0.087 : op < 2.4 ? 0.14 : op < 3.5 ? 0.2 : 0.27) * df));
     human.mspeed = op < 1.0 ? 1.15 : op < 1.6 ? 1.0 : op < 2.4 ? 0.88 : op < 3.5 ? 0.78 : 0.68;   // open shooters get a slower sweep
+    if (buffOn(p, 'hotstreak') || buffOn(p, 'footwork')) setZone(Math.min(0.45, human.zone * (buffOn(p, 'hotstreak') ? 1.8 : 1.3)));
+    if (buffOn(p, 'quickrelease')) human.mspeed *= 0.6; else if (buffOn(p, 'footwork')) human.mspeed *= 0.8;
     $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
 }
 const ringEl = $('ring');
@@ -1158,7 +1171,49 @@ function defaultTeam() {
 let TEAM;
 try { TEAM = JSON.parse(localStorage.getItem('cc_team')) || defaultTeam(); } catch (e) { TEAM = defaultTeam(); }
 function saveTeam() { try { localStorage.setItem('cc_team', JSON.stringify(TEAM)); } catch (e) {} }
-const upCost = r => 50 * r.lv;
+const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
+const lvNeed = lv => 3 + 3 * lv;   // level points for the next level: 6, 9, 12 ... (each upgrade gives +3)
+const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once activated; icon order follows the skill sheet
+  middunk: ['MID-COURT DUNK', 'Shots inside the arc go in far more often'], speedboost: ['SPEED BOOST', 'Runs 35% faster'],
+  stamina: ['HIGH STAMINA', 'Sprinting uses no stamina'], superjump: ['SUPER JUMP', 'Higher blocks and longer reach for rebounds'],
+  powerdunk: ['POWER DUNK', 'Shots at the rim can\'t be blocked and rarely miss'],
+  longrange: ['LONG RANGE', '3-pointers go in 40% more often'], accuracy: ['SHOT ACCURACY', 'Every shot is 25% more accurate'],
+  quickrelease: ['QUICK RELEASE', 'Shot meter sweeps much slower'], hotstreak: ['HOT STREAK', 'Wider perfect window; each make adds 3 seconds'],
+  clutch: ['CLUTCH SHOOTING', 'Big accuracy boost in close games and late in the shot clock'],
+  stealboost: ['STEAL BOOST', 'Steals succeed far more often'], block: ['SHOT BLOCKING', 'Blocks almost every shot you contest'],
+  lockdown: ['LOCKDOWN DEFENSE', 'The player you guard shoots far worse'], rebound: ['REBOUND BOOST', 'Grabs rebounds from much further away'],
+  intercept: ['PASS INTERCEPTION', 'Picks off passes near you twice as often'],
+  fastpass: ['FAST PASSING', 'Passes fly much faster'], teamassist: ['TEAM ASSIST', 'Teammates shoot 30% better off your passes'],
+  dribble: ['DRIBBLE MASTERY', 'The ball can\'t be stolen from you'], crossover: ['CROSSOVER', 'Freezes nearby defenders and gives a burst of speed'],
+  vision: ['COURT VISION', 'Your passes can\'t be picked off'],
+  recovery: ['STAMINA RECOVERY', 'Refills the whole team\'s stamina and speeds recovery'], finishing: ['STRONG FINISHING', 'Close shots go in 40% more often'],
+  contact: ['CONTACT RESISTANCE', 'Defenders contesting your shot don\'t bother you'], footwork: ['BALANCED FOOTWORK', 'Steadier shot meter and a little extra speed'],
+  allaround: ['ALL-AROUND BOOST', 'Faster, better shooting and better steals'],
+};
+// skills charge by playing (points, assists, steals, rebounds, passes, time on court); a full charge shows the button
+function skillCharge(p, n) { if (!p || p.team !== 0 || !p.skill || NET.role === 'guest') return; p.chg = Math.min(100, (p.chg || 0) + n); }
+function buffOn(p, k) { return !!p && p.buff === k && performance.now() < p.buffT; }
+let abilEl = null;
+function abilTick() {
+  if (!abilEl) {
+    abilEl = el('button'); abilEl.id = 'abil'; abilEl.hidden = true; document.body.appendChild(abilEl);
+    abilEl.onclick = e => { e.stopPropagation(); const p = abilEl.p; if (!p || p.chg < 100) return; p.chg = 0; p.buff = p.skill; p.buffT = performance.now() + 8000; toastL(p.name.toUpperCase() + ': ' + SKILLS[p.skill][0] + '!', true); sfxL('cheer', 0.4); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); if (p.skill === 'recovery') team(0).forEach(q => q.stamina = 1); if (p.skill === 'crossover') team(1).forEach(q => { if (d2(q.pos, p.pos) < 3) q.react = 1.0; }); abilEl.hidden = true; abilEl.p = null; };
+    ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => abilEl.addEventListener(ev, e => e.stopPropagation()));
+  }
+  const inGame = $('home').hidden && T.hidden && game.phase !== 'over';
+  if (inGame && game.phase === 'live') team(0).forEach(q => skillCharge(q, 0.22));
+  const ready = inGame ? team(0).filter(q => q.skill && q.chg >= 100) : [], p = ready.find(q => q === ball.holder) || ready[0] || null;
+  if (p !== abilEl.p) { abilEl.p = p; if (p) abilEl.innerHTML = '<i class="ski ski-' + p.skill + '"></i><b>' + SKILLS[p.skill][0] + '</b><small>' + esc(p.name) + '</small>'; }
+  abilEl.hidden = !p;
+}
+setInterval(abilTick, 100);
+function skillPick(r) {   // level up: choose one of two skills (replaces the current one) or skip
+  const pool = Object.keys(SKILLS).filter(k => k !== r.skill), two = [];
+  while (two.length < 2) { const k = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; two.push(k); }
+  let m = T.querySelector('#ucf'); if (!m) { m = el('div'); m.id = 'ucf'; T.appendChild(m); }
+  m.innerHTML = `<div class="box"><h3>${esc(r.name.toUpperCase())} REACHED LEVEL ${r.lv}!</h3><div class="cst">Choose a new skill${r.skill ? ' (replaces <b>' + SKILLS[r.skill][0] + '</b>)' : ''}</div><div class="sks">${two.map(k => `<button class="sk" data-act="skill" data-val="${k}"><i class="ski ski-${k}"></i><b>${SKILLS[k][0]}</b><small>${SKILLS[k][1]}</small></button>`).join('')}</div><div class="bts"><button class="no" data-act="ucancel">SKIP</button></div></div>`;
+  m.hidden = false;
+}
 function teamXP(n) { TEAM.xp += Math.round(n); saveTeam(); }
 // starters drive the Purple players on court: names, hairstyles, speed and shooting
 function jerseyTex(base, ci) {   // recolour the purple jersey texture to a team colour, keeping its shading
@@ -1191,7 +1246,7 @@ function applyRoster() {
     const r = TEAM.roster[i]; if (!r) return;
     p.name = r.name.toUpperCase().slice(0, 1) + r.name.slice(1).toLowerCase(); if (p.label.firstChild) p.label.firstChild.nodeValue = p.name;
     if (p.hairKey !== r.hair + ':' + r.tint) { p.hairEnt = setHair(p.model, r.hair, r.tint, p.hairEnt); p.hairKey = r.hair + ':' + r.tint; }
-    if (p.spd0 === undefined) p.spd0 = p.spd; p.spd = p.spd0 * (0.86 + r.stats.speed / 300); p.rat = r.stats;
+    if (p.spd0 === undefined) p.spd0 = p.spd; p.spd = p.spd0 * (0.86 + r.stats.speed / 300); p.rat = r.stats; p.skill = r.skill || null;
   });
 }
 // ---- portraits: photograph the real 3D player (with their hairstyle) once, then reuse the picture
@@ -1266,10 +1321,13 @@ T.addEventListener('click', e => {
     m.hidden = false;
   }
   else if (a === 'ucancel') T.querySelector('#ucf').hidden = true;
+  else if (a === 'skill') { const r = TEAM.roster[TSEL] || TEAM.roster[0]; r.skill = v; saveTeam(); applyRoster(); T.querySelector('#ucf').hidden = true; toastL(r.name.toUpperCase() + ' learned ' + SKILLS[v][0], true); drawDetails(); }
   else if (a === 'upgrade') {
     const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r); if (TEAM.xp < c) return toastL('Not enough XP — earn XP by playing games', false);
     T.querySelector('#ucf').hidden = true;
-    TEAM.xp -= c; r.stats[v] = Math.min(99, r.stats[v] + NEXT[v]); r.lv++; saveTeam(); applyRoster(); sfxL('net', 0.6); toastL(v.toUpperCase() + ' upgraded to ' + r.stats[v], true); drawDetails();
+    TEAM.xp -= c; r.stats[v] = Math.min(99, r.stats[v] + NEXT[v]); r.ups = (r.ups ?? r.lv) + 1; r.lp = (r.lp || 0) + 3; let up = false;
+    while (r.lp >= lvNeed(r.lv)) { r.lp -= lvNeed(r.lv); r.lv++; up = true; }
+    saveTeam(); applyRoster(); sfxL('net', 0.6); toastL(v.toUpperCase() + ' upgraded to ' + r.stats[v], true); drawDetails(); if (up) skillPick(r);
   }
   else if (a === 'prevp' || a === 'nextp') { TSEL = (TSEL + (a === 'nextp' ? 1 : -1) + TEAM.roster.length) % TEAM.roster.length; drawDetails(); }
 });
@@ -1323,15 +1381,16 @@ function drawDetails() {
   NEXT = {}; for (const k of STATS) NEXT[k] = 2 + ((r.lv + k.length) % 2);   // +2 or +3 each level
   s.innerHTML = `
   <div class="dhead"><button class="arrow l" data-act="prevp">‹</button>${pic(r)}<div class="pn">${esc(r.name)}</div><div class="pl">LEVEL ${r.lv}</div>
-    <i class="bar"><b style="width:${Math.min(100, TEAM.xp / c * 100)}%"></b></i><div class="lvb">${num(r.lv)}</div><div class="ovrb">${num(ovr(r))}</div><button class="arrow r" data-act="nextp">›</button></div>
+    <i class="bar"><b style="width:${Math.min(100, (r.lp || 0) / lvNeed(r.lv) * 100)}%"></b></i><div class="lvb">${num(r.lv)}</div><div class="ovrb">${num(ovr(r))}</div><button class="arrow r" data-act="nextp">›</button></div>
   <div class="xpb"><i class="xpfill" style="width:${Math.min(100, TEAM.xp / c * 100) * 0.559}%"></i><b class="need">${TEAM.xp} / ${c} XP</b></div>
-  <p class="uhow">Tap a stat to upgrade it. Each upgrade raises one stat and costs more XP than the last.</p>
-  <div class="upan"><i class="uh"></i>${STATS.map((k, i) => `<div class="ug">${k.toUpperCase()}${i === 0 ? `<span class="lvn">NEXT UPGRADE: LEVEL ${r.lv + 1}</span>` : ''}</div><div class="urow r${i}${r.stats[k] >= 99 ? ' max' : ''}" data-act="ustat" data-val="${k}"><i class="uic"></i><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}<i class="ug"></i><i class="uf"></i></div>
+  <p class="uhow">Tap a stat to upgrade it. Each upgrade raises one stat, adds +3 level points and costs more XP than the last. Level up to choose a skill.</p>
+  <p class="uskill">${r.skill ? `<i class="ski ski-${r.skill}"></i>SKILL: <b>${SKILLS[r.skill][0]}</b> — ${SKILLS[r.skill][1]}. Charges as you play; tap its button in a match.` : `No skill yet — reach level ${r.lv + 1} to choose one.`}</p>
+  <div class="upan"><i class="uh"></i>${STATS.map((k, i) => `<div class="ug">${k.toUpperCase()}${i === 0 ? `<span class="lvn">LEVEL PTS ${r.lp || 0} / ${lvNeed(r.lv)}</span>` : ''}</div><div class="urow r${i}${r.stats[k] >= 99 ? ' max' : ''}" data-act="ustat" data-val="${k}"><i class="uic"></i><i class="ubar"><b style="width:${r.stats[k]}%"></b></i><span class="a">${r.stats[k]}</span><span class="b">${Math.min(99, r.stats[k] + NEXT[k])}</span></div>`).join('')}<i class="ug"></i><i class="uf"></i></div>
   <div class="cost"><div><small>UPGRADE COST</small>${num(c, 'g')}<b class="xpw">XP</b></div><div><small>XP AFTER UPGRADE</small>${TEAM.xp >= c ? num(TEAM.xp - c) : '<b class="no">NEED ' + (c - TEAM.xp) + '</b>'}</div></div>
   <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>
   <p class="sub">Earn XP by playing games.</p>`;
 }
-$('hteam').onclick = () => openTeam('team'); $('hplayers').onclick = () => openTeam('team'); $('hstats').onclick = () => openTeam('details', 0);
+$('hteam').onclick = () => openTeam('team'); $('hnteam').onclick = () => openTeam('team'); $('hnup').onclick = () => openTeam('details', 0); $('hnshop').onclick = () => openTeam('draft');
 applyRoster();
 
 { const hb = document.createElement('button'); hb.id = 'home-btn'; hb.textContent = 'Home'; $('controls').prepend(hb); hb.onclick = () => { if (NET.role) leaveGame(); showHome(); }; }
