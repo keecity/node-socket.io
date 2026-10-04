@@ -19,6 +19,35 @@ function defaultTeam() {
 let TEAM;
 try { TEAM = JSON.parse(localStorage.getItem('cc_team')) || defaultTeam(); } catch (e) { TEAM = defaultTeam(); }
 function saveTeam() { try { localStorage.setItem('cc_team', JSON.stringify(TEAM)); } catch (e) {} }
+// ---- cash + contracts: wins and contracts pay cash; cash buys draft picks
+const draftCost = () => 500 + 250 * Math.max(0, TEAM.roster.length - 6);
+const CT_KINDS = [   // [key, label, team target, team reward, matches allowed]
+  ['pts', 'Score {n} points', 8, 120, 1], ['threes', 'Make {n} threes', 3, 100, 2], ['steals', 'Get {n} steals', 2, 100, 1],
+  ['reb', 'Grab {n} rebounds', 4, 90, 1], ['skills', 'Use {n} skills', 3, 150, 3], ['wins', 'Win {n} games', 3, 400, 5], ['margin', 'Win a game by {n}+', 8, 250, 3]];
+function newContract(named) {
+  const used = (TEAM.ct || []).map(c => c.k), pool = CT_KINDS.filter(x => !used.includes(x[0])), k = pool[Math.floor(Math.random() * pool.length)], solo = k[0] === 'wins' || k[0] === 'margin';
+  const who = named && !solo ? Math.floor(Math.random() * Math.min(3, TEAM.roster.length)) : null;
+  const n = who === null ? k[2] : Math.max(1, Math.round(k[2] * 0.75));
+  return { k: k[0], n, who, name: who === null ? null : TEAM.roster[who].name, got: 0, left: k[4], pay: Math.round(k[3] * (who === null ? 1 : 1.75) / 5) * 5 };
+}
+function ctText(c) { const k = CT_KINDS.find(x => x[0] === c.k); return k[1].replace('{n}', c.n) + (c.name ? ' with ' + c.name : ''); }
+function ensureContracts() {
+  TEAM.cash ??= 500; TEAM.ct ??= [];
+  while (TEAM.ct.length < 3) TEAM.ct.push(newContract(TEAM.ct.length === 1 ? true : TEAM.ct.length === 0 ? false : Math.random() < 0.5));
+}
+let CT = null;   // this match's tallies: CT[stat][roster index]
+function ctStart() { CT = { pts: {}, threes: {}, steals: {}, reb: {}, skills: {} }; }
+function ctAdd(stat, p, n = 1) {
+  if (!CT || !p || p.team !== 0 || NET.role === 'guest') return; const i = team(0).indexOf(p); CT[stat][i] = (CT[stat][i] || 0) + n;
+  ensureContracts(); for (const c of TEAM.ct) if (c.k === stat && (c.who === null || c.who === i)) { const was = c.got; c.got = Math.min(c.n, c.got + n); if (c.got > was && c.got < c.n) toastL('Contract: ' + c.got + '/' + c.n + ' — ' + ctText(c), false); if (c.got >= c.n && was < c.n) toastL('CONTRACT DONE: ' + ctText(c), true); }
+}
+function ctEnd(won, margin) {   // after a match: pay finished contracts, count down the rest, refill the slots
+  if (NET.role) return; ensureContracts(); let pay = won ? 300 : 75; const done = [];
+  for (const c of TEAM.ct) { if (c.k === 'wins' && won) c.got++; if (c.k === 'margin' && won && margin >= c.n) c.got = c.n; c.left--; }
+  TEAM.ct = TEAM.ct.filter(c => { if (c.got >= c.n) { pay += c.pay; done.push(c); return false; } return c.left > 0; });
+  ensureContracts(); TEAM.cash += pay; saveTeam(); CT = null;
+  return { pay, done };
+}
 const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
 const lvNeed = lv => 3 + 3 * lv;   // level points for the next level: 6, 9, 12 ... (each upgrade gives +3)
 const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once activated; icon order follows the skill sheet
@@ -187,7 +216,7 @@ function openTeam(view, arg) {
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
   T.querySelectorAll('.tnav button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'details' && b.dataset.go === 'details')));
   setTC(view === 'edit' && EDIT ? EDIT.color : TEAM.color);
-  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails })[view]();
+  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails, contracts: drawContracts })[view]();
   T.querySelector('.scr[data-v="' + view + '"] .body').scrollTop = 0;
 }
 function closeTeam() { T.hidden = true; $('home').hidden = false; applyRoster(); }
@@ -208,7 +237,7 @@ T.addEventListener('click', e => {
   else if (a === 'pick') { DSEL = +v; drawDraft(); }
   else if (a === 'draftit') {
     if (TEAM.roster.length >= ROSTER_MAX) return toastL('Roster full (' + ROSTER_MAX + ' players)', true);
-    const p = TEAM.draft[DSEL]; TEAM.roster.push(p); TEAM.draft = null; saveTeam(); toastL(p.name.toUpperCase() + ' drafted!', true); sfxL('cheer', 0.6); openTeam('team');
+    const p = TEAM.draft[DSEL], dc = draftCost(); ensureContracts(); if (TEAM.cash < dc) return toastL('Need $' + dc + ' to draft — win games and finish contracts', false); TEAM.cash -= dc; TEAM.roster.push(p); TEAM.draft = null; saveTeam(); toastL(p.name.toUpperCase() + ' drafted!', true); sfxL('cheer', 0.6); openTeam('team');
   }
   else if (a === 'ustat') {   // ask before spending XP on one stat
     const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r), to = Math.min(99, r.stats[v] + NEXT[v]); if (r.stats[v] >= 99) return toastL(v.toUpperCase() + ' is maxed', false);
@@ -242,6 +271,7 @@ function drawTeam() {
     <div class="tcount">${num(R.length)}<b>/</b>${num(ROSTER_MAX)}<small>PLAYERS</small></div>
     <div class="trate"><small>TEAM RATING</small>${num(teamRating(), 'g')}</div>
     <button class="bgold tedit" data-act="go" data-val="edit"><span class="lbl">EDIT TEAM</span></button></div>
+  <div class="cashbar"><i class="coin">$</i><b>${(ensureContracts(), TEAM.cash).toLocaleString()}</b><span>CASH</span><button class="bgold ctb" data-act="go" data-val="contracts"><span class="lbl">CONTRACTS${TEAM.ct.some(c => c.got >= c.n) ? ' ✓' : ''}</span></button></div>
   <div class="sec"><i class="sec-start"></i><button class="bdark" data-act="editlineup"><span class="lbl">${T.classList.contains('swap') ? 'DONE' : 'EDIT LINEUP'}</span></button></div>
   <div class="cards">${R.slice(0, 3).map((r, i) => `<button class="card${LINEUP === i ? ' gold' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i}">${pic(r)}<span class="lv">${num(r.lv)}</span><span class="nm">${esc(r.name)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('')}</div>
   <div class="sec"><i class="sec-bench"></i></div>
@@ -279,6 +309,14 @@ function drawDraft() {
   <button class="link" data-act="go" data-val="team">VIEW ROSTER</button>`;
 }
 let NEXT = {};
+function drawContracts() {
+  ensureContracts(); const s = T.querySelector('.scr[data-v="contracts"] .body');
+  s.innerHTML = `<div class="cashbar"><i class="coin">$</i><b>${TEAM.cash.toLocaleString()}</b><span>CASH</span></div>
+  <p class="uhow">Finish contracts before they run out of matches to earn bonus cash. Contracts that name a player pay more — you must control that player.</p>
+  ${TEAM.ct.map(c => `<div class="ctc${c.name ? ' named' : ''}">${c.who !== null && TEAM.roster[c.who] ? pic(TEAM.roster[c.who]) : `<i class="mascot lg${TEAM.mascot}"></i>`}<div class="ctm"><b>${esc(ctText(c))}</b><i class="bar"><b style="width:${c.got / c.n * 100}%"></b></i><small>${c.k === 'margin' ? (c.got >= c.n ? 'Done' : 'Not yet') : c.got + ' / ' + c.n} · ${c.left} match${c.left === 1 ? '' : 'es'} left</small></div><div class="ctp">$${c.pay}</div></div>`).join('')}
+  <p class="sub">Win: $300 · Loss: $75 · Draft pick: $${draftCost()}</p>
+  <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>`;
+}
 function drawDetails() {
   const s = T.querySelector('.scr[data-v="details"] .body'), r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r);
   NEXT = {}; for (const k of STATS) NEXT[k] = 2 + ((r.lv + k.length) % 2);   // +2 or +3 each level

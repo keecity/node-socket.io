@@ -225,12 +225,12 @@ function inboundPass(h, r) {   // throw it in; the clock and play start with the
   if (!r) { let bd = 1e9; for (const q of team(h.team)) { if (q === h) continue; const c = closestDefender(q), sc = d2(q.pos, h.pos) - (c ? Math.min(2, d2(c.pos, q.pos)) : 2) * 1.5; if (sc < bd) { bd = sc; r = q; } } }
   if (!r) return; r.lastPasser = null; game.phase = 'live'; game.inbounder = null; toast((h.team ? 'Teal' : 'Purple') + ' ball'); startPass(h, r);
 }
-function restart() { setTimeout(rephase, 50); game.score = [0, 0]; game.crowd = [1, 1]; game.distract = 0; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
+function restart() { setTimeout(rephase, 50); if (typeof ctStart === 'function') ctStart(); game.score = [0, 0]; game.crowd = [1, 1]; game.distract = 0; $('banner').className = ''; netEv('ban', '', ''); toast('First to ' + TARGET, true); inbound(Math.random() < .5 ? 0 : 1, flat(0, 0)); }
 function scored(H) {
   const s = game.shot; if (!s) return;
   const t = s.shooter.team; if (attackHoop(t) !== H) return;
   if (TUT) { game.shot = null; sfx('net'); tutEvent('made'); return; }
-  stats.made++; if (typeof skillCharge === 'function') { skillCharge(s.shooter, 10 * s.pts); if (buffOn(s.shooter, 'hotstreak')) s.shooter.buffT += 3000; } game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
+  stats.made++; if (typeof ctAdd === 'function') { ctAdd('pts', s.shooter, s.pts); if (s.pts === 3) ctAdd('threes', s.shooter); } if (typeof skillCharge === 'function') { skillCharge(s.shooter, 10 * s.pts); if (buffOn(s.shooter, 'hotstreak')) s.shooter.buffT += 3000; } game.score[t] += s.pts; game.lastScoreTeam = t; game.shot = null;
   if (s.ft) toast('Free throw good', false); else toast(s.dunk ? s.shooter.name.toUpperCase() + ' THROWS IT DOWN!' : s.pts === 3 ? s.shooter.name + ' from downtown!' : s.shooter.name + (s.assist ? ' scores — dime from ' + s.assist.name : ' scores'), true);
   sfx('net'); netEv('score', t); crowdReact(t); game.phase = 'scored'; game.timer = 1.6;
   const pf = game.pendingFoul; game.pendingFoul = null;
@@ -238,7 +238,7 @@ function scored(H) {
   if (s.ft) { game.phase = 'ftair'; game.ftMade = true; }   // the free-throw loop decides what comes next
   hud();
   if (t === 0 && !NET.role && typeof teamXP === 'function') teamXP(s.pts * 5);
-  if (game.score[t] >= TARGET && !NET.role && typeof teamXP === 'function') { teamXP(t === 0 ? 300 : 120); setTimeout(() => toastL('+' + (t === 0 ? 300 : 120) + ' XP — spend it in My Team', true), 2600); }
+  if (game.score[t] >= TARGET && !NET.role && typeof teamXP === 'function') { teamXP(t === 0 ? 300 : 120); const r = ctEnd(t === 0, game.score[0] - game.score[1]); setTimeout(() => toastL('+' + (t === 0 ? 300 : 120) + ' XP  ·  +$' + r.pay + (r.done.length ? '  ·  ' + r.done.length + ' contract' + (r.done.length > 1 ? 's' : '') + ' paid' : ''), true), 2600); }
   if (game.score[t] >= TARGET) { game.phase = 'over'; game.timer = 7; $('banner').textContent = (t ? 'TEAL' : 'PURPLE') + ' WIN ' + game.score[0] + '–' + game.score[1]; $('banner').className = 'show t' + t; netEv('ban', $('banner').textContent, 'show t' + t); }
 }
 
@@ -383,7 +383,7 @@ function updateActions(dt) {
         if (aiReach && h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < 0.14) { callFoul(p, h); continue; }   // the computer reaches in too
         chance = buffOn(h, 'dribble') ? 0 : Math.min(1, chance + (buffOn(p, 'stealboost') ? 0.35 : buffOn(p, 'allaround') ? 0.15 : 0));
         if (h && h.team !== p.team && !h.action && d2(h.pos, p.pos) < 2.0 && Math.random() < chance) {
-          if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, skillCharge(p, 30), toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
+          if (p.perfectSteal || Math.random() < 0.5) { p.perfectSteal = false; give(p); game.phase = 'live'; setAnim(p, 'DribbleRun', 0.1); stats.steal++, skillCharge(p, 30), ctAdd('steals', p), toast('STEAL! ' + p.name + ' takes it', true); sfx('block'); }
           else {
             const to = flat(p.pos.x - h.pos.x, p.pos.z - h.pos.z).normalize();
             release(h.ballNode.getPosition().clone(), new pc.Vec3(to.x * 2.2 + (Math.random() - .5), 0.8, to.z * 2.2 + (Math.random() - .5)), false);
@@ -567,7 +567,7 @@ function defenseAI(p, dt) {
     const dB = ball.pos.distance(new pc.Vec3(p.pos.x, 1.2, p.pos.z));
     if (dB < 0.9 && ball.pos.y < 2.3) {
       ball.pass.tried.add(p.id);
-      if (Math.random() < (buffOn(ball.pass.from, 'vision') ? 0 : buffOn(p, 'intercept') ? 0.9 : 0.45)) { give(p); setAnim(p, 'Dribble', 0.1); game.phase = 'live'; stats.steal++, skillCharge(p, 30), toast(p.name + ' picks it off!', true); sfx('block'); }
+      if (Math.random() < (buffOn(ball.pass.from, 'vision') ? 0 : buffOn(p, 'intercept') ? 0.9 : 0.45)) { give(p); setAnim(p, 'Dribble', 0.1); game.phase = 'live'; stats.steal++, skillCharge(p, 30), ctAdd('steals', p), toast(p.name + ' picks it off!', true); sfx('block'); }
       else { ball.vel.x *= 0.25; ball.vel.z *= 0.25; ball.vel.y = 1.2; ball.pass = null; ball.lastTouch = p.team; game.phase = 'loose'; toast('Deflected by ' + p.name); }
     }
   }
@@ -579,7 +579,7 @@ function chase(p, dt) {
   steer(p, tgt, 4.0, dt, 13); animMove(p, dt, 'offball');
   if (p.vel.length() < 1.0) faceTo(p, ball.pos.x, ball.pos.z, 8, dt);
   if (d2(p.pos, ball.pos) < (buffOn(p, 'rebound') ? 1.6 : buffOn(p, 'superjump') ? 1.25 : 0.85) && ball.pos.y < 1.8) {
-    const was = game.offense; give(p); game.phase = 'live'; skillCharge(p, 15);
+    const was = game.offense; give(p); game.phase = 'live'; skillCharge(p, 15); ctAdd('reb', p);
     toast(p.team === was ? 'Offensive board — ' + p.name : p.name + ' rebounds'); setAnim(p, 'Dribble', 0.1);
   }
 }
@@ -1177,6 +1177,35 @@ function defaultTeam() {
 let TEAM;
 try { TEAM = JSON.parse(localStorage.getItem('cc_team')) || defaultTeam(); } catch (e) { TEAM = defaultTeam(); }
 function saveTeam() { try { localStorage.setItem('cc_team', JSON.stringify(TEAM)); } catch (e) {} }
+// ---- cash + contracts: wins and contracts pay cash; cash buys draft picks
+const draftCost = () => 500 + 250 * Math.max(0, TEAM.roster.length - 6);
+const CT_KINDS = [   // [key, label, team target, team reward, matches allowed]
+  ['pts', 'Score {n} points', 8, 120, 1], ['threes', 'Make {n} threes', 3, 100, 2], ['steals', 'Get {n} steals', 2, 100, 1],
+  ['reb', 'Grab {n} rebounds', 4, 90, 1], ['skills', 'Use {n} skills', 3, 150, 3], ['wins', 'Win {n} games', 3, 400, 5], ['margin', 'Win a game by {n}+', 8, 250, 3]];
+function newContract(named) {
+  const used = (TEAM.ct || []).map(c => c.k), pool = CT_KINDS.filter(x => !used.includes(x[0])), k = pool[Math.floor(Math.random() * pool.length)], solo = k[0] === 'wins' || k[0] === 'margin';
+  const who = named && !solo ? Math.floor(Math.random() * Math.min(3, TEAM.roster.length)) : null;
+  const n = who === null ? k[2] : Math.max(1, Math.round(k[2] * 0.75));
+  return { k: k[0], n, who, name: who === null ? null : TEAM.roster[who].name, got: 0, left: k[4], pay: Math.round(k[3] * (who === null ? 1 : 1.75) / 5) * 5 };
+}
+function ctText(c) { const k = CT_KINDS.find(x => x[0] === c.k); return k[1].replace('{n}', c.n) + (c.name ? ' with ' + c.name : ''); }
+function ensureContracts() {
+  TEAM.cash ??= 500; TEAM.ct ??= [];
+  while (TEAM.ct.length < 3) TEAM.ct.push(newContract(TEAM.ct.length === 1 ? true : TEAM.ct.length === 0 ? false : Math.random() < 0.5));
+}
+let CT = null;   // this match's tallies: CT[stat][roster index]
+function ctStart() { CT = { pts: {}, threes: {}, steals: {}, reb: {}, skills: {} }; }
+function ctAdd(stat, p, n = 1) {
+  if (!CT || !p || p.team !== 0 || NET.role === 'guest') return; const i = team(0).indexOf(p); CT[stat][i] = (CT[stat][i] || 0) + n;
+  ensureContracts(); for (const c of TEAM.ct) if (c.k === stat && (c.who === null || c.who === i)) { const was = c.got; c.got = Math.min(c.n, c.got + n); if (c.got > was && c.got < c.n) toastL('Contract: ' + c.got + '/' + c.n + ' — ' + ctText(c), false); if (c.got >= c.n && was < c.n) toastL('CONTRACT DONE: ' + ctText(c), true); }
+}
+function ctEnd(won, margin) {   // after a match: pay finished contracts, count down the rest, refill the slots
+  if (NET.role) return; ensureContracts(); let pay = won ? 300 : 75; const done = [];
+  for (const c of TEAM.ct) { if (c.k === 'wins' && won) c.got++; if (c.k === 'margin' && won && margin >= c.n) c.got = c.n; c.left--; }
+  TEAM.ct = TEAM.ct.filter(c => { if (c.got >= c.n) { pay += c.pay; done.push(c); return false; } return c.left > 0; });
+  ensureContracts(); TEAM.cash += pay; saveTeam(); CT = null;
+  return { pay, done };
+}
 const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
 const lvNeed = lv => 3 + 3 * lv;   // level points for the next level: 6, 9, 12 ... (each upgrade gives +3)
 const SKILLS = {   // [name, what it does] - every skill lasts 8 seconds once activated; icon order follows the skill sheet
@@ -1345,7 +1374,7 @@ function openTeam(view, arg) {
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
   T.querySelectorAll('.tnav button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'details' && b.dataset.go === 'details')));
   setTC(view === 'edit' && EDIT ? EDIT.color : TEAM.color);
-  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails })[view]();
+  ({ team: drawTeam, edit: drawEdit, draft: drawDraft, details: drawDetails, contracts: drawContracts })[view]();
   T.querySelector('.scr[data-v="' + view + '"] .body').scrollTop = 0;
 }
 function closeTeam() { T.hidden = true; $('home').hidden = false; applyRoster(); }
@@ -1366,7 +1395,7 @@ T.addEventListener('click', e => {
   else if (a === 'pick') { DSEL = +v; drawDraft(); }
   else if (a === 'draftit') {
     if (TEAM.roster.length >= ROSTER_MAX) return toastL('Roster full (' + ROSTER_MAX + ' players)', true);
-    const p = TEAM.draft[DSEL]; TEAM.roster.push(p); TEAM.draft = null; saveTeam(); toastL(p.name.toUpperCase() + ' drafted!', true); sfxL('cheer', 0.6); openTeam('team');
+    const p = TEAM.draft[DSEL], dc = draftCost(); ensureContracts(); if (TEAM.cash < dc) return toastL('Need $' + dc + ' to draft — win games and finish contracts', false); TEAM.cash -= dc; TEAM.roster.push(p); TEAM.draft = null; saveTeam(); toastL(p.name.toUpperCase() + ' drafted!', true); sfxL('cheer', 0.6); openTeam('team');
   }
   else if (a === 'ustat') {   // ask before spending XP on one stat
     const r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r), to = Math.min(99, r.stats[v] + NEXT[v]); if (r.stats[v] >= 99) return toastL(v.toUpperCase() + ' is maxed', false);
@@ -1400,6 +1429,7 @@ function drawTeam() {
     <div class="tcount">${num(R.length)}<b>/</b>${num(ROSTER_MAX)}<small>PLAYERS</small></div>
     <div class="trate"><small>TEAM RATING</small>${num(teamRating(), 'g')}</div>
     <button class="bgold tedit" data-act="go" data-val="edit"><span class="lbl">EDIT TEAM</span></button></div>
+  <div class="cashbar"><i class="coin">$</i><b>${(ensureContracts(), TEAM.cash).toLocaleString()}</b><span>CASH</span><button class="bgold ctb" data-act="go" data-val="contracts"><span class="lbl">CONTRACTS${TEAM.ct.some(c => c.got >= c.n) ? ' ✓' : ''}</span></button></div>
   <div class="sec"><i class="sec-start"></i><button class="bdark" data-act="editlineup"><span class="lbl">${T.classList.contains('swap') ? 'DONE' : 'EDIT LINEUP'}</span></button></div>
   <div class="cards">${R.slice(0, 3).map((r, i) => `<button class="card${LINEUP === i ? ' gold' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i}">${pic(r)}<span class="lv">${num(r.lv)}</span><span class="nm">${esc(r.name)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('')}</div>
   <div class="sec"><i class="sec-bench"></i></div>
@@ -1437,6 +1467,14 @@ function drawDraft() {
   <button class="link" data-act="go" data-val="team">VIEW ROSTER</button>`;
 }
 let NEXT = {};
+function drawContracts() {
+  ensureContracts(); const s = T.querySelector('.scr[data-v="contracts"] .body');
+  s.innerHTML = `<div class="cashbar"><i class="coin">$</i><b>${TEAM.cash.toLocaleString()}</b><span>CASH</span></div>
+  <p class="uhow">Finish contracts before they run out of matches to earn bonus cash. Contracts that name a player pay more — you must control that player.</p>
+  ${TEAM.ct.map(c => `<div class="ctc${c.name ? ' named' : ''}">${c.who !== null && TEAM.roster[c.who] ? pic(TEAM.roster[c.who]) : `<i class="mascot lg${TEAM.mascot}"></i>`}<div class="ctm"><b>${esc(ctText(c))}</b><i class="bar"><b style="width:${c.got / c.n * 100}%"></b></i><small>${c.k === 'margin' ? (c.got >= c.n ? 'Done' : 'Not yet') : c.got + ' / ' + c.n} · ${c.left} match${c.left === 1 ? '' : 'es'} left</small></div><div class="ctp">$${c.pay}</div></div>`).join('')}
+  <p class="sub">Win: $300 · Loss: $75 · Draft pick: $${draftCost()}</p>
+  <button class="tealbtn" data-act="go" data-val="team"><span class="lbl">BACK TO ROSTER</span></button>`;
+}
 function drawDetails() {
   const s = T.querySelector('.scr[data-v="details"] .body'), r = TEAM.roster[TSEL] || TEAM.roster[0], c = upCost(r);
   NEXT = {}; for (const k of STATS) NEXT[k] = 2 + ((r.lv + k.length) % 2);   // +2 or +3 each level

@@ -183,3 +183,14 @@
 #team .sko .ski{width:34px;height:34px}#team .sko b{font:400 9px 'Russo One',system-ui;text-align:center}#team .sko small{font-size:8px;color:#8fa3b5;text-align:center;line-height:1.2}
 #team .sko.on{border-color:#ffc233;box-shadow:0 0 10px #ffc23366}#team .sko.on small{color:#ffc233;font:400 9px 'Russo One',system-ui}
 #ucf .skbig{display:block;width:64px;height:64px;margin:0 auto 6px}#team .sko{justify-content:center;min-height:84px}
+#team .cashbar{position:relative;display:flex;align-items:center;gap:8px;height:clamp(40px,11cqw,52px);margin:2px 0 6px;padding:0 6px 0 12px;border:2px solid #b8c3cc66;border-radius:8px;background:linear-gradient(90deg,#2a1d05,#0f1724 40%)}
+#team .cashbar .coin{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe9a0,#ffc233 45%,#b47a0a);color:#5a3a00;font:400 15px 'Russo One',system-ui;display:flex;align-items:center;justify-content:center;font-style:normal;box-shadow:0 0 8px #ffc23388}
+#team .cashbar b{font:400 clamp(16px,5cqw,22px) 'Russo One',system-ui;color:#ffc233;font-weight:400}#team .cashbar span{font-size:10px;color:#9fb0bf;letter-spacing:1px}
+#team .cashbar .ctb{margin-left:auto;height:78%;aspect-ratio:459/113}#team .cashbar .ctb .lbl{font-size:clamp(8px,2.4cqw,11px);color:#fff;text-shadow:0 1px 0 #000,0 0 3px #000}
+#team .hdr .tt.t-ct{height:auto;bottom:12px;padding:6px 26px;background:var(--t-btn_dark) center/100% 100% no-repeat;font:400 clamp(18px,5.5cqw,24px) 'Russo One',system-ui;font-style:normal;letter-spacing:1px;color:#fff}
+#team .ctc{display:flex;align-items:center;gap:10px;padding:8px 10px;margin-bottom:8px;border:2px solid #b8c3cc44;border-radius:10px;background:linear-gradient(#152235,#0b1420)}
+#team .ctc.named{border-color:#ffc23377}
+#team .ctc .pt,#team .ctc .mascot{position:static;width:48px;height:48px;flex:none;border-radius:8px;background-size:contain}
+#team .ctm{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}#team .ctm>b{font:400 13px 'Russo One',system-ui;color:#e8eef4;font-weight:400}#team .ctm small{font-size:10px;color:#8fa3b5}
+#team .ctm .bar{position:relative!important;left:auto!important;top:auto!important;width:100%!important;height:7px;border-radius:4px;background:#1e2733;overflow:hidden;display:block}#team .ctm .bar b{display:block;height:100%;background:linear-gradient(90deg,#c98a12,#ffc233)}
+#team .ctp{font:400 16px 'Russo One',system-ui;color:#ffc233}
