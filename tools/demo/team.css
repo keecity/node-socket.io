@@ -270,3 +270,5 @@
 #team .geq::before{background:#fff}
 #team .geq .gimg{position:relative;isolation:isolate}
 #team .geq .gimg::after{content:'';position:absolute;inset:0;background:var(--tc,#7b3cf0);mix-blend-mode:color;-webkit-mask:var(--gm) center/contain no-repeat;mask:var(--gm) center/contain no-repeat;pointer-events:none}
+#team .ghero .groom{isolation:isolate}
+#team .ghero .groom::after{content:'';position:absolute;inset:0;background:var(--tc,#7b3cf0);mix-blend-mode:color;-webkit-mask:var(--gm-room) center/cover no-repeat;mask:var(--gm-room) center/cover no-repeat;border-radius:6px}

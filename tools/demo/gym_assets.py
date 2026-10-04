@@ -26,6 +26,6 @@ css=':root{'
 for k,(im,b) in crops.items():
   c=im.crop(b); c=fit(c, 700 if k in('hero','row','secbar','nav4','room') else 140 if k.startswith('eq') else 300)
   css+=f'--g-{k}:{u(c, 72 if k=="room" else 80)};'; S[k]=c.size
-  if k in ('hero','row','secbar') or k.startswith('eq'): css+=f'--gm-{k}:{u(mask(c),50)};'
+  if k in ('hero','row','secbar') or k.startswith('eq') or k=='room': css+=f'--gm-{k}:{u(mask(c),50)};'
 css+='}\n'
 open('gym_sprites.css','w').write(css); print(S)
