@@ -171,7 +171,7 @@ function drawDraft() {
   const barc = { speed: 'green', shooting: 'blue', passing: 'gold', defense: 'red', rebounding: 'purple' };
   s.innerHTML = `<p class="sub">Choose a player for your roster</p>
   <div class="dcards">${D.map((r, i) => `<button class="card${DSEL === i ? ' gold' : ''}" data-act="pick" data-val="${i}">${pic(r)}<span class="nm">${esc(r.name)}</span><span class="st nostar">${num(ovr(r), DSEL === i ? 'g' : 'w')}</span></button>`).join('')}</div>
-  <div class="spanel">${pic(p)}<div class="pn">${esc(p.name)}</div><div class="pl">LEVEL ${p.lv}</div><div class="povr">${num(ovr(p))}</div>
+  <div class="spanel">${pic(p)}<div class="pn">${esc(p.name)}<small>LV ${p.lv}</small></div><div class="povr">${num(ovr(p))}</div>
     ${STATS.map((k, i) => `<div class="srow r${i}"><i class="sbar ${barc[k]}"><b style="width:${p.stats[k]}%"></b></i><span>${p.stats[k]}</span></div>`).join('')}</div>
   <div class="dtable">${D.map((r, i) => `<button class="tr r${i}${DSEL === i ? ' on' : ''}" data-act="pick" data-val="${i}">${pic(r)}<span class="c1">${esc(r.name)}</span><span class="c2">${ovr(r)}</span><span class="c3">${r.stats.speed}</span></button>`).join('')}</div>
   <button class="bigbtn${full ? ' off' : ''}" data-act="draftit"><span>${full ? 'ROSTER FULL' : 'DRAFT ' + esc(p.name.toUpperCase())}</span><i class="ic i-play"></i></button>

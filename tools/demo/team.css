@@ -139,3 +139,13 @@
 #team .dhead .lvb,#team .dhead .ovrb{top:19%;height:61%;display:flex;align-items:center;justify-content:center;font-size:clamp(11px,3.4cqw,17px)}
 #team .dhead .lvb{left:64.3%;width:9.7%}#team .dhead .ovrb{left:86%;width:10.5%}
 #team .tnav{padding:0 1%}#team .tnav button{flex:none}#team .tnav button:nth-child(1){width:32.2%}#team .tnav button:nth-child(2){width:34.5%}#team .tnav button:nth-child(3){width:32.2%}
+#team .spanel .pt{left:5.8%;top:9%;width:19.2%;height:67%}
+#team .spanel .pn,#team .spanel .pl{top:8.5%;height:15.5%;display:flex;align-items:center;line-height:1;left:auto}
+#team .spanel .pn{right:13.5%;font-size:clamp(11px,3.4cqw,17px)}
+#team .spanel .pl{right:25.5%;font-size:9px}
+#team .spanel .povr{left:87.2%;width:9.8%;top:5%;height:19%;display:flex;align-items:center;justify-content:center}
+#team .srow{left:0;width:100%;height:6.2%}
+#team .srow .sbar{left:41.6%;top:0;width:26.3%;height:100%}
+#team .srow span{right:auto;left:89%;width:8%;top:0;height:100%;display:flex;align-items:center;justify-content:flex-end;line-height:1;font-size:clamp(10px,3cqw,14px)}
+#team .srow.r0{top:29.6%}#team .srow.r1{top:43.7%}#team .srow.r2{top:58%}#team .srow.r3{top:72.4%}#team .srow.r4{top:86.8%}
+#team .spanel .pn{right:25.5%;gap:6px}#team .spanel .pn small{font-size:9px;color:#9fb0bf}
