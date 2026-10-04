@@ -152,3 +152,4 @@
 #team .card .nm{top:64.5%;height:12.5%;left:14%;right:14%;display:flex;align-items:center;justify-content:center;line-height:1;font-size:clamp(8px,2.5cqw,12px);white-space:nowrap;overflow:hidden}
 #team .card .st,#team .card .st.nostar{left:44%;right:auto;top:82.6%;height:10.4%;display:flex;align-items:center;justify-content:flex-start;font-size:clamp(12px,3.8cqw,19px)}
 #team .card .st .dg{height:100%}
+#team .card .nm{top:66.3%;padding-top:.08em}
