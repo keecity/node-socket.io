@@ -24,10 +24,10 @@ function asset(key, type, filename) {
   const a = new pc.Asset(filename, type, { url: filename, filename, contents: bytes(ASSETS[key]).buffer });
   return new Promise((res, rej) => { a.ready(() => res(a)); a.once('error', e => rej(new Error(filename + ': ' + e))); app.assets.add(a); app.assets.load(a); });
 }
-const [color, height, hoopAsset, playerAsset, tealAsset] = await Promise.all([
+const [color, height, hoopAsset, playerAsset, tealAsset, hairAsset] = await Promise.all([
   asset('color', 'texture', 'court.jpg'), asset('height', 'texture', 'height.jpg'),
   asset('hoop', 'container', 'hoop.glb', 'model/gltf-binary'), asset('player', 'container', 'player.glb', 'model/gltf-binary'),
-  asset('teal', 'texture', 'teal.jpg', 'image/jpeg')]);
+  asset('teal', 'texture', 'teal.jpg', 'image/jpeg'), asset('hair', 'container', 'hair.glb', 'model/gltf-binary')]);
 const floorMat = mat('Maple', [1, 1, 1]); floorMat.diffuseMap = color.resource; floorMat.bumpMap = height.resource; floorMat.bumpiness = .035; floorMat.gloss = 42; floorMat.update();
 const floor = primitive('Court', 'plane', [30, 1, 16], [0, 0, 0], floorMat); floor.render.castShadows = false;
 const HOOPS = [];
@@ -107,6 +107,10 @@ function makePlayer(team, idx) {
   for (const a of playerAsset.resource.animations) model.anim.assignAnimation(a.resource.name, a.resource, undefined, 1, !!CLIPS[a.resource.name]);
   const label = document.createElement('div'); label.className = 'tag t' + team; label.textContent = NAMES[team][idx]; $('tags').appendChild(label);
   const sb = document.createElement('i'); sb.className = 'sbar'; const sf = document.createElement('b'); sb.appendChild(sf); label.appendChild(sb);
+  { const HAIR = [0, 6, 13, 9, 14, 19][P.length], hairs = hairAsset.resource.instantiateRenderEntity(), h = hairs.findByName('hair' + HAIR);   // one style per player
+    if (h) { const tint = [[0.10, 0.07, 0.05], [0.05, 0.04, 0.04], [0.16, 0.10, 0.06], [0.07, 0.05, 0.04], [0.12, 0.08, 0.05], [0.04, 0.03, 0.03]][P.length];
+      for (const r of h.findComponents('render')) for (const mi of r.meshInstances) { const m = mi.material.clone(); m.diffuse = new pc.Color(...tint.map(c => c * 3.2)); m.gloss = 0.35; m.update(); mi.material = m; }
+      h.reparent(model.findByName('head')); h.setLocalPosition(0, 0, 0); h.setLocalEulerAngles(0, 0, 0); h.setLocalScale(1, 1, 1); } hairs.destroy(); }
   return { id: P.length, team, idx, name: NAMES[team][idx], ent, model, label, ballNode: model.findByName('basketball'), rootBone: model.findByName('root'), head: model.findByName('head'),
     k, runClip: ['Run', 'RunB', 'RunC', 'RunC', 'Run', 'RunB'][P.length], spd: [1.0, 0.94, 1.07, 1.04, 0.97, 1.0][P.length],
     stamina: 1, drain: 0, pos: new pc.Vec3(), vel: new pc.Vec3(), yaw: 0, state: 'Ready', action: null, think: Math.random() * .3, timer: 0, cut: 0, juke: 0, stall: 0, react: 0, holdT: 0 };
