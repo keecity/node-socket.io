@@ -115,3 +115,9 @@
 #team .tealbtn{display:block;width:80%;margin:0 auto;aspect-ratio:194/63;background:var(--t-btn_teal) center/100% 100% no-repeat}#team .tealbtn .lbl{font-size:clamp(12px,3.8cqw,18px)}#team .two .lbl{font-size:clamp(12px,3.8cqw,18px)}
 #team.swap .card,#team.swap .brow{animation:wig .6s ease-in-out infinite alternate}@keyframes wig{to{filter:brightness(1.25)}}
 #team .tpanel .tedit .lbl,#team .xprow .vup .lbl{font-size:clamp(7px,2cqw,10px)}
+
+#team .lw{display:inline-flex;align-items:flex-end;height:1em;gap:.04em;max-width:100%}#team .lw i{display:block;height:100%;background-size:100% 100%;background-repeat:no-repeat;flex:none}#team .lw .sp{width:.3em}
+#team .tpanel .tn{font-size:clamp(16px,5cqw,26px);width:36%;max-width:36%;overflow:hidden}
+#team .hero .hn{font-size:clamp(13px,4cqw,20px);display:flex;justify-content:center;padding-bottom:5px;overflow:hidden}
+#team .fonts{display:flex;gap:3%;margin:-2px 0 8px}#team .fnt{flex:1;height:clamp(44px,13cqw,60px);border:2px solid #3a4655!important;border-radius:8px;background:#0b141e!important;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:clamp(16px,5cqw,24px)}
+#team .fnt small{font-size:9px;letter-spacing:1.5px;color:#9fb0bf;font-family:'Rajdhani',system-ui,sans-serif}#team .fnt.on{border-color:#ffc233!important;box-shadow:0 0 10px #ffb62788}

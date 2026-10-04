@@ -4,6 +4,8 @@ const COLORS = [['PURPLE', '#7b3cf0'], ['TEAL', '#19c6c0'], ['RED', '#e0283a'], 
 const MASCOTS = ["wolf", "bull", "falcon", "panther", "bear", "shark", "lion", "tiger", "eagle", "cobra", "rhino", "gorilla", "fox", "ram", "stag", "gator", "dragon", "scorpion", "stallion", "howler", "owl", "bat", "hornet", "boar", "kraken", "bolts", "fireball", "kings", "shield", "comets", "bison", "elephant", "hippo", "doberman", "raccoon", "crab", "mantis", "spider", "beetle", "lobster", "rooster", "peacock", "penguin", "hawk", "pelican", "hyena", "badger", "wolverine", "porcupine", "jackrabbit", "gargoyle", "knight", "mech", "alien", "pirate", "volcano", "wave", "cyclone", "summit", "rocket", "lightning", "shooting star", "crown", "diamond", "flame", "guardian", "sun", "moon", "peaks", "tornado", "axes", "hammers", "swords", "anchor", "tower", "chevrons", "links", "infinity", "delta", "compass", "power", "hourglass", "chain", "target", "planet", "fastbreak", "launch", "hex", "apex", "trident"];   // 90 logos; the first six keep the original order
 const DRAFT_NAMES = ['Malik', 'Theo', 'Cruz', 'Dex', 'Remy', 'Zane', 'Omar', 'Luka', 'Ty', 'Niko', 'Ace', 'Jett', 'Rio', 'Sol', 'Bo', 'Kofi', 'Ezra', 'Max'];
 const ROSTER_MAX = 9;
+const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.'&", FONTS = ['BLOCK', 'SPEED', 'CRACKED'];
+const letters = (s, f) => '<span class="lw">' + [...String(s).toUpperCase()].map(ch => ch === ' ' ? '<i class="sp"></i>' : GLYPHS.indexOf(ch) >= 0 ? '<i class="lt' + f + ' c' + GLYPHS.indexOf(ch) + '"></i>' : '').join('') + '</span>';
 const ovr = r => Math.round(STATS.reduce((a, k) => a + r.stats[k], 0) / STATS.length);
 const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 function newPlayer(name, base, hair) {
@@ -59,6 +61,11 @@ const pic = r => '<img class="pt" alt="" src="' + portrait(r) + '">';
 const teamRating = () => Math.round(TEAM.roster.slice(0, 3).reduce((a, r) => a + ovr(r), 0) / Math.max(1, Math.min(3, TEAM.roster.length)));
 let TSEL = 0, DSEL = 1, LINEUP = null;
 const T = $('team');
+function fitNames() {   // shrink the sprite lettering until the name fits its slot
+  T.querySelectorAll('.tn, .hn').forEach(box => { const lw = box.querySelector('.lw'); if (!lw) return; box.style.fontSize = ''; lw.style.height = '';
+    let fs = parseFloat(getComputedStyle(box).fontSize), max = box.clientWidth - 4;
+    for (let k = 0; k < 30 && lw.scrollWidth > max && fs > 7; k++) { fs *= 0.92; box.style.fontSize = fs + 'px'; lw.style.height = fs + 'px'; } });
+}
 function openTeam(view, arg) {
   if (arg !== undefined) TSEL = arg; if (view === 'edit' && T.dataset.view !== 'edit') { EDIT = null; const o = T.querySelector('#tname'); if (o) o.remove(); } if (view !== 'team') T.classList.remove('swap'); T.hidden = false; $('home').hidden = true;
   T.querySelectorAll('.scr').forEach(s => s.hidden = s.dataset.v !== view); T.dataset.view = view;
@@ -78,8 +85,9 @@ T.addEventListener('click', e => {
   }
   else if (a === 'editlineup') { LINEUP = null; const on = T.classList.toggle('swap'); toastL(on ? 'Tap a player, then the player to swap with' : 'Lineup saved', false); drawTeam(); }
   else if (a === 'color') { EDIT.color = +v; drawEdit(); }
+  else if (a === 'font') { EDIT.font = +v; drawEdit(); }
   else if (a === 'mascot') { EDIT.mascot = +v; const sc = T.querySelector('.masc').scrollTop; drawEdit(); T.querySelector('.masc').scrollTop = sc; }
-  else if (a === 'saveteam') { TEAM.name = (T.querySelector('#tname').value || 'MY TEAM').toUpperCase().slice(0, 20); TEAM.color = EDIT.color; TEAM.mascot = EDIT.mascot; saveTeam(); toastL('Team saved', false); openTeam('team'); }
+  else if (a === 'saveteam') { TEAM.name = (T.querySelector('#tname').value || 'MY TEAM').toUpperCase().slice(0, 20); TEAM.color = EDIT.color; TEAM.mascot = EDIT.mascot; TEAM.font = EDIT.font; saveTeam(); toastL('Team saved', false); openTeam('team'); }
   else if (a === 'pick') { DSEL = +v; drawDraft(); }
   else if (a === 'draftit') {
     if (TEAM.roster.length >= ROSTER_MAX) return toastL('Roster full (' + ROSTER_MAX + ' players)', true);
@@ -95,7 +103,7 @@ function drawTeam() {
   const s = T.querySelector('.scr[data-v="team"] .body'), R = TEAM.roster, col = COLORS[TEAM.color], swap = T.classList.contains('swap');
   s.innerHTML = `
   <div class="tpanel"><i class="mascot lg${TEAM.mascot}"></i>
-    <div class="tn">${esc(TEAM.name)}</div><div class="tc"><i style="background:${col[1]}"></i>TEAM COLOR: ${col[0]}</div>
+    <div class="tn">${letters(TEAM.name, TEAM.font || 0)}</div><div class="tc"><i style="background:${col[1]}"></i>TEAM COLOR: ${col[0]}</div>
     <div class="tcount">${num(R.length)}<b>/</b>${num(ROSTER_MAX)}<small>PLAYERS</small></div>
     <div class="trate"><small>TEAM RATING</small>${num(teamRating(), 'g')}</div>
     <button class="bgold tedit" data-act="go" data-val="edit"><i class="ic i-pencil"></i><span class="lbl">EDIT TEAM</span></button></div>
@@ -106,20 +114,23 @@ function drawTeam() {
   <div class="xprow">${pic(R[0])}<span class="nm">${esc(R[0].name)}</span><span class="xp">${TEAM.xp} XP</span><i class="bar"><b style="width:${Math.min(100, TEAM.xp / upCost(R[0]) * 50)}%"></b></i>
     <button class="bgold vup" data-act="player" data-val="0"><span class="lbl">VIEW &amp; UPGRADE ›</span></button></div>
   <button class="bigbtn" data-act="go" data-val="draft"><i class="ball"></i><span>DRAFT NEW PLAYER</span><i class="ic i-chev"></i></button>`;
+  fitNames();
 }
 let EDIT = null;
 function drawEdit() {
-  const s = T.querySelector('.scr[data-v="edit"] .body'); if (!EDIT) EDIT = { color: TEAM.color, mascot: TEAM.mascot };
+  const s = T.querySelector('.scr[data-v="edit"] .body'); if (!EDIT) EDIT = { color: TEAM.color, mascot: TEAM.mascot, font: TEAM.font || 0 };
   const typed = s.querySelector('#tname') ? s.querySelector('#tname').value : TEAM.name;
   s.innerHTML = `
-  <div class="hero"><i class="mascot big lg${EDIT.mascot}"></i><div class="hn" style="border-color:${COLORS[EDIT.color][1]}">${esc(typed)}</div>${pic(TEAM.roster[0])}</div>
+  <div class="hero"><i class="mascot big lg${EDIT.mascot}"></i><div class="hn" style="border-color:${COLORS[EDIT.color][1]}">${letters(typed, EDIT.font)}</div>${pic(TEAM.roster[0])}</div>
   <div class="namef"><input id="tname" maxlength="20" value="${esc(typed)}" spellcheck="false"><span class="cnt">${typed.length} / 20</span></div>
+  <div class="fonts">${FONTS.map((n, i) => `<button class="fnt${EDIT.font === i ? ' on' : ''}" data-act="font" data-val="${i}">${letters('ABC', i)}<small>${n}</small></button>`).join('')}</div>
   <div class="row-lbl"><i class="lbl-color"></i></div>
   <div class="dots">${COLORS.map((c, i) => `<button class="dot d${i}${EDIT.color === i ? ' on' : ''}" data-act="color" data-val="${i}" aria-label="${c[0]}"></button>`).join('')}</div>
   <div class="row-lbl"><i class="lbl-mascot"></i></div>
   <div class="masc">${MASCOTS.map((m, i) => `<button class="ms${EDIT.mascot === i ? ' on' : ''}" data-act="mascot" data-val="${i}"><i class="mascot lg${i}"></i><span>${m.toUpperCase()}</span></button>`).join('')}</div>
   <div class="two"><button class="bdark" data-act="go" data-val="team"><span class="lbl">CANCEL</span></button><button class="bgold" data-act="saveteam"><span class="lbl">SAVE TEAM</span></button></div>`;
-  const inp = s.querySelector('#tname'); inp.oninput = () => { s.querySelector('.cnt').textContent = inp.value.length + ' / 20'; s.querySelector('.hn').textContent = inp.value; };
+  const inp = s.querySelector('#tname'); inp.oninput = () => { s.querySelector('.cnt').textContent = inp.value.length + ' / 20'; s.querySelector('.hn').innerHTML = letters(inp.value, EDIT.font); fitNames(); };
+  fitNames();
 }
 function drawDraft() {
   if (!TEAM.draft) { const used = new Set(TEAM.roster.map(r => r.name)), names = DRAFT_NAMES.filter(n => !used.has(n)).sort(() => Math.random() - 0.5); TEAM.draft = [0, 1, 2].map(i => newPlayer(names[i] || 'Rookie', rnd(52, 66))); saveTeam(); }
