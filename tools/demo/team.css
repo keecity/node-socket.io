@@ -154,3 +154,4 @@
 #team .card .st .dg{height:100%}
 #team .card .nm{top:66.3%;padding-top:.08em}
 #team .tnav{margin-bottom:calc(max(0px,env(safe-area-inset-bottom)) + 30px)}
+#team .uhow{margin:2px 4% 6px;text-align:center;font-size:clamp(10px,3cqw,13px);line-height:1.35;color:#c9d6e2}
