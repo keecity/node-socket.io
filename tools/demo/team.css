@@ -255,3 +255,8 @@
 #team .geq{aspect-ratio:900/150}#team .geq .ginfo{gap:4px}
 #team .ghero{aspect-ratio:900/480}#team .ghero .groom{height:63%}#team .ghero .gtt{top:69%}#team .ghero .gex{top:74%}
 #team .ghero .groom{height:60%}#team .ghero .gtt{top:66%}#team .ghero .gex{top:71%}
+#team .ghero .gtt{top:auto;bottom:9%;left:6%;gap:3px}
+#team .ghero .gtt b{font-size:clamp(12px,3.8cqw,18px)}#team .ghero .gtt em{font-size:clamp(15px,4.8cqw,24px);margin:0}
+#team .ghero .gtt small{font-size:clamp(6px,1.8cqw,9px)}
+#team .ghero .gex{top:auto;bottom:13%;right:6%;gap:3px;padding-left:4%}
+#team .ghero .gtt{bottom:12%}#team .ghero .gex{bottom:16%}
