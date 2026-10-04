@@ -1276,8 +1276,6 @@ function drawTeam() {
   <div class="cards">${R.slice(0, 3).map((r, i) => `<button class="card${LINEUP === i ? ' gold' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i}">${pic(r)}<span class="lv">${num(r.lv)}</span><span class="nm">${esc(r.name)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('')}</div>
   <div class="sec"><i class="sec-bench"></i></div>
   ${R.slice(3).map((r, i) => `<button class="brow${LINEUP === i + 3 ? ' sel' : ''}" data-act="${swap ? 'lineup' : 'player'}" data-val="${i + 3}">${pic(r)}<span class="nm">${esc(r.name)}</span><span class="lv">${num(r.lv)}</span><span class="st">${num(ovr(r), 'g')}</span></button>`).join('') || '<p class="empty">No bench players — draft one below.</p>'}
-  <div class="xprow">${pic(R[0])}<span class="nm">${esc(R[0].name)}</span><span class="xp">${TEAM.xp} XP</span><i class="bar"><b style="width:${Math.min(100, TEAM.xp / upCost(R[0]) * 50)}%"></b></i>
-    <button class="bgold vup" data-act="player" data-val="0"><span class="lbl">VIEW &amp; UPGRADE ›</span></button></div>
   <button class="bigbtn" data-act="go" data-val="draft"><i class="ball"></i><span>DRAFT NEW PLAYER</span><i class="ic i-chev"></i></button>`;
   fitNames();
 }
