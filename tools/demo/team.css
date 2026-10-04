@@ -45,7 +45,7 @@
 #team .card .pt{position:absolute;left:12%;top:7%;width:76%;height:61%;clip-path:polygon(14% 0,86% 0,100% 12%,100% 100%,0 100%,0 12%)}
 #team .card .lv{position:absolute;right:8%;top:17%;font-size:clamp(12px,3.6cqw,18px)}
 #team .card .nm{position:absolute;left:0;right:0;top:68%;text-align:center;font-size:clamp(10px,3.2cqw,15px);text-transform:uppercase}
-#team .card .st{position:absolute;left:38%;top:80%;font-size:clamp(14px,4.4cqw,22px)}#team .card .st.nostar{left:0;right:0;text-align:center;display:flex;justify-content:center}
+#team .card .st{position:absolute;left:47%;top:80%;font-size:clamp(14px,4.4cqw,22px)}#team .card .st.nostar{left:0;right:0;text-align:center;display:flex;justify-content:center}
 #team .brow{position:relative;display:block;width:100%;aspect-ratio:615/77;background:var(--t-benchrow) center/100% 100% no-repeat;margin-bottom:4px;text-align:left}
 #team .brow.sel{filter:drop-shadow(0 0 6px #ffc233)}
 #team .brow .pt{position:absolute;left:5.5%;top:14%;width:13%;height:72%;clip-path:polygon(25% 0,75% 0,100% 25%,100% 75%,75% 100%,25% 100%,0 75%,0 25%)}
