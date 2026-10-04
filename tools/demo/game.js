@@ -1085,6 +1085,15 @@ function tutIdle(p, dt) {   // everyone the player isn't controlling waits in pl
   const b = ball.holder ? bodyPos(ball.holder) : ball.pos; if (ball.holder !== p) faceTo(p, b.x, b.z, 4, dt);
 }
 
+// ---- home screen: the match waits behind it until Play
+function showHome() { $('home').hidden = false; game.paused = true; if (TUT) endTutorial(true); $('controls').hidden = true; tutBtn.hidden = true; }
+function leaveHome() { $('home').hidden = true; game.paused = false; app.timeScale = speed; tutBtn.hidden = !!NET.role; }
+$('hplay').onclick = () => { leaveHome(); restart(); };
+$('hprac').onclick = () => { leaveHome(); startTutorial(); };
+$('hgear').onclick = () => { $('controls').hidden = !$('controls').hidden; };
+for (const id of ['hteam', 'hplayers', 'hstats']) $(id).onclick = () => toastL('Coming soon', false);
+{ const hb = document.createElement('button'); hb.id = 'home-btn'; hb.textContent = 'Home'; $('controls').prepend(hb); hb.onclick = () => { if (NET.role) leaveGame(); showHome(); }; }
+game.paused = true;
 window.__act = act; window.__g = groundAt; window.__w2s = (x, z) => { const s = w2s(new pc.Vec3(x, 0, z), new pc.Vec3()); const r = app.graphicsDevice.canvas.getBoundingClientRect(); return [s.x + r.left, s.y + r.top]; };
 window.game = { tutEvent, startTutorial, endTutorial, TUTS: () => TUT, stats, NET, callFoul, game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
