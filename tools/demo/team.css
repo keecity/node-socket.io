@@ -262,3 +262,6 @@
 #team .ghero .gtt{bottom:12%}#team .ghero .gex{bottom:16%}
 #team .ghero .gtt{top:67.5%;bottom:auto}#team .ghero .gex{top:74%;bottom:auto}
 #team .geq .ginfo b{font-size:clamp(9px,2.7cqw,13px)}#team .geq .ginfo small{font-size:clamp(7px,2.2cqw,10px)}#team .geq .glv{font-size:clamp(7px,2cqw,9px);padding:1px 8px}#team .geq{margin-bottom:12px}
+#team .ghero .gtt{top:66.5%;height:27%;bottom:auto;justify-content:center;gap:2px;overflow:hidden}
+#team .ghero .gtt b{font-size:3.3cqw;line-height:1}#team .ghero .gtt em{font-size:4.3cqw;line-height:1}#team .ghero .gtt small{font-size:1.8cqw;line-height:1}
+#team .ghero .gex{top:66.5%;height:27%;bottom:auto;justify-content:center}
