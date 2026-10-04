@@ -569,7 +569,7 @@ function updateCamera(dt) {
   let aspect = app.graphicsDevice.width / app.graphicsDevice.height;
   if (camMode === 'arena') {
     const H = document.body.clientHeight || 1, top = Math.max($('board').getBoundingClientRect().bottom, $('ft21').getBoundingClientRect().bottom) + 4;
-    const bot = $('hint').getBoundingClientRect().top - 4, h = Math.max(0.3, (bot - top) / H);
+    const hr = $('hint').getBoundingClientRect(), mr = $('meter').getBoundingClientRect(), bot = Math.min(hr.height > 0 ? hr.top : 1e9, mr.top - 40) - 4, h = Math.max(0.3, (bot - top) / H);
     camera.camera.rect = new pc.Vec4(0, 1 - bot / H, 1, h); camera.camera.scissorRect = camera.camera.rect; aspect = aspect / h;
   } else { camera.camera.rect = new pc.Vec4(0, 0, 1, 1); camera.camera.scissorRect = camera.camera.rect; }
   const portrait = aspect < 0.9;
@@ -594,7 +594,7 @@ function updateCamera(dt) {
   const w = app.graphicsDevice.canvas.clientWidth, sp = new pc.Vec3();
   for (const p of P) {
     const bp = bodyPos(p), top = new pc.Vec3(bp.x, Math.max(2.3, p.head.getPosition().y + 0.75), bp.z);
-    camera.camera.worldToScreen(top, sp);
+    w2s(top, sp);
     p.label.style.transform = `translate(${sp.x.toFixed(0)}px, ${sp.y.toFixed(0)}px) translate(-50%,-100%)`;
     p.label.classList.toggle('ball', ball.holder === p);
     p.label.style.display = (camera.camera.projection === pc.PROJECTION_ORTHOGRAPHIC || sp.z > 0) && sp.x > -50 && sp.x < w + 50 ? '' : 'none';
@@ -757,11 +757,20 @@ function setZone(halfM) {   // halfM: perfect window half-width in marker units 
 }
 const meterPos = () => Math.sin(human.mt * Math.PI * 1.15 - Math.PI / 2);
 const human = { stamina: 1, lastTap: null, on: true, down: false, t0: 0, x: 0, y: 0, meter: false, mt: 0, target: null };
-function groundAt(sx, sy) {
-  const a = camera.camera.screenToWorld(sx, sy, camera.camera.nearClip), b = camera.camera.screenToWorld(sx, sy, camera.camera.farClip);
-  if (Math.abs(b.y - a.y) < 1e-6) return null; const t = a.y / (a.y - b.y); return flat(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
+// screen <-> world for the camera's viewport rectangle (the court is drawn between the HUD bars)
+function viewRect() { const c = app.graphicsDevice.canvas, W = c.clientWidth, H = c.clientHeight, r = camera.camera.rect; return { W, H, top: (1 - r.y - r.w) * H, h: Math.max(1, r.w * H) }; }
+function w2s(world, out) { return camera.camera.worldToScreen(world, out); }   // the component already honours the viewport rect
+function s2w(sx, sy, z) { const v = viewRect(); return camera.camera.camera.screenToWorld(sx, sy - v.top, z, v.W, v.h, new pc.Vec3()); }
+function groundAt(sx, sy) {   // invert worldToScreen on the floor (exact for any viewport rect; two Newton steps)
+  const g = flat(0, 0), s = new pc.Vec3(), sa = new pc.Vec3(), sb = new pc.Vec3();
+  for (let it = 0; it < 4; it++) {
+    w2s(g, s); w2s(new pc.Vec3(g.x + 1, 0, g.z), sa); w2s(new pc.Vec3(g.x, 0, g.z + 1), sb);
+    const a = sa.x - s.x, b = sb.x - s.x, c = sa.y - s.y, d = sb.y - s.y, det = a * d - b * c; if (Math.abs(det) < 1e-9) return null;
+    const ex = sx - s.x, ey = sy - s.y; g.x += (d * ex - b * ey) / det; g.z += (-c * ex + a * ey) / det;
+  }
+  return Number.isFinite(g.x) && Number.isFinite(g.z) ? g : null;
 }
-function screenOf(p) { const s = new pc.Vec3(); const bp = bodyPos(p); camera.camera.worldToScreen(new pc.Vec3(bp.x, 1.0, bp.z), s); return s; }
+function screenOf(p) { const s = new pc.Vec3(); const bp = bodyPos(p); w2s(new pc.Vec3(bp.x, 1.0, bp.z), s); return s; }
 const canEl = $('scene'), meterEl = $('meter'), markEl = $('mark');
 function myInbound() { return human.on && game.phase === 'inbound' && game.inbounder && ball.holder === game.inbounder && ball.holder.team === HUMAN && !ball.holder.action && game.timer <= 0; }
 function myFT() { return human.on && game.phase === 'ftwait' && game.timer <= 0 && game.ft && ball.holder === game.ft.shooter && ball.holder.team === HUMAN; }
@@ -858,7 +867,7 @@ function meterTick() {   // a 0.25 s hold brings up the shot meter
     $('mlabel').textContent = op < 1.0 ? 'CONTESTED' : op < 1.6 ? 'GUARDED' : op < 2.4 ? 'SPACE' : op < 3.5 ? 'OPEN' : 'WIDE OPEN';
 }
 const ringEl = $('ring');
-function ring(g, sprint) { ringEl.style.borderColor = sprint ? '#ff6a3d' : '#ffd27a'; const s = new pc.Vec3(); camera.camera.worldToScreen(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
+function ring(g, sprint) { ringEl.style.borderColor = sprint ? '#ff6a3d' : '#ffd27a'; const s = new pc.Vec3(); w2s(new pc.Vec3(g.x, 0, g.z), s); ringEl.style.left = s.x + 'px'; ringEl.style.top = s.y + 'px'; ringEl.className = ''; void ringEl.offsetWidth; ringEl.className = 'go'; }
 $('mode').onclick = () => { human.on = !human.on; $('mode').textContent = human.on ? 'Watch AI' : 'Play'; $('hint').hidden = !human.on; };
 // ====================================================================== online head-to-head
 // The host's screen runs the whole game (Purple). A guest who joins controls Teal: their taps travel to the
@@ -1074,6 +1083,7 @@ function tutIdle(p, dt) {   // everyone the player isn't controlling waits in pl
   const b = ball.holder ? bodyPos(ball.holder) : ball.pos; if (ball.holder !== p) faceTo(p, b.x, b.z, 4, dt);
 }
 
+window.__act = act; window.__g = groundAt; window.__w2s = (x, z) => { const s = w2s(new pc.Vec3(x, 0, z), new pc.Vec3()); const r = app.graphicsDevice.canvas.getBoundingClientRect(); return [s.x + r.left, s.y + r.top]; };
 window.game = { tutEvent, startTutorial, endTutorial, TUTS: () => TUT, stats, NET, callFoul, game, P, ball, HOOPS, S, inbound, give, human, scored, attackHoop, sfx };
 P.forEach(p => { p.pos.set((p.team ? 1 : -1) * (2 + p.idx * 1.5), 0, (p.idx - 1) * 3); faceTo(p, 0, 0); place(p); p.ballNode.enabled = false; });
 app.start(); $('loading').hidden = true;
