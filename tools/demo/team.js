@@ -55,16 +55,18 @@ function ctEnd(won, margin) {   // after a match: pay for the win/loss and any f
 // ---- gym: buy and upgrade equipment with cash; every level adds +5% to all match XP (bonuses stack, max level 3)
 const EQUIP = ['SHOOTING MACHINE', 'WEIGHT BENCH', 'TREADMILL', 'RECOVERY STATION', 'SPIN BIKE', 'ROWING MACHINE', 'POWER RACK', 'DUMBBELL RACK', 'CABLE MACHINE', 'PLYO BOXES', 'MEDICINE BALLS', 'PUSH SLED',
   'STAIR CLIMBER', 'ELLIPTICAL', 'LEG PRESS', 'LEG EXTENSION', 'LAT PULLDOWN', 'PULL-UP TOWER', 'KETTLEBELL RACK', 'REBOUNDER NET', 'HEAVY BAG', 'ICE BATH', 'MASSAGE TABLE', 'AGILITY HURDLES'];
-const EQ_MAX = 3, EQ_PCT = 5;
+const EQ_MAX = 3;
+const eqPct = i => Math.round((0.5 + 1.5 * i / (EQUIP.length - 1)) * 2) / 2;   // % per level: 0.5% for the first machine up to 2% for the last (full gym about +90%)
+const fmtPct = v => +v.toFixed(1);
 const eqCost = (i, lv) => Math.round((300 + 150 * i) * (1 + 0.6 * lv) / 50) * 50;   // later machines cost more   // buy (lv 0) or upgrade price
-const gymPct = () => EQUIP.reduce((a, _, i) => a + ((TEAM.gym || {})[i] || 0) * EQ_PCT, 0);
+const gymPct = () => fmtPct(EQUIP.reduce((a, _, i) => a + ((TEAM.gym || {})[i] || 0) * eqPct(i), 0));
 function drawGym() {
   ensureContracts(); TEAM.gym ??= {}; const s = T.querySelector('.scr[data-v="gym"] .body'), pct = gymPct(), coin = '<i class="gcoin"></i>';
   T.querySelector('.scr[data-v="gym"] .gcash').innerHTML = coin + TEAM.cash.toLocaleString();
-  s.innerHTML = `<div class="ghero"><i class="groom"></i><i class="glogo mascot lg${TEAM.mascot}"></i><div class="gtt"><b>TEAM TRAINING</b><em>+${pct}% MATCH XP</em><small>APPLIES TO EVERY ROSTER PLAYER.</small></div><div class="gex"><small>EXAMPLE:</small><b>100 XP → <em>${100 + pct} XP</em></b></div></div>
+  s.innerHTML = `<div class="ghero"><i class="groom"></i><i class="glogo mascot lg${TEAM.mascot}"></i><div class="gtt"><b>TEAM TRAINING</b><em>+${pct}% MATCH XP</em><small>APPLIES TO EVERY ROSTER PLAYER.</small></div><div class="gex"><small>EXAMPLE:</small><b>100 XP → <em>${Math.round(100 + pct)} XP</em></b></div></div>
   <div class="gsec"><b>EQUIPMENT</b><small>PERMANENT XP BONUSES STACK.</small></div>
   ${EQUIP.map((n, i) => { const lv = TEAM.gym[i] || 0, max = lv >= EQ_MAX, c = eqCost(i, lv);
-    return `<div class="geq"><i class="gimg" style="background-image:var(--g-eq${i})"></i><div class="ginfo"><b>${n}</b><span class="glv">${lv ? 'LV ' + lv : 'NOT OWNED'}</span><small>${max ? `+${lv * EQ_PCT}% XP · MAX` : lv ? `+${lv * EQ_PCT}% → <em>+${(lv + 1) * EQ_PCT}% XP</em>` : `UNLOCK <em>+${EQ_PCT}% XP</em>`}</small></div>${max ? '<div class="gbtn max"><b>MAXED</b></div>' : `<button class="gbtn${TEAM.cash < c ? ' off' : ''}" data-act="gymbuy" data-val="${i}"><b>${lv ? 'UPGRADE' : 'BUY'}</b><span>${coin}${c.toLocaleString()}</span></button>`}</div>`; }).join('')}
+    return `<div class="geq"><i class="gimg" style="background-image:var(--g-eq${i})"></i><div class="ginfo"><b>${n}</b><span class="glv">${lv ? 'LV ' + lv : 'NOT OWNED'}</span><small>${max ? `+${fmtPct(lv * eqPct(i))}% XP · MAX` : lv ? `+${fmtPct(lv * eqPct(i))}% → <em>+${fmtPct((lv + 1) * eqPct(i))}% XP</em>` : `UNLOCK <em>+${eqPct(i)}% XP</em>`}</small></div>${max ? '<div class="gbtn max"><b>MAXED</b></div>' : `<button class="gbtn${TEAM.cash < c ? ' off' : ''}" data-act="gymbuy" data-val="${i}"><b>${lv ? 'UPGRADE' : 'BUY'}</b><span>${coin}${c.toLocaleString()}</span></button>`}</div>`; }).join('')}
   <p class="ginf"><i class="ginfo-i"></i>EARN COINS BY PLAYING MATCHES.</p>`;
 }
 const upCost = r => 50 * (r.ups ?? r.lv);   // every upgrade costs more than the one before
