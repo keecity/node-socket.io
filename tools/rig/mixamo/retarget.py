@@ -9,7 +9,8 @@ def qbetween(a, b):
 def child_dir(name):
     i = M.ID[name]; ch = M.NODES[i].children
     # the main child (largest translation) defines the bone axis
-    best = max(ch, key=lambda c: np.linalg.norm(M.REST[c][0])); v = M.REST[best][0]; return v / np.linalg.norm(v)
+    spinal = [c for c in ch if M.NAME[c].startswith(('Spine', 'Neck', 'Head'))]      # the spine continues up the chain, not into a shoulder
+    best = spinal[0] if spinal else max(ch, key=lambda c: np.linalg.norm(M.REST[c][0])); v = M.REST[best][0]; return v / np.linalg.norm(v)
 SAG = lambda th, lat=0.0: np.array([lat, -np.cos(th), np.sin(th)])          # limb angle from down, + forward
 def img2w(v2): return np.array([0.0, v2[1], v2[0]])
 import json

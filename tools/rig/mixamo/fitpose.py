@@ -47,7 +47,8 @@ def pose_from(p):
     t['LeftUpLeg'] = SAG(np.radians(d['thL']), 0.05); t['LeftLeg'] = SAG(np.radians(d['shL']), 0.03)
     t['RightArm'] = SAG(np.radians(d['uaR']), -np.sin(np.radians(d['abR']))); t['RightForeArm'] = SAG(np.radians(d['faR']), -0.15)
     t['RightHand'] = SAG(np.radians(d['hdR']), -0.05)
-    t['LeftArm'] = SAG(np.radians(d['uaL']), 0.35); t['LeftForeArm'] = SAG(np.radians(d['faL']), 0.15)
+    uaL = float(np.clip(-0.4 * (d['thL'] - d['thR']) + 5, -28, 24))          # hidden in the video: swings opposite the left leg (capped)
+    t['LeftArm'] = SAG(np.radians(uaL), 0.12); t['LeftForeArm'] = SAG(np.radians(min(uaL + 80, 85)), 0.05)   # ~80 deg elbow, hand stays below the chest
     foot = {'Left': np.radians(d['ftL']), 'Right': np.radians(d['ftR'])}
     local = {}; Wd = {}
     for i in M.ORDER:
@@ -58,6 +59,30 @@ def pose_from(p):
         if nm in ('LeftFoot', 'RightFoot'):
             pitch = foot[nm[:-4]]; rd = REST[M.ID[nm.replace('Foot', 'ToeBase')]][:3, 3] - REST[i][:3, 3]; rd /= np.linalg.norm(rd)
             c, s_ = np.cos(pitch), np.sin(pitch); aim = np.array([rd[0], rd[1] * c + rd[2] * s_, -rd[1] * s_ + rd[2] * c])
+        if aim is not None and nm in ('LeftArm', 'RightArm'):
+            sg = 1 if nm.startswith('Left') else -1; L = np.linalg.norm(M.REST[M.NODES[i].children[0]][0]); sp = Wd[M.ID['Spine2']][:3, 3]
+            a = aim / np.linalg.norm(aim)
+            for _ in range(12):                                    # elbow clears the chest
+                if sg * (Wc[0, 3] + a[0] * L - sp[0]) >= 0.125: break
+                a = a + np.array([sg * 0.12, 0, 0]); a /= np.linalg.norm(a)
+            aim = a
+        if aim is not None and nm in ('LeftForeArm', 'RightForeArm'):
+            # a real elbow: the forearm folds forward from the upper arm (5-140 deg), elbow pointing back and out
+            sg = 1 if nm.startswith('Left') else -1
+            a1 = Wp[:3, :3] @ child_dir(M.NAME[M.PARENT[i]]); a1 /= np.linalg.norm(a1)
+            pole = np.array([sg * 0.35, 0.0, -1.0]); f = -(pole - (pole @ a1) * a1); f /= np.linalg.norm(f)
+            a2 = aim / np.linalg.norm(aim); phi = np.arccos(np.clip(a2 @ a1, -1, 1))
+            phi = np.clip(phi if (a2 @ f) >= 0 else 0.1, np.radians(5), np.radians(140))
+            aim = np.cos(phi) * a1 + np.sin(phi) * f
+            L = np.linalg.norm(M.REST[M.NODES[i].children[0]][0]); sp = Wd[M.ID['Spine2']][:3, 3]
+            for _ in range(10):                                    # wrist clears the body too
+                if sg * (Wc[0, 3] + aim[0] * L - sp[0]) >= 0.13: break
+                aim = aim + np.array([sg * 0.1, 0, 0]); aim /= np.linalg.norm(aim)
+        if aim is not None and nm in ('LeftHand', 'RightHand'):
+            fa = Wp[:3, :3] @ child_dir(M.NAME[M.PARENT[i]]); fa /= np.linalg.norm(fa); a = aim / np.linalg.norm(aim)
+            ang = np.arccos(np.clip(a @ fa, -1, 1))
+            if ang > np.radians(70):                               # wrist bends at most ~70 deg
+                perp = a - (a @ fa) * fa; perp /= np.linalg.norm(perp) + 1e-9; aim = np.cos(np.radians(70)) * fa + np.sin(np.radians(70)) * perp
         if aim is not None:
             cur = Wc[:3, :3] @ child_dir(nm); Rn = qmat(qbetween(cur, aim)) @ Wc[:3, :3]
             Ln = Wp[:3, :3].T @ Rn; local[nm] = matq(Ln); Wc = Wp @ M.mat(tr, local[nm], s)
