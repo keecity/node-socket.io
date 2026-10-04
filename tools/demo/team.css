@@ -261,3 +261,4 @@
 #team .ghero .gex{top:auto;bottom:13%;right:6%;gap:3px;padding-left:4%}
 #team .ghero .gtt{bottom:12%}#team .ghero .gex{bottom:16%}
 #team .ghero .gtt{top:67.5%;bottom:auto}#team .ghero .gex{top:74%;bottom:auto}
+#team .geq .ginfo b{font-size:clamp(9px,2.7cqw,13px)}#team .geq .ginfo small{font-size:clamp(7px,2.2cqw,10px)}#team .geq .glv{font-size:clamp(7px,2cqw,9px);padding:1px 8px}#team .geq{margin-bottom:12px}
