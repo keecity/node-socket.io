@@ -753,6 +753,7 @@ function dribbleSound() {
 // ====================================================================== controls
 let speed = 1;
 $('menu-btn').onclick = () => { $('controls').hidden = !$('controls').hidden; };
+$('board').appendChild($('menu-btn'));   // rests on the scoreboard's right corner, as in the reference
 $('pause').onclick = () => { game.paused = !game.paused; $('pause').textContent = game.paused ? 'Play' : 'Pause'; app.timeScale = game.paused ? 0 : speed; };
 $('speed').onclick = () => { speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1; app.timeScale = game.paused ? 0 : speed; $('speed').textContent = speed + '×'; };
 const CAMS = ['arena', 'broadcast', 'follow'], CAMNAME = { arena: 'Arena cam', broadcast: 'Broadcast cam', follow: 'Follow cam' };
