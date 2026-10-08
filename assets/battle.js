@@ -2063,7 +2063,7 @@ function updatePeds(dt) {
     p.gp = (p.gp || p.ph) + cad * dt; const a = p.im.geometry.attributes.aAnim; a.setXYZW(p.i, p.gp, p.ph, sw, 1.35); }   // phase accumulates, so speed changes never jump the stride
   for (const im of pedKinds) { im.instanceMatrix.needsUpdate = true; im.geometry.attributes.aAnim.needsUpdate = true; }
 }
-const nodes_town_ok = i => { const { chains, nodes } = ROAD_NET, c = chains[i]; return nodes[c.a].town === nodes[c.b].town && c.len < 90 && c.len > 2.5; };
+const nodes_town_ok = i => { const { chains, nodes } = ROAD_NET, c = chains[i]; return nodes[c.a].town === nodes[c.b].town && c.len < 90 * TS && c.len > 2.5; };   // in-town streets only (lengths scale with the towns)
 
 // ------------------------------------------------------------------ robots
 const TEAM_COL = [[1, 0.55, 0.8], [0.55, 0.85, 1]];
