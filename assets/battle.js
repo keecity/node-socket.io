@@ -3264,6 +3264,32 @@ function applyFog() { if (!FOG_ON) return;
   for (const k of tanks) if (k.team === 1) { const v = fogVisible(k.pos.x, k.pos.z); k.root.visible = v; if (!v && k.bar) k.bar.g.visible = false; }
   for (const L of [outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
 const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
+// ------------------------------------------------------------------ demolition
+// Your own buildings can be torn down: they drop in a cloud of dust and sink away, the ground is freed for building again and
+// half the price comes back (all of it if construction had not finished). Anything that depended on them is let go first.
+const BLISTS = () => [['outpost', outposts], ['airbase', airbases], ['pump', pumpjacks], ['camp', camps], ['mine', mines], ['farm', farms], ['wh', warehouses], ['hangar', hangars]];
+const demolishing = [];
+function buildingAt2D(team, x, z) { let best = null, bd = 1e9;
+  for (const [key, L] of BLISTS()) for (const b of L) { if (!b.alive || b.team !== team) continue; const d = wdist2(b.x, b.z, x, z);
+    const inside = key === 'wh' ? inWhLot(b, x, z, 0) : key === 'hangar' ? inHangarLot(b, x, z) : key === 'farm' ? inFarmLot(b, x, z, 0) : key === 'airbase' ? !!airbaseAt(new THREE.Vector3(x, -1e3, z)) && d < 4
+      : d < ({ outpost: OUTPOST_W * 0.7, pump: 0.9, camp: 1.1, mine: 1.4 })[key];
+    if (inside && d < bd) { bd = d; best = { b, key }; } }
+  return best; }
+function demolish(b, key) { if (!b || !b.alive) return null; const done = b.done !== false, back = {};
+  for (const [k, v] of Object.entries(PRICE[key])) back[k] = Math.floor(v * (done ? 0.5 : 1));
+  b.alive = false; b.demolished = true; spend(b.team, Object.fromEntries(Object.entries(back).map(([k, v]) => [k, -v])));
+  if (key === 'outpost') rebuildTerritory();
+  if (key === 'airbase') { b.queue = 0; for (const p of b.pads) { const h = p.heli; p.heli = null; if (h) { h.home = null; if (h.alive && h.mode === 'landed') h.mode = 'takeoff'; } } }
+  if (key === 'hangar') { if (h_bay(b)) release(b); for (const f of b.queue) { f.svc = null; f.order = null; } b.queue.length = 0; b.buildQ.length = 0; }
+  if (key === 'wh') { b.tankQ = 0; for (const t of trucks) if (t.home === b) { t.dead = true; if (t.job && t.job.p) t.job.p.truck = null; } }
+  if (b.truck) { b.truck.dead = true; b.truck = null; }
+  const v = new THREE.Vector3(b.x, b.y + 0.1, b.z); FX.dust(v, 60, { size: [0.2, 1.1], life: [1.6, 3.2], vel: 0.9, up: 0.35, a: 0.6 }); FX.smoke(v, 20, { size: [0.2, 0.9], life: [2, 4], col: [0.55, 0.5, 0.45], a: 0.5, vel: 0.4, up: 0.25 }); addShake(0.12, v);
+  demolishing.push({ b, t: 0, y0: b.y }); log(b.team, `<b>${TEAM_NAME[b.team]}</b> ${unitName(b).split(' ').slice(1).join(' ')} demolished`); return back; }
+const h_bay = h => !!h.bay;
+function updateDemolish(dt) { for (let i = demolishing.length - 1; i >= 0; i--) { const d = demolishing[i], b = d.b; d.t += dt;
+  b.y = d.y0 - Math.pow(Math.min(1, d.t / 2.5), 2) * 0.8; if (b.obj && b.obj.children[0]) b.obj.children[0].scale.y *= 1 - dt * 0.35;
+  if (chance(dt * 10)) FX.dust(new THREE.Vector3(wm(b.x + rand(-0.6, 0.6)), d.y0 + 0.05, wm(b.z + rand(-0.6, 0.6))), 4, { size: [0.1, 0.5], vel: 0.3, a: 0.4 });
+  if (d.t > 2.6) { if (b.obj) { b.obj.visible = false; if (b.obj.parent) b.obj.parent.remove(b.obj); } for (const [, L] of BLISTS()) { const k = L.indexOf(b); if (k >= 0) L.splice(k, 1); } demolishing.splice(i, 1); } } }
 // ---- enemy AI helpers
 let aiEcoT = 20, aiSquadT = 120;
 const aiCount = (list, kind) => list.filter(p => p.alive && p.team === 1 && (!kind || p.kind === kind)).length;
@@ -3401,7 +3427,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt);
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3451,6 +3477,7 @@ const Battle = {
   },
   tanks, TANK_BUILD, queueTank, get tankError() { return TANK_ERR; }, _makeTank: (team, x, z, yaw) => makeTank(team, x, z, yaw), warehouseAt2D: (xw, zw) => { const x = wm(xw / S), z = wm(zw / S); return warehouses.find(w => w.alive && inWhLot(w, x, z, 0)) || null; },
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
+  buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },
