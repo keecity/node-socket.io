@@ -1993,13 +1993,15 @@ addEventListener('mouseup', e => {
 function selectRect(ax, ay, bx, by, keepIfEmpty) {
   const x1 = Math.min(ax, bx), x2 = Math.max(ax, bx);
   const y1 = Math.min(ay, by), y2 = Math.max(ay, by);
+  if (flagFor && x2 - x1 < 5 && y2 - y1 < 5) { const g = pickGround(x1, y1); if (g) { const why = Battle.setPickFlag(flagFor, g.x, g.z); if (why) return feedMsg(why); feedMsg('Pickup flag set: trucks will load there'); } flagFor = null; return; }
   const click = x2 - x1 < 5 && y2 - y1 < 5;
   const picked = [];
   for (const u of Battle.selectables()) { const p = toScreen(u, v3); if (!p) continue;
     if (click ? Math.hypot(p.x - x1, p.y - y1) < 24 : p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) picked.push(u); }
   if (click && picked.length > 1) picked.length = 1;
   if (click && !picked.length && pickCitizen(x1, y1)) return;
-  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); else { const pt = t && Battle.plantAt2D(t.x, t.z); if (pt && pt.idx === 0) openPW(); else { const tn = t && Battle.townAt2D(t.x, t.z); if (tn && (tn.idx === 0 || tn.found || !Battle.fogOn)) openTN(tn); } } } } }
+  if (click && !picked.length) { { const g = pickGround(x1, y1), pr = g && Battle.producerAt2D(g.x, g.z); if (pr) { flagFor = pr; feedMsg((pr.pickFlag ? 'Click to move the truck pickup flag' : 'Click near the building to set where trucks load') + ' — press X to clear it, Esc / right-click cancels.'); return; } }
+  const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); else { const pt = t && Battle.plantAt2D(t.x, t.z); if (pt && pt.idx === 0) openPW(); else { const tn = t && Battle.townAt2D(t.x, t.z); if (tn && (tn.idx === 0 || tn.found || !Battle.fogOn)) openTN(tn); } } } } }
   if (keepIfEmpty && !picked.length) return; Battle.select(picked);
 }
 
@@ -2259,6 +2261,10 @@ $('mkSell').addEventListener('click', () => { const k = mkRes; if (mkStock(k) < 
 setInterval(() => { for (const k in MK) MK[k].mul += (1 - MK[k].mul) * 0.02; mkRender(); }, 1000);   // prices drift back to normal
 for (const k in MK) { const box = $(MK[k].el).closest('.res'); box.style.cursor = 'pointer'; box.title = 'Open the market: buy or sell ' + MK[k].name.toLowerCase(); box.addEventListener('click', () => openMarket(k)); }
 { const box = $('rCredits').closest('.res'); box.style.cursor = 'pointer'; box.title = 'Open the market'; box.addEventListener('click', () => openMarket()); }
+// ---- truck pickup flag: click a farm, mine or woodcutter, then click the spot (near it) where trucks should load
+let flagFor = null;
+addEventListener('keydown', e => { if (!flagFor) return; if (e.key === 'Escape') { flagFor = null; hint(''); } if (e.key === 'x' || e.key === 'X') { Battle.clearPickFlag(flagFor); feedMsg('Pickup flag removed: trucks pick the nearest clear spot'); flagFor = null; } });
+el.addEventListener('mousedown', e => { if (e.button === 2 && flagFor) { flagFor = null; hint(''); } });
 // ---- citizen panel: click a person to meet them
 let czSel = null;
 function pickCitizen(x, y) { let best = null, bd = 22; for (const p of Battle.peds) { if (!p.shown) continue; const t = Battle.towns[p.ti]; if (t && t.idx !== 0 && !t.found && Battle.fogOn) continue;

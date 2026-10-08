@@ -1600,6 +1600,7 @@ function lotBlocked(x, z, ex) { const m = 0.12;
   for (const pr of propsNear(x, z)) if (pr.alive && pr.kind !== 'lamp' && pr.kind !== 'car' && wdist2(pr.x, pr.z, x, z) < pr.r + m) return true;
   return false; }
 // off-road leg: straight if clear, otherwise A* on a fine grid around the obstacles
+let offroadFail = false;
 function offroad(a, b, ex, foot, blk = lotBlocked) { const dx = wd(b.x - a.x), dz = wd(b.z - a.z), L = Math.hypot(dx, dz); let clear = true;
   for (let s = 0.1; s < L - 0.1; s += 0.08) { const px = wm(a.x + dx * s / L), pz = wm(a.z + dz * s / L); if ((s > 0.35 && blk(px, pz, ex)) || (foot && Hd(px, pz) < 2 / S * 1.1)) { clear = false; break; } } if (clear) return [b];
   const G = 0.12, pad = 2.5, nx = Math.ceil((Math.abs(dx) + pad * 2) / G), nz = Math.ceil((Math.abs(dz) + pad * 2) / G), ox = Math.min(0, dx) - pad, oz = Math.min(0, dz) - pad, N = nx * nz;
@@ -1610,7 +1611,7 @@ function offroad(a, b, ex, foot, blk = lotBlocked) { const dx = wd(b.x - a.x), d
   while (open.length && it++ < 40000) { let bi = 0; for (let k = 1; k < open.length; k++) if (gs[open[k]] + h(open[k]) < gs[open[bi]] + h(open[bi])) bi = k; const c = open.splice(bi, 1)[0]; if (c === g0) break;
     const cx = c % nx, cz = Math.floor(c / nx); for (let ddz = -1; ddz <= 1; ddz++) for (let ddx = -1; ddx <= 1; ddx++) { if (!ddx && !ddz) continue; const x2 = cx + ddx, z2 = cz + ddz; if (x2 < 0 || z2 < 0 || x2 >= nx || z2 >= nz) continue;
       const n = x2 + z2 * nx; if (n !== g0 && isB(n)) continue; const g = gs[c] + (ddx && ddz ? 1.414 : 1); if (g < gs[n]) { if (gs[n] === 1e9) open.push(n); gs[n] = g; par[n] = c; } } }
-  if (par[g0] < 0) return [b]; const out = []; for (let c = g0, k = 0; c !== s0 && c >= 0; c = par[c], k++) if (k % 2 === 0) out.unshift({ x: wm(a.x + (c % nx) * G + ox), z: wm(a.z + Math.floor(c / nx) * G + oz) }); out.push(b); return out; }
+  if (par[g0] < 0) { offroadFail = true; return [b]; } const out = []; for (let c = g0, k = 0; c !== s0 && c >= 0; c = par[c], k++) if (k % 2 === 0) out.unshift({ x: wm(a.x + (c % nx) * G + ox), z: wm(a.z + Math.floor(c / nx) * G + oz) }); out.push(b); return out; }
 function planRoute(from, to, ex = [], blk = lotBlocked) { const ra = nearestRoad(from.x, from.z), rb = nearestRoad(to.x, to.z), pts = [from];
   if (ra && rb && ra.d < 8 && rb.d < 8) { const r = roadRoute(ra, rb); if (r && r.length) { pts.push(...offroad(from, r[0], ex, false, blk), ...r.slice(1)); pts.push(...offroad(r[r.length - 1], to, ex, false, blk)); return pts; } }
   pts.push(...offroad(from, to, ex, false, blk)); return pts; }
@@ -1631,14 +1632,30 @@ function parkInside(t) { const w = t.home, p = whWorld(w, (t.slot - 0.5) * 0.24,
 const pickupPoint = p => p.kind === 'woodcutter' ? wcWorld(p, (WC_BOX.x1 + 0.35), 0) : p.kind === 'farm' ? fmWorld(p, FM_HALF * FM_K + 0.45, 0) : mnWorld(p, 6 * MN_K, 9 * MN_K);
 // trucks serve pickups in the order they were asked for, so busy woodcutters cannot starve the mines and farms
 const truckReq = new Map();
-function sendTruck(p, kind) { if (!truckReq.has(p)) truckReq.set(p, missionClock);
+// pickup flag: the player may pin where trucks stop (near the building); otherwise the nearest clear spot is used
+const FLAG_R = 3.2;
+function pickTarget(p) { const f = p.pickFlag; return f && !truckBlocked(f.x, f.z, []) ? f : f ? null : approachPoint(p); }
+function obstructed(p) { truckReq.delete(p); p.obstructT = missionClock + 10; if (!p.obstructed) { p.obstructed = true;
+  if (p.team === 0 && window.onOutpostAlert) window.onOutpostAlert('PICKUP OBSTRUCTED', `Trucks cannot reach the ${p.kind === 'woodcutter' ? 'woodcutter camp' : p.kind}'s pickup. Move its pickup flag or clear the way.`, { x: p.x * S, z: p.z * S }); } }
+function setPickFlag(p, xw, zw) { const x = wm(xw / S), z = wm(zw / S); if (wdist2(x, z, p.x, p.z) > FLAG_R) return 'Too far from the building: place the flag close to it';
+  if (truckBlocked(x, z, [])) return 'A truck will not fit there'; p.pickFlag = { x, z }; p.obstructed = false; p.obstructT = 0; showFlag(p); return null; }
+const flagMat = [new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.5, roughness: 0.4 }), new THREE.MeshStandardMaterial({ color: 0xffb020, side: THREE.DoubleSide, emissive: 0x402800 })];
+function showFlag(p) { if (p.team !== 0) return; if (!p.flagObj) { const g = new THREE.Group(), pole = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 6), flagMat[0]); pole.position.y = 0.2; g.add(pole);
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.1), flagMat[1]); cloth.position.set(0.08, 0.34, 0); g.add(cloth); g.traverse(o => { if (o.isMesh) o.castShadow = true; }); battleRoot.add(g); p.flagObj = g; }
+  p.flagObj.visible = !!p.pickFlag && p.alive; }
+function updateFlags() { const c = camD(); for (const L of [camps, mines, farms]) for (const p of L) if (p.flagObj) { p.flagObj.visible = !!p.pickFlag && p.alive; if (p.pickFlag) p.flagObj.position.set(disp(p.pickFlag.x, c.x), Hd(p.pickFlag.x, p.pickFlag.z), disp(p.pickFlag.z, c.z)); p.flagObj.children[1].rotation.y = Math.sin(missionClock * 3) * 0.3; } }
+function producerAt2D(x, z) { const hit = buildingAt2D(0, x, z); if (hit && ['camp', 'mine', 'farm'].includes(hit.key)) return hit.b; for (const L of [camps, mines, farms]) for (const p of L) if (p.alive && p.team === 0 && wdist2(p.x, p.z, x, z) < 1.2) return p; return null; }
+function sendTruck(p, kind) { if (p.obstructT > missionClock) return false; if (!truckReq.has(p)) truckReq.set(p, missionClock);
   const free = trucks.filter(t => !t.dead && t.team === p.team && t.state === 'home' && t.home.alive); if (!free.length) return false;
   let first = null; for (const [q, at] of truckReq) { if (!q.alive || q.truck) { truckReq.delete(q); continue; } if (q.team === p.team && (!first || at < truckReq.get(first))) first = q; }
   if (first && first !== p) return false; truckReq.delete(p);
   const t = free.sort((a, b) => wdist2(a.x, a.z, p.x, p.z) - wdist2(b.x, b.z, p.x, p.z))[0], w = t.home;
+  const dest = pickTarget(p); if (!dest) { obstructed(p); return false; }
+  const from = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6); offroadFail = false; let route = planRoute(from, dest, [w], truckBlocked);
+  if (offroadFail) { offroadFail = false; route = planRoute(from, dest, [w]); if (offroadFail) { obstructed(p); return false; } }   // tight squeeze: centre-line clearance only; no way at all: obstructed p.obstructed = false;
   t.job = { p, kind }; t.trailer.visible = false; t.trailer = kind === 'wood' ? t.flat : t.box; t.trailer.visible = true;
   const bay = whWorld(w, 0, WH_D / 2 + 0.9), out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6);
-  t.path = [bay, out, ...planRoute(out, approachPoint(p), [w], truckBlocked).slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
+  t.path = [bay, out, ...route.slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
 function truckHome(t) { const w = t.home, out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6), bay = whWorld(w, 0, WH_D / 2 + 0.9), inside = whWorld(w, 0, -WH_D / 2 + 0.3);
   t.path = [...planRoute({ x: t.x, z: t.z }, out, [w], truckBlocked), bay, inside]; t.pi = 0; t.state = 'back'; }
 function updateTrucks(dt) { const c = camD();
@@ -3628,7 +3645,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateCitizens(dt); updateWaterTowers(); updateBubbles();
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateFlags(); updateCitizens(dt); updateWaterTowers(); updateBubbles();
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3681,6 +3698,7 @@ const Battle = {
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
   setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
   waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT, citizen, get focusPed() { return focusPed; }, set focusPed(v) { focusPed = v; },
+  producerAt2D: (xw, zw) => producerAt2D(wm(xw / S), wm(zw / S)), setPickFlag, clearPickFlag: p => { p.pickFlag = null; p.obstructed = false; p.obstructT = 0; showFlag(p); }, FLAG_R,
   POWER, POWER_USE, PLANT_CAP, PLANT_UP, upgradePlant, plantAt2D: (xw, zw) => plantAt2D(wm(xw / S), wm(zw / S)),
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
