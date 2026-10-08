@@ -603,7 +603,7 @@ function detach(id, v, spin = 8) {
   debris.push({ ch, grp, i: ch.i, p: _P.clone(), q: _Q.clone(), s: _S.clone(), v: v.clone(), w: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(spin * rand(0.3, 1)), sleep: 0, age: 0 });
   if (debris.length > 2500) debris.shift();
 }
-function propDestroyed(p) { if (!p.alive) return; p.alive = false; p.town.destroyed++;
+function propDestroyed(p) { if (!p.alive) return; p.alive = false; p.town.destroyed++; if (p.kind === 'house') p.town.warHeat = Math.min(6, (p.town.warHeat || 0) + 0.6);
   const c = new THREE.Vector3(p.x, p.y0 + p.h * 0.3, p.z);
   if (p.kind === 'house' || p.kind === 'tower') { FX.dust(c, 26, { size: [0.15, 0.7], life: [1.6, 3.2], vel: 0.55, up: 0.2, a: 0.55 }); FX.smoke(c, 8, { size: [0.2, 0.9], col: [0.5, 0.46, 0.42], a: 0.5 }); addShake(0.28, c); if (p.fire) fires.push({ x: p.x, z: p.z, t: rand(6, 11) }); }
   if (p.kind === 'car') { FX.explosion(new THREE.Vector3(p.x, p.y0 + 0.03, p.z), 0.8); fires.push({ x: p.x, z: p.z, t: rand(5, 9) }); scorchMarks.add(p.x, p.z, 0, 0.35, 0.35); impact(new THREE.Vector3(p.x, p.y0 + 0.03, p.z), 0.22, null, 1.4, 'blast'); }
@@ -629,7 +629,7 @@ function checkIntegrity(p) {
 }
 // damage everything within radius of a point (pt in demo units, any wrapped copy)
 function impact(pt, radius, dir, power, kind = 'hit') {
-  carImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); soldierImpact(pt, radius, power, kind); hangarImpact(pt, radius, power, kind); tankImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
+  carImpact(pt, radius, power, kind); waterImpact(pt, radius, power, kind); citizensImpact(pt, radius, power, kind); outpostImpact(pt, radius, power, kind); airbaseImpact(pt, radius, power, kind); pumpImpact(pt, radius, power, kind); campImpact(pt, radius, power, kind); mineImpact(pt, radius, power, kind); farmImpact(pt, radius, power, kind); warehouseImpact(pt, radius, power, kind); soldierImpact(pt, radius, power, kind); hangarImpact(pt, radius, power, kind); tankImpact(pt, radius, power, kind); bridgeImpact(pt, radius, power, kind);
   const seen = new Set(); let any = false;
   for (let gx = pt.x - radius - GRID; gx <= pt.x + radius + GRID; gx += GRID) for (let gz = pt.z - radius - GRID; gz <= pt.z + radius + GRID; gz += GRID) for (const p of propsNear(gx, gz)) {
     if (seen.has(p) || !p.alive) continue; seen.add(p);
@@ -650,7 +650,7 @@ function impact(pt, radius, dir, power, kind = 'hit') {
 function pointInProp(p, pt) { if (pt.y > p.h + 0.01 || pt.y < p.y0 - 0.05) return false; const dx = wd(pt.x - p.x), dz = wd(pt.z - p.z);
   if (p.hw) { const c = Math.cos(-p.rotY), s = Math.sin(-p.rotY); const lx = dx * c - dz * s, lz = dx * s + dz * c; return Math.abs(lx) < p.hw && Math.abs(lz) < p.hd; }
   return Math.hypot(dx, dz) < p.r; }
-function propHit(pos) { if (outpostAt(pos) || airbaseAt(pos) || pumpAt(pos) || campAt(pos) || mineAt(pos) || warehouseAt(pos) || hangarAt(pos)) return true; for (const p of propsNear(pos.x, pos.z)) if (p.alive && pointInProp(p, pos)) return true; return false; }
+function propHit(pos) { if (waterAt(pos) || outpostAt(pos) || airbaseAt(pos) || pumpAt(pos) || campAt(pos) || mineAt(pos) || warehouseAt(pos) || hangarAt(pos)) return true; for (const p of propsNear(pos.x, pos.z)) if (p.alive && pointInProp(p, pos)) return true; return false; }
 const _corner = new THREE.Vector3();
 function updateDebris(dt) {
   for (const t of towns) for (const k in t.G) t.G[k].touched = false;
@@ -1108,7 +1108,7 @@ function destroyAirbase(b) { b.alive = false; b.queue = 0;
   if (b.team === 0 && window.onOutpostAlert) window.onOutpostAlert('AIR BASE DESTROYED', 'Its gunships have lost their home pads.', { x: b.x * S, z: b.z * S }); }
 // ground already levelled for a standing building is locked: later levelling (and its blend) never moves it
 function groundLocked(xw, zw, self) { const x = xw / S, z = wm(zw / S), xx = wm(x), m = 0.3;   // ~one terrain cell (demo units), so the pad's edge cells stay put; fixed, not tied to the map size
-  for (const o of outposts) if (o !== self && o.alive && o.pad) { const dx = wd(xx - o.x), dz = wd(z - o.z), c = Math.cos(o.rot || 0), s = Math.sin(o.rot || 0); if (Math.abs(dx * c - dz * s) < o.pad + m && Math.abs(dx * s + dz * c) < o.pad + m) return true; }
+  for (const o of [...outposts, ...waterTowers]) if (o !== self && o.alive && o.pad) { const dx = wd(xx - o.x), dz = wd(z - o.z), c = Math.cos(o.rot || 0), s = Math.sin(o.rot || 0); if (Math.abs(dx * c - dz * s) < o.pad + m && Math.abs(dx * s + dz * c) < o.pad + m) return true; }
   for (const b of airbases) if (b !== self && b.alive && wdist2(b.x, b.z, xx, z) < 4.5) { const { lx, lz } = abLocal(b, xx, z); const mm = 1 + m / AB_K; if (lx > AB_EXT[0] - mm && lx < AB_EXT[1] + mm && lz > AB_EXT[2] - mm && lz < AB_EXT[3] + mm) return true; }
   for (const p of pumpjacks) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 2) { if (inPumpLot(p, xx, z, 0.15 + m)) return true; }
   for (const p of camps) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 2.2) { if (inCampLot(p, xx, z, 0.15 + m)) return true; }
@@ -1589,6 +1589,7 @@ function roadRoute(a, b) { const { chains, at } = ROAD_NET, ca = chains[a.c], cb
 // is this ground taken by a building (other than the exempt ones)? trucks drive around these
 function lotBlocked(x, z, ex) { const m = 0.12;
   for (const o of outposts) if (o.alive && !ex.includes(o) && wdist2(o.x, o.z, x, z) < OUTPOST_W * 0.6 + m) return true;
+  for (const o of waterTowers) if (o.alive && !ex.includes(o) && wdist2(o.x, o.z, x, z) < WT_W * 0.6 + m) return true;
   for (const a of airbases) if (a.alive && !ex.includes(a) && wdist2(a.x, a.z, x, z) < 4.5) { const { lx, lz } = abLocal(a, x, z); if (lx > AB_EXT[0] * 1 - 1 && lx < AB_EXT[1] + 1 && lz > AB_EXT[2] - 1 && lz < AB_EXT[3] + 1) return true; }
   for (const q of pumpjacks) if (q.alive && !ex.includes(q) && wdist2(q.x, q.z, x, z) < 2 && inPumpLot(q, x, z, m)) return true;
   for (const q of camps) if (q.alive && !ex.includes(q) && wdist2(q.x, q.z, x, z) < 2.2 && inCampLot(q, x, z, m)) return true;
@@ -2045,22 +2046,29 @@ function spawnPeds(count) {
       peds.push({ im, i, c, s: rand(3, chains[c].len - 3), dir: chance(.5) ? 1 : -1, side: chance(.5) ? 1 : -1, v: 0, mode: 'walk', t: rand(2, 12), ph: rand(0, 6.28), yaw: 0, spd: rand(0.95, 1.25), lat: rand(-0.3, 0.3) }); } }); }
 const _pm = new THREE.Matrix4(), _pq = new THREE.Quaternion(), _pv = new THREE.Vector3(), _ps = new THREE.Vector3(1, 1, 1), _up = new THREE.Vector3(0, 1, 0);
 function updatePeds(dt) {
-  if (!peds.length) return; PED_UNIFORM.value += dt; const { chains, at } = ROAD_NET, SW = ROAD_HW - 0.55;
-  for (const p of peds) { const c = chains[p.c];
+  if (!peds.length) return; PED_UNIFORM.value += dt; const { chains, at } = ROAD_NET, SW = ROAD_HW - 0.55, hr = TOD.t * 24;
+  for (const p of peds) { if (p.ti === undefined) assignCommute(p); const c = chains[p.c], tn = towns[p.ti], popK = tn && tn.pop0 ? tn.pop / tn.pop0 : 1;
     // danger: robots or fire close by -> run away along the street
     let fear = null; for (const r of robots) { if (r.state === 'ko') continue; const q0 = roadSample(c, p.s), d = Math.hypot(wd(r.pos.x * S - q0.x), wd(r.pos.z * S - q0.z)); if (d < 55) { fear = { d, dot: (wd(r.pos.x * S - q0.x) * q0.tx + wd(r.pos.z * S - q0.z) * q0.tz) }; break; } }
     p.fleeT = (p.fleeT || 0) - dt;
     if (fear) { if (p.mode !== 'run' || (p.fleeT <= 0 && fear.dot * p.dir > 0 && fear.d < 30)) { p.dir = fear.dot > 0 ? -1 : 1; p.fleeT = rand(4, 6); } p.mode = 'run'; p.t = rand(3, 6); }   // pick a way to flee, then commit to it
-    p.t -= dt; if (p.t <= 0) { if (p.mode === 'idle') { p.mode = 'walk'; p.t = rand(6, 20); if (chance(.3)) p.dir *= -1; } else { p.mode = chance(.35) ? 'idle' : 'walk'; p.t = p.mode === 'idle' ? rand(2, 7) : rand(6, 18); } }
+    const goal = fear ? null : pedGoal(p, hr);
+    if (goal) { if (p.c === goal.c && Math.abs(p.s - goal.s) < 2) { p.inside = true; p.trip = 0; p.v = 0; p.mode = 'idle'; p.t = 5; }   // home / at work: indoors
+      else { p.inside = false; p.trip = (p.trip || 0) + dt; if (p.trip > (p.tmax || (p.tmax = rand(10, 28)))) { p.c = goal.c; p.s = goal.s; p.trip = 0; p.tmax = 0; }   // a short walk on screen, then indoors (a whole commute would outlast the 3-minute day)
+        if (p.c === goal.c) p.dir = goal.s > p.s ? 1 : -1; else if (p.trip < dt * 1.5) { const cc = chains[p.c], da = Math.hypot(wd((cc.x[0] - goal.x) / S), wd((cc.z[0] - goal.z) / S)), db = Math.hypot(wd((cc.x[cc.n] - goal.x) / S), wd((cc.z[cc.n] - goal.z) / S)); p.dir = db < da ? 1 : -1; }
+        if (p.mode !== 'run') { p.mode = 'walk'; p.t = 5; } } }
+    else { p.inside = false; p.trip = 0; }
+    if (!p.inside) { p.t -= dt; if (p.t <= 0) { if (p.mode === 'idle') { p.mode = 'walk'; p.t = rand(6, 20); if (chance(.3)) p.dir *= -1; } else { p.mode = chance(.35) ? 'idle' : 'walk'; p.t = p.mode === 'idle' ? rand(2, 7) : rand(6, 18); } } }
     const want = p.mode === 'run' ? p.spd * 2.1 : p.mode === 'walk' ? p.spd : 0; p.v += (want - p.v) * Math.min(1, dt * 4);
     p.s += p.dir * p.v * dt;
     if (p.s < 0.5 || p.s > c.len - 0.5) { const node = p.s > c.len - 0.5 ? c.b : c.a, opts = (at[node] || []).filter(o => o.i !== p.c && nodes_town_ok(o.i));
-      if (opts.length && (p.mode === 'run' || chance(.8))) { const o = opts[Math.floor(Math.random() * opts.length)]; p.c = o.i; p.dir = o.start ? 1 : -1; p.s = o.start ? 0.6 : chains[o.i].len - 0.6; }
+      if (opts.length && (p.mode === 'run' || goal || chance(.8))) { const o = goal ? stepToward(p, opts, goal) : opts[Math.floor(Math.random() * opts.length)]; p.c = o.i; p.dir = o.start ? 1 : -1; p.s = o.start ? 0.6 : chains[o.i].len - 0.6; }
       else { p.dir *= -1; p.s = clamp(p.s, 0.6, c.len - 0.6); p.fleeT = rand(3, 5); } }   // dead end: turn round and keep going that way
     const q = roadSample(chains[p.c], p.s), hx = q.tx * p.dir, hz = q.tz * p.dir, off = p.side * (SW + p.lat);
     const x = q.x - q.tz * off, z = q.z + q.tx * off, yaw = Math.atan2(hx, hz); let dy = yaw - p.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); p.yaw += dy * Math.min(1, dt * 6);
-    const dxw = x + SIZE * Math.round((cam.x - x) / SIZE), dzw = z + SIZE * Math.round((cam.z - z) / SIZE), far = Math.hypot(dxw - cam.x, dzw - cam.z) > 700;
-    _pv.set(dxw, heightAt(x, z) + 0.35, dzw); _pq.setFromAxisAngle(_up, p.yaw); _ps.setScalar(far ? 0 : 1); _pm.compose(_pv, _pq, _ps); p.im.setMatrixAt(p.i, _pm);
+    const dxw = x + SIZE * Math.round((cam.x - x) / SIZE), dzw = z + SIZE * Math.round((cam.z - z) / SIZE), dd = Math.hypot(dxw - cam.x, dzw - cam.z), far = dd > 700;
+    p.shown = !far && !p.inside && p.q < popK; p.wd = dd; p.wx = dxw; p.wy = heightAt(x, z); p.wz = dzw;
+    _pv.set(dxw, p.wy + 0.35, dzw); _pq.setFromAxisAngle(_up, p.yaw); _ps.setScalar(p.shown ? 1 : 0); _pm.compose(_pv, _pq, _ps); p.im.setMatrixAt(p.i, _pm);
     const k = Math.min(1, p.v / p.spd), run = p.mode === 'run', stride = (run ? 1.75 : 1.2 + 0.25 * p.lat) * Math.max(0.45, Math.min(1, k)), cad = 6.2832 * p.v / stride, sw = run ? 1.0 : 0.55 * k;
     p.gp = (p.gp || p.ph) + cad * dt; const a = p.im.geometry.attributes.aAnim; a.setXYZW(p.i, p.gp, p.ph, sw, 1.35); }   // phase accumulates, so speed changes never jump the stride
   for (const im of pedKinds) { im.instanceMatrix.needsUpdate = true; im.geometry.attributes.aAnim.needsUpdate = true; }
@@ -2155,7 +2163,7 @@ const ATTACKS = {
   Melee_Punch_Combo: { hits: [[0.06, 0.16, 40, 'a jab', 'fistL'], [0.36, 0.48, 62, 'a cross', 'fistR']] },
   Melee_Boost_Kick: { hits: [[0.22, 0.36, 75, 'a boost kick', 'footR', 1]] },
 };
-function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'hangar' ? 'hangar' : f.kind === 'tank' ? 'tank' : f.kind === 'soldier' ? 'soldier' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
+function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'hangar' ? 'hangar' : f.kind === 'tank' ? 'tank' : f.kind === 'water' ? 'water tower' : f.kind === 'soldier' ? 'soldier' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
 function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'heli') return heliHit(def, amount, att, at);
   if (def.kind === 'airbase') return airbaseHit(def, amount);
@@ -2166,6 +2174,7 @@ function damage(att, def, amount, label, heavy, dir, at) {
   if (def.kind === 'warehouse') return warehouseHit(def, amount);
   if (def.kind === 'hangar') return hangarHit(def, amount);
   if (def.kind === 'tank') return tankHit(def, amount, att);
+  if (def.kind === 'water') return waterHit(def, amount);
   if (att && att.kind === 'robot' && att.lvl) amount *= 1 + 0.15 * (att.lvl.weapons || 0);   // researched weapons
   if (def.kind === 'soldier') return soldierHit(def, amount, att);
   if (def.state === 'ko') return;
@@ -3222,7 +3231,7 @@ function updateDepots(dt) { for (const w of warehouses) { if (!w.alive || !w.don
 // in credits plus the gathered resources (oil, wood, ore, food). Both sides pay the same prices; mechs are the costliest thing in the game.
 const CR = [6000, 6000], CR_RATE = 540;
 const PRICE = {
-  camp: { cr: 500 }, farm: { cr: 400, wood: 20 }, pump: { cr: 800, wood: 60 }, mine: { cr: 1200, wood: 120 },
+  water: { cr: 600, ore: 60 }, camp: { cr: 500 }, farm: { cr: 400, wood: 20 }, pump: { cr: 800, wood: 60 }, mine: { cr: 1200, wood: 120 },
   wh: { cr: 1000, wood: 150, ore: 50 }, outpost: { cr: 600, wood: 80, ore: 60 },
   airbase: { cr: 1500, wood: 250, ore: 300, oil: 150 }, hangar: { cr: 2500, wood: 300, ore: 500, oil: 200 },
   heli: { cr: 900, ore: 200, oil: 250, food: 40 }, tank: { cr: 1800, ore: 350, oil: 200 },
@@ -3275,17 +3284,17 @@ function applyFog() { if (!FOG_ON) return;
   for (const k of trucks) if (k.team === 1 && !k.dead) { const v = fogVisible(k.x, k.z); k.obj.visible = v; if (!v) { if (k.trailer.visible) { k.trailer.visible = false; k.fogTr = k.trailer; } } else if (k.fogTr) { if (k.fogTr === k.trailer) k.trailer.visible = true; k.fogTr = null; } }
   for (const t of towns) if (!t.found) t.root.visible = false;
   for (const k of tanks) if (k.team === 1) { const v = fogVisible(k.pos.x, k.pos.z); k.root.visible = v; if (!v && k.bar) k.bar.g.visible = false; }
-  for (const L of [outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
+  for (const L of [waterTowers, outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
 const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
 // ------------------------------------------------------------------ demolition
 // Your own buildings can be torn down: they drop in a cloud of dust and sink away, the ground is freed for building again and
 // half the price comes back (all of it if construction had not finished). Anything that depended on them is let go first.
-const BLISTS = () => [['outpost', outposts], ['airbase', airbases], ['pump', pumpjacks], ['camp', camps], ['mine', mines], ['farm', farms], ['wh', warehouses], ['hangar', hangars]];
+const BLISTS = () => [['water', waterTowers], ['outpost', outposts], ['airbase', airbases], ['pump', pumpjacks], ['camp', camps], ['mine', mines], ['farm', farms], ['wh', warehouses], ['hangar', hangars]];
 const demolishing = [];
 function buildingAt2D(team, x, z) { let best = null, bd = 1e9;
   for (const [key, L] of BLISTS()) for (const b of L) { if (!b.alive || b.team !== team) continue; const d = wdist2(b.x, b.z, x, z);
     const inside = key === 'wh' ? inWhLot(b, x, z, 0) : key === 'hangar' ? inHangarLot(b, x, z) : key === 'farm' ? inFarmLot(b, x, z, 0) : key === 'airbase' ? !!airbaseAt(new THREE.Vector3(x, -1e3, z)) && d < 4
-      : d < ({ outpost: OUTPOST_W * 0.7, pump: 0.9, camp: 1.1, mine: 1.4 })[key];
+      : d < ({ water: WT_W * 0.7, outpost: OUTPOST_W * 0.7, pump: 0.9, camp: 1.1, mine: 1.4 })[key];
     if (inside && d < bd) { bd = d; best = { b, key }; } }
   return best; }
 function demolish(b, key) { if (!b || !b.alive) return null; const done = b.done !== false, back = {};
@@ -3306,7 +3315,7 @@ function updateDemolish(dt) { for (let i = demolishing.length - 1; i >= 0; i--) 
 // ------------------------------------------------------------------ electric grid
 // Each HQ's power plant supplies a limited number of megawatts (upgradeable); every structure draws from it, homes too.
 // When demand outruns supply the whole grid browns out: buildings work at supply / demand speed (never below 15%).
-const POWER_USE = { outpost: 6, airbase: 30, hangar: 40, pump: 8, camp: 4, mine: 20, farm: 3, wh: 10, home: 0.5 };
+const POWER_USE = { water: 5, outpost: 6, airbase: 30, hangar: 40, pump: 8, camp: 4, mine: 20, farm: 3, wh: 10, home: 0.5 };
 const PLANT_CAP = [150, 260, 400, 600], PLANT_UP = [{ cr: 1500, ore: 200 }, { cr: 2500, ore: 400, oil: 200 }, { cr: 4000, ore: 700, oil: 400 }];
 const POWER = [0, 1].map(() => ({ level: 0, supply: PLANT_CAP[0], demand: 0, eff: 1, homes: 0, users: {} }));
 const pe = team => POWER[team] ? POWER[team].eff : 1;
@@ -3321,6 +3330,123 @@ function updatePower(dt) { powerT -= dt; homeCountT -= dt; if (powerT > 0) retur
 function upgradePlant(team) { const g = POWER[team]; if (g.level >= PLANT_CAP.length - 1) return 'Power plant fully upgraded'; const c = PLANT_UP[g.level], poor = canAfford(team, c); if (poor) return poor;
   spend(team, c); g.level++; powerT = 0; log(team, `<b>${TEAM_NAME[team]}</b> power plant upgraded: ${PLANT_CAP[g.level]} MW`); return null; }
 function plantAt2D(x, z) { for (const t of towns) { const pp = t.plantProp; if (pp && pp.alive && Math.abs(wd(x - pp.x)) < pp.hw && Math.abs(wd(z - pp.z)) < pp.hd) return t; } return null; }
+// ------------------------------------------------------------------ water towers
+// a placeholder tower (steel legs, a tank on top, ~25 m tall) built from simple shapes until a real model arrives
+const WT_W = 1.1, WT_SUPPLY = 150, waterTowers = [];
+function makeWaterTowerModel(ghost) { const g = new THREE.Group(), M = c => ghost ? GHOST_MAT : new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.35 });
+  const steel = M(0x8d969c), tankM = M(0xdfe4e7), roofM = M(0x5f7f96), H = 1.45, L = 0.3;
+  for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, H, 6), steel); leg.position.set(a * L, H / 2, b * L); g.add(leg); }
+  for (const y of [0.4, 0.9, 1.3]) for (let k = 0; k < 4; k++) { const br = new THREE.Mesh(new THREE.BoxGeometry(2 * L, 0.025, 0.025), steel), a = k * Math.PI / 2; br.position.set(Math.sin(a) * L, y, Math.cos(a) * L); br.rotation.y = a; g.add(br); }
+  const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, H, 8), steel); pipe.position.y = H / 2; g.add(pipe);
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.12, 0.2, 24), tankM); bowl.position.y = H - 0.1; g.add(bowl);
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.5, 24), tankM); tank.position.y = H + 0.25; g.add(tank);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.505, 0.505, 0.06, 24), roofM); band.position.y = H + 0.3; g.add(band);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(0.53, 0.25, 24), roofM); roof.position.y = H + 0.62; g.add(roof);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = !ghost; o.receiveShadow = !ghost; } });
+  const holder = new THREE.Group(); holder.add(g); return holder; }
+function canPlaceWater(team, xw, zw) { const x = wm(xw / S), z = wm(zw / S), e = WT_W / 2;
+  if (!inTerritory(team, x, z)) return 'Outside your territory';
+  if (Hd(x, z) < 2 / S * 1.2 || heightAt(xw, zw) < 2.5) return 'Cannot build on water';
+  let lo = 1e9, hi = -1e9; for (const [a, b] of [[-e, -e], [e, -e], [e, e], [-e, e], [0, 0]]) { const h = Hd(x + a, z + b); lo = Math.min(lo, h); hi = Math.max(hi, h); } if (hi - lo > 0.6) return 'Ground too steep';
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]]) if (roadAt((x + dx * e) * S, (z + dz * e) * S) > 0.5) return 'Blocked by a road';
+  for (const [a, b] of [[0, 0], [e, 0], [-e, 0], [0, e], [0, -e]]) for (const p of propsNear(x + a, z + b)) if (p.alive && wdist2(p.x, p.z, x, z) < p.r + e * 0.9) return 'Blocked by a building';
+  for (const w of waterTowers) if (w.alive && wdist2(w.x, w.z, x, z) < WT_W * 1.4) return 'Too close to another water tower';
+  if (lotBlocked(x, z, [])) return 'Blocked by a building';
+  return null; }
+function buildWaterTower(team, xw, zw, rot = 0, instant) { const x = wm(xw / S), z = wm(zw / S), e = WT_W / 2;
+  let lo = 0; for (const [a, b] of [[-e, -e], [e, -e], [e, e], [-e, e], [0, 0]]) lo += Hd(x + a, z + b) / 5;
+  const obj = makeWaterTowerModel(false); battleRoot.add(obj); obj.rotation.y = rot;
+  const o = { kind: 'water', team, x, z, y: lo, obj, rot, pad: e * 1.05, hp: 450, maxHp: 450, alive: true }; waterTowers.push(o);
+  if (instant) { o.done = true; return o; }
+  startSite(o, [-e, e, -e, e], 2.1, 15, () => { if (team === 0) log(0, '<b>Water tower</b> online: +' + WT_SUPPLY + ' citizens supplied'); });
+  if (window.clearTreesIn) clearTreesIn((xw2, zw2) => wdist2(o.x, o.z, xw2 / S, zw2 / S) < WT_W * 0.8);
+  FX.dust(new THREE.Vector3(x, lo, z), 20, { size: [0.1, 0.5], life: [0.8, 1.6], vel: 0.5, up: 0.15, a: 0.5 }); return o; }
+function waterAt(pos) { for (const o of waterTowers) if (o.alive && wdist2(o.x, o.z, pos.x, pos.z) < WT_W * 0.5 && pos.y < o.y + 2.1) return o; return null; }
+function waterImpact(pt, radius, power, kind) { for (const o of waterTowers) { if (!o.alive || wdist2(o.x, o.z, pt.x, pt.z) > radius + WT_W * 0.5) continue;
+  o.hp -= kind === 'bullet' ? 4 : kind === 'step' ? 0 : 60 * power; if (o.hp <= 0) destroyWater(o); } }
+function waterHit(o, amount) { o.hp -= amount; if (o.hp <= 0 && o.alive) destroyWater(o); }
+function destroyWater(o) { o.alive = false; const p = new THREE.Vector3(o.x, o.y + 1.5, o.z); FX.explosion(p, 1.0); FX.dust(new THREE.Vector3(o.x, o.y, o.z), 40, { size: [0.2, 0.9], life: [1.5, 3], vel: 0.8, up: 0.3, a: 0.5 });
+  o.obj.traverse(m => { if (m.isMesh) { m.material = m.material.clone(); m.material.color.multiplyScalar(0.3); } }); o.obj.scale.y *= 0.25; scorchMarks.add(o.x, o.z, 0, 1.0, 1.0);
+  const t = towns.find(t => wdist2(t.x, t.z, o.x, o.z) < TOWN * 2); if (t) t.warHeat = (t.warHeat || 0) + 0.8;
+  if (o.team === 0) log(0, '<b>Water tower destroyed</b>: the town is short of water'); }
+function updateWaterTowers() { const c = camD(); for (const o of waterTowers) o.obj.position.set(disp(o.x, c.x), o.y, disp(o.z, c.z)); }
+
+// ------------------------------------------------------------------ citizens
+// Every town has people. They live in its houses, work at the HQ, the power plant and the team's buildings, eat the team's
+// food, drink from the mains and water towers, use the grid, and hate war. Their mood (0..100) is a weighted mix of those
+// needs; unhappy people move away, happy towns with spare homes draw newcomers. Without homes a town is homeless and small.
+const NEED_W = { food: 0.2, work: 0.15, home: 0.2, water: 0.15, power: 0.1, peace: 0.2 }, NEEDS = Object.keys(NEED_W);
+const JOBS = { outpost: 30, airbase: 120, hangar: 140, pump: 40, camp: 60, mine: 120, farm: 60, wh: 100, water: 20 };
+const EAT = 0.1;   // food per citizen per day
+const houseCap = p => clamp(Math.round(Math.PI * (p.r * S * 0.75) ** 2 / 25), 2, 6) * clamp(Math.round(p.h * S / 3.2), 1, 3);
+let citT = 0, migT = 0, foodAcc = [0, 0];
+function townTeam(t) { const i = towns.indexOf(t); return i < 2 ? i : -1; }
+function updateCitizens(dt) {
+  for (const t of towns) { t.warHeat = (t.warHeat || 0) * Math.exp(-dt / 45); }
+  // eating
+  for (const team of [0, 1]) { const t = towns[team]; if (!t || t.pop === undefined) continue; foodAcc[team] += t.pop * EAT * dt / TOD.DAY;
+    if (foodAcc[team] >= 1) { const n = Math.floor(foodAcc[team]); foodAcc[team] -= n; FOOD[team] = Math.max(0, FOOD[team] - n); } }
+  citT -= dt; if (citT <= 0) { citT = 1;
+    for (const t of towns) { const team = townTeam(t), houses = props.filter(p => p.kind === 'house' && p.alive && p.town === t);
+      t.cap = houses.reduce((a, p) => a + (p.cap || (p.cap = houseCap(p))), 0); t.comfort = houses.length ? houses.reduce((a, p) => a + (p.comfort || 0.75), 0) / houses.length : 0;
+      if (t.pop === undefined) { t.pop = Math.round(t.cap * 0.85); t.pop0 = Math.max(1, t.pop); t.mains = Math.round(t.pop0 * 0.6); t.happy = 60; }
+      const pop = Math.max(1, t.pop), N = t.need || (t.need = {});
+      if (team >= 0) { let jobs = 150 + t.pop0 * 0.45; for (const [key, L] of BLISTS()) for (const b of L) if (b.alive && b.team === team && b.done !== false) jobs += JOBS[key] || 0; t.jobs = Math.round(jobs); }
+      else t.jobs = Math.round(t.pop0 * 0.85);
+      t.homeless = Math.max(0, t.pop - t.cap);
+      const towers = waterTowers.filter(w => w.alive && w.done !== false && (team >= 0 ? w.team === team && wdist2(w.x, w.z, t.x, t.z) < TERR_HQ_R * 1.5 : wdist2(w.x, w.z, t.x, t.z) < TOWN * 2)).length;
+      const pw = team >= 0 ? ((!t.plantProp || t.plantProp.alive) && !t.hqDown ? pe(team) : 0) : 0.75;
+      t.water = Math.round((t.mains + towers * WT_SUPPLY) * (team >= 0 ? 0.4 + 0.6 * pw : 1));
+      N.food = team >= 0 ? (FOOD[team] <= 0 ? 0 : clamp(FOOD[team] / Math.max(1, t.pop * EAT), 0.35, 1)) : 0.8;
+      N.work = clamp(t.jobs / pop, 0, 1);
+      N.home = t.cap ? clamp(t.cap / pop, 0, 1) * (0.55 + 0.45 * t.comfort) : 0;
+      N.water = clamp(t.water / pop, 0, 1);
+      N.power = pw;
+      N.peace = clamp(1 - t.warHeat / 3, 0, 1);
+      const target = 100 * NEEDS.reduce((a, k) => a + NEED_W[k] * N[k], 0) - 30 * Math.max(0, 0.4 - Math.min(N.food, N.water, N.home + (t.cap ? 0.3 : 0))) / 0.4; t.happy += (target - t.happy) * Math.min(1, 1 / 6); } }
+  // migration, once an in-game hour
+  migT -= dt; if (migT <= 0) { migT = TOD.DAY / 24;
+    for (const t of towns) { if (t.pop === undefined) continue; const team = townTeam(t), was = t.pop; let leave = 0, come = 0;
+      if (t.happy < 45) leave += Math.ceil(t.pop * 0.03 * (45 - t.happy) / 45 + 0.5);
+      leave += Math.ceil(t.homeless * (t.happy < 45 ? 0.12 : 0.05));
+      if (t.happy > 60 && t.pop < t.cap) come = Math.ceil(Math.min(t.cap - t.pop, t.pop * 0.02 + 1) * (t.happy - 60) / 40 + 0.3);
+      t.pop = Math.max(0, t.pop - Math.min(t.pop, leave) + come);
+      if (team === 0 && t.pop < was && (was - t.pop) >= 3 && chance(0.5)) { const w = NEEDS.reduce((a, k) => t.need[k] < t.need[a] ? k : a, 'food');
+        log(0, `<b>${was - t.pop} citizens left</b> your town (${({ food: 'hunger', work: 'no work', home: t.homeless ? 'homelessness' : 'poor housing', water: 'no water', power: 'blackouts', peace: 'the war' })[w]})`); } } }
+}
+// war near a town scares its people
+function citizensImpact(pt, radius, power, kind) { if (kind === 'step') return; for (const t of towns) if (wdist2(t.x, t.z, pt.x, pt.z) < TOWN * 1.6) t.warHeat = Math.min(6, (t.warHeat || 0) + (kind === 'bullet' ? 0.01 : 0.25 * power)); }
+function townAt2D(x, z) { for (const t of towns) if (wdist2(t.x, t.z, x, z) < TOWN * 1.1) return t; return null; }
+// ---- commuting: each pedestrian has a home and a workplace in its town and walks between them on the clock
+const pedTownPts = [];
+function townPoints(ti) { if (pedTownPts[ti]) return pedTownPts[ti]; const { chains } = ROAD_NET, out = [];
+  chains.forEach((c, ci) => { if (!nodes_town_ok(ci) || ROAD_NET.nodes[c.a].town !== ti) return; for (let s = 2; s < c.len - 2; s += 6) { const q = roadSample(c, s); out.push({ c: ci, s, x: q.x, z: q.z }); } });
+  return pedTownPts[ti] = out; }
+function nearestTownPt(ti, xw, zw) { let best = null, bd = 1e9; for (const q of townPoints(ti)) { const d = Math.hypot(wd((q.x - xw) / S), wd((q.z - zw) / S)); if (d < bd) { bd = d; best = q; } } return best; }
+function assignCommute(p) { const { chains, nodes } = ROAD_NET, ti = nodes[chains[p.c].a].town, t = towns[ti]; p.ti = ti; p.q = Math.random(); if (!t) return;
+  const houses = props.filter(h => h.kind === 'house' && h.alive && h.town === t); p.house = houses.length ? houses[Math.floor(Math.random() * houses.length)] : null;
+  p.home = p.house ? (p.house.homePt || (p.house.homePt = nearestTownPt(ti, p.house.x * S, p.house.z * S))) : null;
+  const team = townTeam(t), spots = [t.hq, t.plantProp].filter(Boolean).map(w => ({ x: w.x, z: w.z }));
+  if (team >= 0) for (const [, L] of BLISTS()) for (const b of L) if (b.alive && b.team === team && wdist2(b.x, b.z, t.x, t.z) < TOWN * 1.2) spots.push({ x: b.x, z: b.z });
+  for (let k = 0; k < 3; k++) { const h = houses[Math.floor(Math.random() * houses.length)]; if (h) spots.push({ x: h.x, z: h.z }); }   // shops and offices in town
+  const w = spots[Math.floor(Math.random() * spots.length)]; p.work = w ? nearestTownPt(ti, w.x * S, w.z * S) : null;
+  p.leave = rand(6.3, 8.5); p.back = rand(16.4, 19); p.bed = rand(20.5, 23.5); p.jobless = Math.random() < 0.12; }
+// at a junction, take the street whose far end gets closest to the goal
+function stepToward(p, opts, goal) { const { chains } = ROAD_NET; let best = null, bd = 1e9;
+  for (const o of opts) { const c = chains[o.i], k = o.start ? c.n : 0, d = Math.hypot(wd((c.x[k] - goal.x) / S), wd((c.z[k] - goal.z) / S)) + (o.i === goal.c ? -1e3 : 0) + Math.random() * 0.3; if (d < bd) { bd = d; best = o; } } return best; }
+function pedGoal(p, h) { if (!p.home) return null; if (p.jobless) return h >= p.bed || h < p.leave + 1 ? p.home : null;
+  if (h < p.leave || h >= p.bed) return p.home; if (h < p.back) return p.work || p.home; return null; }   // after work: stroll around until bedtime
+// ---- opinions: thought bubbles over people (your icons), showing what is on their mind
+const MOOD_TEX = {}, bubbles = []; let bubbleT = 0;
+function moodTex(k) { return MOOD_TEX[k] || (MOOD_TEX[k] = new THREE.TextureLoader().load('assets/ui/mood/' + k + '.png')); }
+function updateBubbles(dt) { if (!peds.length) return;
+  if (!bubbles.length) for (let i = 0; i < 8; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, sizeAttenuation: false })); s.visible = false; s.renderOrder = 5; scene.add(s); bubbles.push({ s, p: null, t: 0 }); }
+  bubbleT -= dt; if (bubbleT <= 0) { bubbleT = rand(0.5, 1.2); const b = bubbles.find(b => !b.p), near = peds.filter(q => q.shown && q.wd < 450), p = near[Math.floor(Math.random() * near.length)];
+    if (b && p && !bubbles.some(o => o.p === p)) { const t = towns[p.ti]; if (t && t.need && (townTeam(t) === 0 || t.found || !FOG_ON)) {
+      const ks = NEEDS.slice().sort((a, c) => t.need[a] - t.need[c]), k = chance(0.65) ? ks[Math.floor(Math.random() * 2)] : ks[Math.floor(Math.random() * ks.length)], v = t.need[k];
+      b.s.material.map = moodTex(k + (v > 0.75 ? '_good' : v > 0.45 ? '_ok' : '_bad')); b.s.material.needsUpdate = true; b.p = p; b.t = 0; } } }
+  for (const b of bubbles) { if (!b.p) continue; b.t += dt; const p = b.p; if (b.t > 3.2 || !p.shown) { b.p = null; b.s.visible = false; continue; }
+    const a = Math.min(1, b.t * 4, (3.2 - b.t) * 3), sc = 0.055 * (0.6 + 0.4 * Math.min(1, b.t * 5)); b.s.visible = true; b.s.material.opacity = a; b.s.scale.set(sc, sc, 1); b.s.position.set(p.wx, p.wy + 2.6, p.wz); } }
 // ---- enemy AI helpers
 let aiEcoT = 20, aiSquadT = 120;
 const aiCount = (list, kind) => list.filter(p => p.alive && p.team === 1 && (!kind || p.kind === kind)).length;
@@ -3338,8 +3464,9 @@ function aiBuildNext() { const T = missionClock, P = towns[0], pl = q => -wdist2
     [mineProto && aiCount(mines) < (T > 300 ? 2 : 1) && !canAfford(1, PRICE.mine) && T > 80, () => aiTry(aiSpots(80).map(q => ({ ...q, rot: mineFacing(q.x, q.z) })), q => canPlaceMine(1, q.x * S, q.z * S, q.rot), q => buildMine(1, q.x * S, q.z * S, q.rot))],
     [WC_BOX && camps.filter(p => p.alive && p.team === 1 && !p.depleted).length < 2 && !canAfford(1, PRICE.camp) && T > 100, () => aiTry(aiSpots(50), q => canPlaceCamp(1, q.x * S, q.z * S, q.rot) || campTrees(q).length < 6, q => buildCamp(1, q.x * S, q.z * S, q.rot), q => campTrees(q).length)],
     [farmProto && aiCount(farms) < 3 && !canAfford(1, PRICE.farm) && T > 110, () => aiTry(aiSpots(40), q => canPlaceFarm(1, q.x * S, q.z * S, q.rot), q => buildFarm(1, q.x * S, q.z * S, q.rot))],
+    [aiCount(waterTowers) < 4 && towns[1].need && towns[1].need.water < 0.95 && !canAfford(1, PRICE.water) && T > 60, () => aiTry(aiSpots(40), q => canPlaceWater(1, q.x * S, q.z * S), q => buildWaterTower(1, q.x * S, q.z * S, q.rot))],
     [hangarProto && aiCount(hangars) < 1 && !canAfford(1, PRICE.hangar) && T > 200, () => aiTry(aiSpots(60), q => canPlaceHangar(1, q.x * S, q.z * S, q.rot), q => buildHangar(1, q.x * S, q.z * S, q.rot), q => -pl(q))] ];
-  const keys = ['outpost', 'pump', 'wh', 'mine', 'camp', 'farm', 'hangar'];
+  const keys = ['outpost', 'pump', 'wh', 'mine', 'camp', 'farm', 'water', 'hangar'];
   for (let i = 0; i < plan.length; i++) if (plan[i][0] && plan[i][1]()) { spend(1, PRICE[keys[i]]); return; } }
 // hangar: build mechs while the army is small, research, send badly damaged mechs out of the fight for repair and idle ones for upgrades
 function aiDepot() { const W1 = warehouses.filter(w => w.alive && w.done && w.team === 1); if (!W1.length || !tankProto) return;
@@ -3421,6 +3548,8 @@ const Battle = {
     const roles = [];   // mechs are precious: none to start, every one is built at a hangar
     for (const team of [0, 1]) roles.forEach((r, k) => spawnRobot(team, r, k));
     for (const team of [0, 1]) { const t = towns[team]; makeHeli(team, t.x + 1.2 * TS, t.z); }
+    for (const team of [0, 1]) { const t = towns[team]; for (let k = 0; k < 200; k++) { const a = rand(0, 6.28), r = rand(TOWN + 1.5, TOWN + 5), x = wm(t.x + Math.cos(a) * r), z = wm(t.z + Math.sin(a) * r);   // one water tower per HQ town
+      if (!canPlaceWater(team, x * S, z * S)) { buildWaterTower(team, x * S, z * S, rand(0, 6.28), true); break; } } }
     log(null, 'Destroy the <b>Cobalt</b> forces and their HQ tower. Build a mech hangar to field more mechs.');
     return { x: towns[0].x * S, z: (towns[0].z + 2) * S };
   },
@@ -3458,7 +3587,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateCitizens(dt); updateWaterTowers(); updateBubbles(dt);
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3510,6 +3639,7 @@ const Battle = {
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
   setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
+  waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT,
   POWER, POWER_USE, PLANT_CAP, PLANT_UP, upgradePlant, plantAt2D: (xw, zw) => plantAt2D(wm(xw / S), wm(zw / S)),
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,

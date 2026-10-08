@@ -207,7 +207,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   <div class="res"><img class="ico" src="assets/ui/wood.png" onerror="this.onerror=null;this.src='assets/ui/supply.png'" alt=""><div><div class="k">WOOD</div><div class="v" id="rWood">0<i></i></div></div></div>
   <div class="res"><img class="ico" src="assets/ui/ore.png" onerror="this.onerror=null;this.src='assets/ui/alloy.png'" alt=""><div><div class="k">ORE</div><div class="v" id="rOre">0<i></i></div></div></div>
   <div class="res"><img class="ico" src="assets/ui/food.png" onerror="this.onerror=null;this.src='assets/ui/supply.png'" alt=""><div><div class="k">FOOD</div><div class="v" id="rFood">0<i></i></div></div></div>
-  <div class="res"><img class="ico" src="assets/ui/supply.png" alt=""><div><div class="k">SUPPLY</div><div class="v" id="rSupply">0/60</div></div></div>
+  <div class="res"><img class="ico" src="assets/ui/supply.png" alt=""><div><div class="k">POP</div><div class="v" id="rSupply" title="Citizens / homes">0</div></div></div>
   <div id="mtime"><div class="k"><b id="todClock" style="color:#ffd27a;letter-spacing:.06em"></b></div><div class="v" id="mclock">00:00:00</div></div>
   <div id="tbright">
     <button class="tbtn" id="bPause"><img class="ico" src="assets/ui/pause.png" alt="">PAUSE</button>
@@ -264,7 +264,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <button class="cmd" data-c="deploy" title="Unload soldiers from the selected gunship"><img class="ico" src="assets/ui/deploy.png" alt="">DEPLOY</button>
     <button class="cmd" data-c="demolish" title="Demolish one of your buildings: half its price comes back"><img class="ico" src="assets/ui/exit.png" alt="">DEMOLISH</button>
   </div>
-  <div class="pn uihidden" id="builds"><button class="cmd" id="bOutpost" title="Radar outpost: extends territory near the border and detects enemies"><img class="ico" src="assets/ui/sight.png" alt="">OUTPOST<small id="opCost" style="font-size:9px;color:var(--gold)">600 CR</small></button><button class="cmd" id="bAirbase" title="Air base: lands, refuels and repairs 3 gunships; builds gunships and researches upgrades"><img class="ico" src="assets/ui/deploy.png" alt="">AIR BASE<small style="font-size:9px;color:var(--gold)">1500 CR</small></button><button class="cmd" id="bPump" title="Oil pump: generates oil while it stands"><img class="ico" src="assets/ui/power.png" alt="">OIL PUMP<small style="font-size:9px;color:var(--gold)">800 CR</small></button><button class="cmd" id="bCamp" title="Woodcutter camp: fells nearby trees for wood until none are left in reach"><img class="ico" src="assets/ui/repair.png" alt="">WOOD<small style="font-size:9px;color:var(--gold)">500 CR</small></button><button class="cmd" id="bMine" title="Mine: dug into a mountain side; ore rides the conveyor into the hopper and storage bins"><img class="ico" src="assets/ui/alloy.png" alt="">MINE<small style="font-size:9px;color:var(--gold)">1200 CR</small></button><button class="cmd" id="bFarm" title="Farm: one crop, grows over time and is harvested for food"><img class="ico" src="assets/ui/supply.png" alt="">FARM<small style="font-size:9px;color:var(--gold)">400 CR</small></button><button class="cmd" id="bWh" title="Warehouse: semi trucks deploy from here to collect lumber and ore"><img class="ico" src="assets/ui/deploy.png" alt="">DEPOT<small style="font-size:9px;color:var(--gold)">1000 CR</small></button><button class="cmd" id="bHangar" title="Mech hangar: builds, repairs and upgrades mechs one at a time; researches mech upgrades"><img class="ico" src="assets/ui/repair.png" alt="">HANGAR<small style="font-size:9px;color:var(--gold)">1800 CR</small></button><span id="buildHint" style="align-self:center;font-size:12px;color:var(--dim);margin-left:10px;max-width:240px"></span></div>
+  <div class="pn uihidden" id="builds"><button class="cmd" id="bWater" title="Water tower: supplies water for 150 more citizens"><img class="ico" src="assets/ui/mood/water_good.png" alt="">WATER<small style="font-size:9px;color:var(--gold)"></small></button><button class="cmd" id="bOutpost" title="Radar outpost: extends territory near the border and detects enemies"><img class="ico" src="assets/ui/sight.png" alt="">OUTPOST<small id="opCost" style="font-size:9px;color:var(--gold)">600 CR</small></button><button class="cmd" id="bAirbase" title="Air base: lands, refuels and repairs 3 gunships; builds gunships and researches upgrades"><img class="ico" src="assets/ui/deploy.png" alt="">AIR BASE<small style="font-size:9px;color:var(--gold)">1500 CR</small></button><button class="cmd" id="bPump" title="Oil pump: generates oil while it stands"><img class="ico" src="assets/ui/power.png" alt="">OIL PUMP<small style="font-size:9px;color:var(--gold)">800 CR</small></button><button class="cmd" id="bCamp" title="Woodcutter camp: fells nearby trees for wood until none are left in reach"><img class="ico" src="assets/ui/repair.png" alt="">WOOD<small style="font-size:9px;color:var(--gold)">500 CR</small></button><button class="cmd" id="bMine" title="Mine: dug into a mountain side; ore rides the conveyor into the hopper and storage bins"><img class="ico" src="assets/ui/alloy.png" alt="">MINE<small style="font-size:9px;color:var(--gold)">1200 CR</small></button><button class="cmd" id="bFarm" title="Farm: one crop, grows over time and is harvested for food"><img class="ico" src="assets/ui/supply.png" alt="">FARM<small style="font-size:9px;color:var(--gold)">400 CR</small></button><button class="cmd" id="bWh" title="Warehouse: semi trucks deploy from here to collect lumber and ore"><img class="ico" src="assets/ui/deploy.png" alt="">DEPOT<small style="font-size:9px;color:var(--gold)">1000 CR</small></button><button class="cmd" id="bHangar" title="Mech hangar: builds, repairs and upgrades mechs one at a time; researches mech upgrades"><img class="ico" src="assets/ui/repair.png" alt="">HANGAR<small style="font-size:9px;color:var(--gold)">1800 CR</small></button><span id="buildHint" style="align-self:center;font-size:12px;color:var(--dim);margin-left:10px;max-width:240px"></span></div>
   <div id="uSvc" class="uihidden" style="margin:0 12px 10px;padding:7px 9px;background:rgba(255,255,255,.04);border:1px solid var(--line2)">
     <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);letter-spacing:.08em"><span style="flex:1">MECH UPGRADES</span><span id="uLvl"></span></div>
     <div id="uSvcSt" style="font-size:12px;margin:4px 0 6px;color:var(--cyan)"></div>
@@ -287,6 +287,12 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <div id="pwState" style="font-size:12px"></div>
     <div id="pwUsers" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
     <button class="abtn" id="pwUp" style="display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer;text-align:left"><img class="ico" src="assets/ui/power.png" alt="" style="width:18px;height:18px"><span id="pwUpT" style="flex:1"></span><small id="pwUpC" style="color:var(--gold);font-size:11px"></small></button></div></div>
+<div id="tnpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:282px;font-size:13px"><div class="hd"><span id="tnName">Town</span><img class="ico" id="tnClose" src="assets/ui/exit.png" alt="Close"></div>
+  <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px">
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--dim)">MOOD</span><b id="tnMood"></b></div>
+    <div class="bar" style="height:8px;background:rgba(255,255,255,.08)"><i id="tnBar" style="display:block;height:100%"></i></div>
+    <div id="tnStats" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
+    <div id="tnNeeds" style="display:flex;flex-direction:column;gap:3px"></div></div></div>
 <div id="abpanel" class="ui pn uihidden"><div class="hd"><span>Air base</span><img class="ico" id="abClose" src="assets/ui/exit.png" alt="Close"></div>
   <div class="bd"><div class="barrow"><img class="ico" src="assets/ui/health.png" alt=""><div class="bar"><i id="abHpBar" style="background:var(--green)"></i></div><span class="n" id="abHp"></span></div>
     <h6>LANDING PADS</h6><div id="abPads"></div>
@@ -1979,7 +1985,7 @@ function selectRect(ax, ay, bx, by, keepIfEmpty) {
   for (const u of Battle.selectables()) { const p = toScreen(u, v3); if (!p) continue;
     if (click ? Math.hypot(p.x - x1, p.y - y1) < 24 : p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) picked.push(u); }
   if (click && picked.length > 1) picked.length = 1;
-  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); else { const pt = t && Battle.plantAt2D(t.x, t.z); if (pt && pt.idx === 0) openPW(); } } } }
+  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); else { const pt = t && Battle.plantAt2D(t.x, t.z); if (pt && pt.idx === 0) openPW(); else { const tn = t && Battle.townAt2D(t.x, t.z); if (tn && (tn.idx === 0 || tn.found || !Battle.fogOn)) openTN(tn); } } } } }
   if (keepIfEmpty && !picked.length) return; Battle.select(picked);
 }
 
@@ -2044,6 +2050,8 @@ const BUILDS = {
     ok: (x, z, r) => 'Left-click to build (' + costTxt(Battle.PRICE.camp) + '): ' + Battle.campTreeCount(x, z, r) + ' trees in reach', tip: 'Place next to a forest inside your territory. The ring shows its reach. Wheel / Q / E / R rotate, right-click cancels.' },
   pump: { btn: 'bPump', cost: () => Battle.PRICE.pump, ghost: () => Battle.pumpGhost(), err: () => Battle.pumpError, name: 'Oil pump',
     check: (x, z, r) => Battle.canPlacePump(0, x, z, r), build: (x, z, r) => Battle.buildPump(x, z, r), snap: (x, z) => Battle.oilSnap(x, z), tip: 'Place on an oil field inside your territory (fields show on the minimap). The pump lines up with the field; R flips it, right-click cancels.' },
+  water: { btn: 'bWater', cost: () => Battle.PRICE.water, ghost: () => Battle.waterGhost(), err: () => null, name: 'Water tower',
+    check: (x, z) => Battle.canPlaceWater(0, x, z), build: (x, z, r) => Battle.buildWaterTower(x, z, r), tip: 'Place inside your territory on flat ground. Each tower supplies water for 150 citizens. Right-click cancels.' },
   outpost: { btn: 'bOutpost', cost: () => Battle.PRICE.outpost, ghost: () => Battle.outpostGhost(), err: () => Battle.outpostError, name: 'Outpost', ring: true,
     check: (x, z) => Battle.canPlaceOutpost(0, x, z), build: (x, z, r) => Battle.buildOutpost(x, z, r), tip: 'Place inside your territory, near the border to extend it. Wheel / Q / E / R rotate, right-click cancels.' },
   hangar: { btn: 'bHangar', cost: () => Battle.PRICE.hangar, ghost: () => Battle.hangarGhost(), err: () => Battle.hangarError, name: 'Mech hangar',
@@ -2056,6 +2064,7 @@ function startPlacing(kind) { const B = BUILDS[kind]; if (placing) { const was =
   const rr = B.ringR ? B.ringR() : Battle.OUTPOST_SENSE * 12, ring = new THREE.Mesh(new THREE.RingGeometry(rr - 3, rr, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5fd0ff, transparent: true, opacity: .35, depthWrite: false }));
   ring.visible = !!(B.ring || B.ringR); g.scale.setScalar(12); scene.add(g); scene.add(ring); placing = { kind, B, g, ring, rot: 0, ok: false }; $(B.btn).classList.add('on'); hint(B.tip); }
 $('bOutpost').addEventListener('click', () => startPlacing('outpost'));
+$('bWater').addEventListener('click', () => startPlacing('water'));
 $('bAirbase').addEventListener('click', () => startPlacing('airbase'));
 $('bPump').addEventListener('click', () => startPlacing('pump'));
 $('bCamp').addEventListener('click', () => startPlacing('camp'));
@@ -2111,7 +2120,7 @@ addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && e.targ
 let lastAlert = null; $('alertbar').style.pointerEvents = 'auto'; $('alertbar').style.cursor = 'pointer'; $('alertbar').addEventListener('mousedown', e => e.stopPropagation()); $('alertbar').addEventListener('click', gotoAlert);
 // ================= build menu =================
 // a pop-up listing every building by category, with its price (dimmed when you cannot afford it) and what it does
-const BCAT = { outpost: 'Military', airbase: 'Military', hangar: 'Military', pump: 'Economy', camp: 'Economy', mine: 'Economy', farm: 'Economy', wh: 'Economy' };
+const BCAT = { water: 'Utilities', outpost: 'Military', airbase: 'Military', hangar: 'Military', pump: 'Economy', camp: 'Economy', mine: 'Economy', farm: 'Economy', wh: 'Economy' };
 const BCATS = ['Military', 'Economy', 'Housing', 'Utilities'];
 let bmCat = 'Economy';
 function bmRender() { const grid = $('bmGrid'), tabs = $('bmTabs');
@@ -2212,6 +2221,17 @@ function pwRender() { if (!pwOpen) return; const g = Battle.POWER[0], L = Battle
   $('pwState').innerHTML = g.supply === 0 ? '<span style="color:#ff7a6a">Plant offline</span>' : g.eff < 1 ? `<span style="color:#ff7a6a">Overloaded: buildings run at ${Math.round(g.eff * 100)}% speed</span>` : `<span style="color:#7ee08a">Grid OK — ${Math.round(g.supply - g.demand)} MW spare</span>`;
   $('pwUsers').innerHTML = Object.entries(g.users).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${PW_NAMES[k] || k}: ${Math.round(v)} MW`).join('<br>');
   const max = g.level >= L.length - 1; $('pwUpT').textContent = max ? 'Fully upgraded' : `Upgrade to ${L[g.level + 1]} MW`; $('pwUpC').textContent = max ? '' : costTxt(Battle.PLANT_UP[g.level]); $('pwUp').style.opacity = max || Battle.canAfford(0, Battle.PLANT_UP[g.level] || {}) ? .5 : 1; }
+// ---- town panel: population, homes, jobs and how its citizens feel about each need
+let tnSel = null; const NEED_NAME = { food: 'Food', work: 'Work', home: 'Shelter', water: 'Water', power: 'Electricity', peace: 'Peace' };
+function openTN(t) { tnSel = t; for (const id of ['abpanel', 'hgpanel', 'dppanel', 'pwpanel']) $(id).classList.add('uihidden'); abSel = hgSel = dpSel = null; pwOpen = false; $('tnpanel').classList.remove('uihidden'); tnRender(); }
+$('tnClose').addEventListener('click', () => { tnSel = null; $('tnpanel').classList.add('uihidden'); });
+function tnRender() { const t = tnSel; if (!t || !t.need) return; const own = t.idx === 0;
+  $('tnName').textContent = t.idx === 0 ? 'Your town' : t.idx === 1 ? 'Enemy town' : 'Settlement';
+  const m = Math.round(t.happy), col = m > 60 ? '#7ee08a' : m >= 45 ? '#ffd27a' : '#ff7a6a'; $('tnMood').textContent = m + ' / 100'; $('tnMood').style.color = col; $('tnBar').style.width = m + '%'; $('tnBar').style.background = col;
+  $('tnStats').innerHTML = `Citizens: <b style="color:var(--text)">${t.pop}</b> &nbsp; Homes for: <b style="color:var(--text)">${t.cap}</b>${t.homeless ? ` &nbsp; <span style="color:#ff7a6a">Homeless: ${t.homeless}</span>` : ''}<br>Jobs: ${t.jobs} &nbsp; Water for: ${t.water}${own ? `<br>Eats ${Math.ceil(t.pop * Battle.EAT)} food a day (stock ${Math.floor(Battle.FOOD ? Battle.FOOD[0] : 0)})` : ''}`;
+  $('tnNeeds').innerHTML = Battle.NEEDS.map(k => { const v = t.need[k], st = v > 0.75 ? 'good' : v > 0.45 ? 'ok' : 'bad', c = st === 'good' ? '#7ee08a' : st === 'ok' ? '#ffd27a' : '#ff7a6a';
+    return `<div style="display:flex;align-items:center;gap:6px"><img src="assets/ui/mood/${k}_${st}.png" alt="" style="width:26px;height:26px"><span style="width:76px">${NEED_NAME[k]}</span><div style="flex:1;height:6px;background:rgba(255,255,255,.08)"><i style="display:block;height:100%;width:${Math.round(v * 100)}%;background:${c}"></i></div></div>`; }).join(''); }
+setInterval(tnRender, 1000);
 // ---- depot panel: builds tanks
 let dpSel = null;
 function openDP(w) { if (!w.done) return feedMsg('Depot under construction: ' + Math.ceil(Battle.siteLeft(w)) + ' s left'); dpSel = w; for (const id of ['abpanel', 'hgpanel']) $(id).classList.add('uihidden'); abSel = hgSel = null; $('dppanel').classList.remove('uihidden'); dpRender(); }
@@ -2285,12 +2305,12 @@ function updateUI(dt) {
   $('rFood').innerHTML = Math.floor(Battle.FOOD[0]).toLocaleString() + `<i>+${Battle.foodRate(0)}/min</i>`;
   $('rOre').innerHTML = Math.floor(Battle.ORE[0]).toLocaleString() + `<i>+${Battle.oreRate(0)}/min</i>`;
   $('rWood').innerHTML = Math.floor(Battle.WOOD[0]).toLocaleString() + `<i>+${Math.round(Battle.woodRate(0))}/min</i>`;
-  const mine = Battle.selectables(); $('rSupply').textContent = (mine.length * 6) + '/60';
+  { const t = Battle.towns && Battle.towns[0]; if (t && t.pop !== undefined) { $('rSupply').textContent = t.pop + '/' + t.cap; $('rSupply').style.color = t.homeless ? '#ff7a6a' : ''; } }
   const en = Battle.enemiesVisible().filter(u => u.kind === 'robot'), hqDown = Battle.towns[1] && Battle.towns[1].hqDown;
   const tick = (id, done) => { const o = $(id); o.classList.toggle('done', done); o.querySelector('img').src = 'assets/ui/' + (done ? 'check' : 'checkbox') + '.png'; };
   tick('oPrim1', !en.length && hqDown); tick('oPrim3', !en.length);
   // selection panels: only while something is selected
-  const sel = mine.filter(u => u.sel);
+  const mine = Battle.selectables(), sel = mine.filter(u => u.sel);
   $('unitinfo').classList.toggle('uihidden', !sel.length); $('selpanel').classList.toggle('uihidden', !sel.length);
   if (!sel.length) { focusUnit = null; return; }
   if (!sel.includes(focusUnit)) focusUnit = sel[0];
