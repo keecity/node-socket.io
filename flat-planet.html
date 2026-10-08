@@ -1012,7 +1012,7 @@ const camera = new THREE.PerspectiveCamera(45, 1, 1, 4000);
 // and normals from depth and tests a small hemisphere of samples around each pixel; the full-resolution composite blurs
 // the occlusion edge-aware (by depth), darkens creases, contact points and the ground under buildings and vehicles,
 // and smooths edges with FXAA (offscreen targets have no MSAA). Toggle: OPTIONS button or the O key.
-const SSAO = { on: true, rt: null, ao: null };
+const SSAO = { on: true, rt: null, ao: null, mask: null, maskMat: new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, toneMapped: false }), tagT: 0 };
 { const kern = []; let s = 7;
   const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   for (let i = 0; i < 12; i++) { let v = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 0.85 + 0.15).normalize(); const k = i / 12; v.multiplyScalar(0.25 + 0.75 * k * k); kern.push(v); }
@@ -1037,10 +1037,10 @@ SSAO.aoMat = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, ton
         occ += (sz >= S.z + 0.1 * R ? 1. : 0.) * range; }
       gl_FragColor = vec4(1. - smoothstep(.08, 1., occ / 12.), -P.z / 4000., 0., 1.); }` });   // small self-occlusion on flat ground is ignored
 SSAO.compMat = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, toneMapped: false,
-  uniforms: { tColor: { value: null }, tAO: { value: null }, uRes: { value: new THREE.Vector2() }, uAORes: { value: new THREE.Vector2() }, uStrength: { value: 1.0 } },
+  uniforms: { tColor: { value: null }, tAO: { value: null }, tMask: { value: null }, uRes: { value: new THREE.Vector2() }, uAORes: { value: new THREE.Vector2() }, uStrength: { value: 1.0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
   fragmentShader: `
-    uniform sampler2D tColor, tAO; uniform vec2 uRes, uAORes; uniform float uStrength; varying vec2 vUv;
+    uniform sampler2D tColor, tAO, tMask; uniform vec2 uRes, uAORes; uniform float uStrength; varying vec2 vUv;
     float lum(vec3 c){ return dot(c, vec3(.299, .587, .114)); }
     vec3 fxaa(vec2 uv){ vec2 px = 1. / uRes; vec3 cM = texture2D(tColor, uv).rgb;
       float lNW = lum(texture2D(tColor, uv + vec2(-1., -1.) * px).rgb), lNE = lum(texture2D(tColor, uv + vec2(1., -1.) * px).rgb),
@@ -1054,26 +1054,39 @@ SSAO.compMat = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, t
       vec3 b = a * .5 + .25 * (texture2D(tColor, uv - dir * .5).rgb + texture2D(tColor, uv + dir * .5).rgb);
       float lB = lum(b); return (lB < lMin || lB > lMax) ? a : b; }
     void main(){
-      vec2 c0 = texture2D(tAO, vUv).rg; float sum = 0., wsum = 0.;
-      for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) { vec2 s = texture2D(tAO, vUv + vec2(float(i), float(j)) / uAORes).rg;
+      vec2 c0 = texture2D(tAO, vUv).rg; float sum = 0., wsum = 0., m = 0.;
+      for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) { vec2 o = vec2(float(i), float(j)) / uAORes, s = texture2D(tAO, vUv + o).rg;
+        m = max(m, texture2D(tMask, vUv + o * 2.5).r * (1. - .1 * float(i * i + j * j)));   // buildings, widened a little so their footing on the ground darkens too
         float w = exp(-abs(s.g - c0.g) * 4000. / max(c0.g * 4000. * .04, .5)) * (1. - .12 * float(i * i + j * j)); sum += s.r * w; wsum += w; }
-      float ao = sum / max(wsum, 1e-4); ao = mix(1., ao * ao, uStrength);
+      float ao = sum / max(wsum, 1e-4); ao = mix(1., ao * ao, uStrength * clamp(m, 0., 1.));
       gl_FragColor = vec4(fxaa(vUv) * (.12 + .88 * ao), 1.); }` });
 SSAO.aoQuad = new THREE.Mesh(quadGeo, SSAO.aoMat); SSAO.compQuad = new THREE.Mesh(quadGeo, SSAO.compMat);
 SSAO.aoScene = new THREE.Scene(); SSAO.aoScene.add(SSAO.aoQuad); SSAO.compScene = new THREE.Scene(); SSAO.compScene.add(SSAO.compQuad);
 function ssaoTargets() { const v = renderer.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(2, v.x | 0), h = Math.max(2, v.y | 0);
   if (SSAO.rt && SSAO.rt.width === w && SSAO.rt.height === h) return;
-  if (SSAO.rt) { SSAO.rt.dispose(); SSAO.ao.dispose(); }
+  if (SSAO.rt) { SSAO.rt.dispose(); SSAO.ao.dispose(); SSAO.mask.dispose(); }
   SSAO.rt = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, encoding: THREE.sRGBEncoding });
   SSAO.rt.depthTexture = new THREE.DepthTexture(w, h); SSAO.rt.depthTexture.type = THREE.UnsignedIntType;
   SSAO.ao = new THREE.WebGLRenderTarget(Math.ceil(w / 2), Math.ceil(h / 2), { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, type: THREE.HalfFloatType });
+  SSAO.mask = new THREE.WebGLRenderTarget(Math.ceil(w / 2), Math.ceil(h / 2), { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
   SSAO.aoMat.uniforms.uRes.value.set(Math.ceil(w / 2), Math.ceil(h / 2)); SSAO.compMat.uniforms.uRes.value.set(w, h); SSAO.compMat.uniforms.uAORes.value.set(Math.ceil(w / 2), Math.ceil(h / 2)); }
+// buildings that get ambient occlusion: town houses, towers and power plants, and every base building (tagged onto layer 1)
+function ssaoTagBuildings() { if (!window.Battle || !Battle.towns) return; const tag = o => o.traverse(m => { if (m.isMesh && !m.__aoL) { m.__aoL = true; m.layers.enable(1); } });
+  for (const t of Battle.towns) if (t.root) tag(t.root);
+  for (const L of [Battle.outposts, Battle.airbases, Battle.pumpjacks, Battle.camps, Battle.mines, Battle.farms, Battle.warehouses, Battle.hangars]) if (L) for (const b of L) if (b.obj) tag(b.obj); }
 function renderFrame() {
   if (!SSAO.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
   ssaoTargets();
   renderer.setRenderTarget(SSAO.rt); renderer.render(scene, camera);
   const U = SSAO.aoMat.uniforms; U.tDepth.value = SSAO.rt.depthTexture; U.uProj.value.copy(camera.projectionMatrix); U.uInvProj.value.copy(camera.projectionMatrixInverse);
   renderer.setRenderTarget(SSAO.ao); renderer.render(SSAO.aoScene, quadCam);
+  // building mask: only building meshes (layer 1), drawn flat white over black
+  if ((SSAO.tagT -= 1) <= 0) { SSAO.tagT = 30; ssaoTagBuildings(); }
+  const bg = scene.background, ac = renderer.autoClear, cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha(), su = renderer.shadowMap.autoUpdate;
+  scene.background = null; scene.overrideMaterial = SSAO.maskMat; camera.layers.set(1); renderer.shadowMap.autoUpdate = false; renderer.setClearColor(0x000000, 1);
+  renderer.setRenderTarget(SSAO.mask); renderer.clear(); renderer.render(scene, camera);
+  scene.background = bg; scene.overrideMaterial = null; camera.layers.set(0); renderer.shadowMap.autoUpdate = su; renderer.setClearColor(cc, ca); renderer.autoClear = ac;
+  SSAO.compMat.uniforms.tMask.value = SSAO.mask.texture;
   SSAO.compMat.uniforms.tColor.value = SSAO.rt.texture; SSAO.compMat.uniforms.tAO.value = SSAO.ao.texture;
   renderer.setRenderTarget(null); renderer.render(SSAO.compScene, quadCam); }
 
