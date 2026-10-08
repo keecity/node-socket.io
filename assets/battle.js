@@ -3439,14 +3439,48 @@ function pedGoal(p, h) { if (!p.home) return null; if (p.jobless) return h >= p.
 // ---- opinions: thought bubbles over people (your icons), showing what is on their mind
 const MOOD_TEX = {}, bubbles = []; let bubbleT = 0;
 function moodTex(k) { return MOOD_TEX[k] || (MOOD_TEX[k] = new THREE.TextureLoader().load('assets/ui/mood/' + k + '.png')); }
-function updateBubbles(dt) { if (!peds.length) return;
-  if (!bubbles.length) for (let i = 0; i < 8; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, sizeAttenuation: false })); s.visible = false; s.renderOrder = 5; scene.add(s); bubbles.push({ s, p: null, t: 0 }); }
-  bubbleT -= dt; if (bubbleT <= 0) { bubbleT = rand(0.5, 1.2); const b = bubbles.find(b => !b.p), near = peds.filter(q => q.shown && q.wd < 450), p = near[Math.floor(Math.random() * near.length)];
-    if (b && p && !bubbles.some(o => o.p === p)) { const t = towns[p.ti]; if (t && t.need && (townTeam(t) === 0 || t.found || !FOG_ON)) {
-      const ks = NEEDS.slice().sort((a, c) => t.need[a] - t.need[c]), k = chance(0.65) ? ks[Math.floor(Math.random() * 2)] : ks[Math.floor(Math.random() * ks.length)], v = t.need[k];
-      b.s.material.map = moodTex(k + (v > 0.75 ? '_good' : v > 0.45 ? '_ok' : '_bad')); b.s.material.needsUpdate = true; b.p = p; b.t = 0; } } }
-  for (const b of bubbles) { if (!b.p) continue; b.t += dt; const p = b.p; if (b.t > 3.2 || !p.shown) { b.p = null; b.s.visible = false; continue; }
-    const a = Math.min(1, b.t * 4, (3.2 - b.t) * 3), sc = 0.055 * (0.6 + 0.4 * Math.min(1, b.t * 5)); b.s.visible = true; b.s.material.opacity = a; b.s.scale.set(sc, sc, 1); b.s.position.set(p.wx, p.wy + 2.6, p.wz); } }
+// one bubble, over the citizen you clicked: it shows what is most on their mind
+let focusPed = null, bubble = null;
+function updateBubbles() { if (!bubble) { bubble = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false, sizeAttenuation: false }));
+    bubble.center.set(0.5, 0); bubble.renderOrder = 5; bubble.scale.set(0.06, 0.06, 1); scene.add(bubble); }   // anchored at its bottom: it sits on the head at any zoom
+  const p = focusPed; bubble.visible = !!(p && p.shown); if (!bubble.visible) return; const c = citizen(p), k = c.worst;
+  const key = k + (c.need[k] > 0.75 ? '_good' : c.need[k] > 0.45 ? '_ok' : '_bad'); if (bubble.key !== key) { bubble.key = key; bubble.material.map = moodTex(key); bubble.material.needsUpdate = true; }
+  bubble.position.set(p.wx, p.wy + PED_H + 0.6, p.wz); }
+// ---- who a citizen is: name, address, and how they feel (their town's situation, coloured by their own circumstances)
+const FIRST = ['Ada', 'Bruno', 'Celia', 'Dmitri', 'Elena', 'Farid', 'Greta', 'Hugo', 'Ines', 'Jonas', 'Kira', 'Luca', 'Mara', 'Nikolai', 'Olga', 'Pavel', 'Quinn', 'Rosa', 'Stefan', 'Tamsin', 'Uma', 'Viktor', 'Wren', 'Yara', 'Zoran', 'Anouk', 'Bas', 'Clara', 'Emil', 'Freya', 'Ivo', 'Lena', 'Milo', 'Nadia', 'Otto', 'Petra', 'Rafael', 'Sanne', 'Tomas', 'Vera'];
+const LAST = ['Novak', 'Brandt', 'Okafor', 'Lindqvist', 'Moreau', 'Kowalski', 'Haddad', 'Varga', 'Reyes', 'Petrov', 'Jansen', 'Costa', 'Weber', 'Ilic', 'Sato', 'Larsen', 'Duval', 'Marek', 'Horvat', 'Aydin', 'Fischer', 'Bianchi', 'Nyberg', 'Kader'];
+const STREET = ['Oak', 'Mill', 'Station', 'Church', 'Foundry', 'Elm', 'Harbour', 'Canal', 'Market', 'Copper', 'Linden', 'Quarry', 'Bridge', 'Orchard', 'Signal', 'Kiln'], SUFFIX = ['Street', 'Road', 'Lane', 'Avenue', 'Row'];
+const hsh = (a, b = 0) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function citizen(p) { const id = p.id === undefined ? (p.id = peds.indexOf(p)) : p.id, t = towns[p.ti], team = t ? townTeam(t) : -1, N = (t && t.need) || {};
+  const homeless = !p.house || hsh(id, 7) < (t && t.pop ? t.homeless / t.pop : 0), need = {};
+  for (const k of NEEDS) need[k] = clamp((N[k] === undefined ? 0.7 : N[k]) + (hsh(id, k.length * 31) - 0.5) * 0.2, 0, 1);
+  if (homeless) need.home = 0.05; else if (p.house && p.house.comfort) need.home = clamp(need.home * (0.7 + 0.3 * p.house.comfort), 0, 1);
+  need.work = p.jobless ? 0.1 : Math.max(need.work, 0.8);
+  const worst = NEEDS.reduce((a, k) => need[k] < need[a] ? k : a, NEEDS[0]), best = NEEDS.reduce((a, k) => need[k] > need[a] ? k : a, NEEDS[0]);
+  const mood = Math.round(100 * NEEDS.reduce((a, k) => a + NEED_W[k] * need[k], 0)), ch = p.house ? (p.house.homePt || p.home) : p.home;
+  const addr = homeless ? 'No fixed address' : `${1 + Math.floor(hsh(id, 3) * 140)} ${STREET[(ch ? ch.c : id) % STREET.length]} ${SUFFIX[((ch ? ch.c : id) >> 3) % SUFFIX.length]}`;
+  const h = TOD.t * 24, where = p.inside ? (h > 9 && h < 16 && !p.jobless ? 'at work' : 'at home') : p.mode === 'run' ? 'running for cover' : 'out walking';
+  return { name: FIRST[Math.floor(hsh(id, 1) * FIRST.length)] + ' ' + LAST[Math.floor(hsh(id, 2) * LAST.length)], age: 18 + Math.floor(hsh(id, 4) * 60), job: p.jobless ? 'Unemployed' : ['Clerk', 'Mechanic', 'Teacher', 'Nurse', 'Welder', 'Shopkeeper', 'Driver', 'Engineer', 'Cook', 'Electrician', 'Farmhand', 'Miner'][Math.floor(hsh(id, 5) * 12)],
+    addr, homeless, need, worst, best, mood, team, where, says: saying(id, need, worst, best, mood, homeless, p.jobless) }; }
+// a sentence assembled from parts: an opener for the mood, the main worry, maybe something good, and a closing thought
+const SAY = {
+  open: { good: ['Honestly, things are good.', 'Can\'t complain much.', 'Life\'s alright here.'], ok: ['It\'s getting by, I suppose.', 'Some days are better than others.', 'We manage.'], bad: ['I\'ve had enough of this place.', 'Things are bad.', 'I don\'t know how much longer we can do this.'] },
+  worry: { food: { ok: ['the shelves are getting thin', 'food is rationed again'], bad: ['my kids went to bed hungry', 'there is no food left anywhere'] },
+    work: { ok: ['work is hard to come by', 'I only get odd shifts'], bad: ['I can\'t find a job', 'nobody is hiring'] },
+    home: { ok: ['our flat is cramped', 'the house needs repairs nobody can afford'], bad: ['I\'m sleeping on the street', 'I have nowhere to live'] },
+    water: { ok: ['the tap runs brown some mornings', 'water pressure keeps dropping'], bad: ['the taps are dry', 'we\'re queueing for water'] },
+    power: { ok: ['the lights flicker every evening', 'power cuts keep coming'], bad: ['we\'ve been in the dark for days', 'there is no electricity'] },
+    peace: { ok: ['the shelling keeps me up at night', 'I hear the guns getting closer'], bad: ['the war is tearing this town apart', 'I watched our street burn'] } },
+  link: ['and', 'and on top of that', 'plus'], but: ['Only thing is,', 'Mind you,', 'Though'],
+  good: { food: 'at least there\'s food on the table', work: 'at least I\'ve got steady work', home: 'at least home feels like home', water: 'at least the water is clean', power: 'at least the power stays on', peace: 'at least it\'s quiet here' },
+  close: { good: ['I\'d stay here for good.', 'Tell the commander thanks.', 'More people should move here.'], ok: ['Fix it and I\'ll stay.', 'I hope it gets better.', 'We\'ll see.'], bad: ['If nothing changes, I\'m leaving.', 'My family is already packing.', 'Why should I stay?'] } };
+function saying(id, need, worst, best, mood, homeless, jobless) { const pick = (a, n) => a[Math.floor(hsh(id, n + Math.floor(TOD.t * 4) * 13) * a.length)], tone = mood > 70 ? 'good' : mood > 50 ? 'ok' : 'bad';
+  let s = pick(SAY.open[tone], 11); const w = need[worst];
+  if (w < 0.75) { const sev = w < 0.45 ? 'bad' : 'ok', sorted = NEEDS.filter(k => need[k] < 0.75).sort((a, b) => need[a] - need[b]);
+    let clause = pick(SAY.worry[worst][sev], 12); if (sorted[1]) clause += ' ' + pick(SAY.link, 14) + ' ' + pick(SAY.worry[sorted[1]][need[sorted[1]] < 0.45 ? 'bad' : 'ok'], 15);
+    s += ' ' + (tone === 'good' ? pick(SAY.but, 17) + ' ' + clause : clause.charAt(0).toUpperCase() + clause.slice(1)) + '.'; }
+  if (need[best] > 0.8 && best !== worst && tone !== 'good') { const g = SAY.good[best]; s += ' ' + g.charAt(0).toUpperCase() + g.slice(1) + '.'; }
+  return s + ' ' + pick(SAY.close[tone], 16); }
 // ---- enemy AI helpers
 let aiEcoT = 20, aiSquadT = 120;
 const aiCount = (list, kind) => list.filter(p => p.alive && p.team === 1 && (!kind || p.kind === kind)).length;
@@ -3587,7 +3621,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateCitizens(dt); updateWaterTowers(); updateBubbles(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateCitizens(dt); updateWaterTowers(); updateBubbles();
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3639,7 +3673,7 @@ const Battle = {
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
   setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
-  waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT,
+  waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT, citizen, get focusPed() { return focusPed; }, set focusPed(v) { focusPed = v; },
   POWER, POWER_USE, PLANT_CAP, PLANT_UP, upgradePlant, plantAt2D: (xw, zw) => plantAt2D(wm(xw / S), wm(zw / S)),
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,

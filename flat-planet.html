@@ -287,6 +287,11 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <div id="pwState" style="font-size:12px"></div>
     <div id="pwUsers" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
     <button class="abtn" id="pwUp" style="display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer;text-align:left"><img class="ico" src="assets/ui/power.png" alt="" style="width:18px;height:18px"><span id="pwUpT" style="flex:1"></span><small id="pwUpC" style="color:var(--gold);font-size:11px"></small></button></div></div>
+<div id="czpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:300px;font-size:13px"><div class="hd"><span id="czName">Citizen</span><img class="ico" id="czClose" src="assets/ui/exit.png" alt="Close"></div>
+  <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px">
+    <div id="czInfo" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
+    <div id="czSay" style="font-style:italic;line-height:1.4;padding:6px 8px;background:rgba(255,255,255,.05);border-left:2px solid var(--cyan)"></div>
+    <div id="czNeeds" style="display:grid;grid-template-columns:1fr 1fr;gap:3px 10px"></div></div></div>
 <div id="tnpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:282px;font-size:13px"><div class="hd"><span id="tnName">Town</span><img class="ico" id="tnClose" src="assets/ui/exit.png" alt="Close"></div>
   <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px">
     <div style="display:flex;justify-content:space-between"><span style="color:var(--dim)">MOOD</span><b id="tnMood"></b></div>
@@ -1985,6 +1990,7 @@ function selectRect(ax, ay, bx, by, keepIfEmpty) {
   for (const u of Battle.selectables()) { const p = toScreen(u, v3); if (!p) continue;
     if (click ? Math.hypot(p.x - x1, p.y - y1) < 24 : p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) picked.push(u); }
   if (click && picked.length > 1) picked.length = 1;
+  if (click && !picked.length && pickCitizen(x1, y1)) return;
   if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); else { const pt = t && Battle.plantAt2D(t.x, t.z); if (pt && pt.idx === 0) openPW(); else { const tn = t && Battle.townAt2D(t.x, t.z); if (tn && (tn.idx === 0 || tn.found || !Battle.fogOn)) openTN(tn); } } } } }
   if (keepIfEmpty && !picked.length) return; Battle.select(picked);
 }
@@ -2221,9 +2227,24 @@ function pwRender() { if (!pwOpen) return; const g = Battle.POWER[0], L = Battle
   $('pwState').innerHTML = g.supply === 0 ? '<span style="color:#ff7a6a">Plant offline</span>' : g.eff < 1 ? `<span style="color:#ff7a6a">Overloaded: buildings run at ${Math.round(g.eff * 100)}% speed</span>` : `<span style="color:#7ee08a">Grid OK — ${Math.round(g.supply - g.demand)} MW spare</span>`;
   $('pwUsers').innerHTML = Object.entries(g.users).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${PW_NAMES[k] || k}: ${Math.round(v)} MW`).join('<br>');
   const max = g.level >= L.length - 1; $('pwUpT').textContent = max ? 'Fully upgraded' : `Upgrade to ${L[g.level + 1]} MW`; $('pwUpC').textContent = max ? '' : costTxt(Battle.PLANT_UP[g.level]); $('pwUp').style.opacity = max || Battle.canAfford(0, Battle.PLANT_UP[g.level] || {}) ? .5 : 1; }
+// ---- citizen panel: click a person to meet them
+let czSel = null;
+function pickCitizen(x, y) { let best = null, bd = 22; for (const p of Battle.peds) { if (!p.shown) continue; const t = Battle.towns[p.ti]; if (t && t.idx !== 0 && !t.found && Battle.fogOn) continue;
+    const v = new THREE.Vector3(p.wx, p.wy + 0.9, p.wz).project(camera); if (v.z > 1) continue; const d = Math.hypot((v.x + 1) / 2 * innerWidth - x, (1 - v.y) / 2 * innerHeight - y); if (d < bd) { bd = d; best = p; } }
+  if (!best) return false; openCZ(best); return true; }
+function openCZ(p) { czSel = p; Battle.focusPed = p; for (const id of ['abpanel', 'hgpanel', 'dppanel', 'pwpanel', 'tnpanel']) $(id).classList.add('uihidden'); abSel = hgSel = dpSel = tnSel = null; pwOpen = false; $('czpanel').classList.remove('uihidden'); czRender(); }
+function closeCZ() { czSel = null; Battle.focusPed = null; $('czpanel').classList.add('uihidden'); }
+$('czClose').addEventListener('click', closeCZ);
+function czRender() { const p = czSel; if (!p) return; const c = Battle.citizen(p), t = Battle.towns[p.ti];
+  $('czName').textContent = c.name;
+  $('czInfo').innerHTML = `${c.age} · ${c.job} · <span style="color:var(--text)">${c.where}</span><br>${c.homeless ? '<span style="color:#ff7a6a">Homeless</span>' : 'Home: ' + c.addr}, ${c.team === 0 ? 'your town' : c.team === 1 ? 'enemy town' : 'neutral settlement'}<br>Mood: <b style="color:${c.mood > 70 ? '#7ee08a' : c.mood > 50 ? '#ffd27a' : '#ff7a6a'}">${c.mood} / 100</b>`;
+  $('czSay').textContent = '“' + c.says + '”';
+  $('czNeeds').innerHTML = Battle.NEEDS.map(k => { const v = c.need[k], st = v > 0.75 ? 'good' : v > 0.45 ? 'ok' : 'bad', col = st === 'good' ? '#7ee08a' : st === 'ok' ? '#ffd27a' : '#ff7a6a';
+    return `<div style="display:flex;align-items:center;gap:5px"><img src="assets/ui/mood/${k}_${st}.png" alt="" style="width:24px;height:24px"><div style="flex:1"><div style="font-size:11px">${NEED_NAME[k]}</div><div style="height:4px;background:rgba(255,255,255,.08)"><i style="display:block;height:100%;width:${Math.round(v * 100)}%;background:${col}"></i></div></div></div>`; }).join(''); }
+setInterval(czRender, 1000);
 // ---- town panel: population, homes, jobs and how its citizens feel about each need
 let tnSel = null; const NEED_NAME = { food: 'Food', work: 'Work', home: 'Shelter', water: 'Water', power: 'Electricity', peace: 'Peace' };
-function openTN(t) { tnSel = t; for (const id of ['abpanel', 'hgpanel', 'dppanel', 'pwpanel']) $(id).classList.add('uihidden'); abSel = hgSel = dpSel = null; pwOpen = false; $('tnpanel').classList.remove('uihidden'); tnRender(); }
+function openTN(t) { closeCZ(); tnSel = t; for (const id of ['abpanel', 'hgpanel', 'dppanel', 'pwpanel']) $(id).classList.add('uihidden'); abSel = hgSel = dpSel = null; pwOpen = false; $('tnpanel').classList.remove('uihidden'); tnRender(); }
 $('tnClose').addEventListener('click', () => { tnSel = null; $('tnpanel').classList.add('uihidden'); });
 function tnRender() { const t = tnSel; if (!t || !t.need) return; const own = t.idx === 0;
   $('tnName').textContent = t.idx === 0 ? 'Your town' : t.idx === 1 ? 'Enemy town' : 'Settlement';
