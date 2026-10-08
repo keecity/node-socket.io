@@ -1782,8 +1782,12 @@ async function buildWorld() {
         c = mix(c, vec3(.9), clamp(foam, 0., 1.));
         float alpha = mix(.45, .96, smoothstep(0.0, .35, depth)) ;
         alpha = max(alpha, foam);
-        c = mix(c, uH, smoothstep(uNear, uFar, length(cameraPosition - vPos)));
+        float dw = length(cameraPosition - vPos);
+        c = mix(c, uH, smoothstep(uNear, uFar, dw));
         c = warShade(c, vPos.xz);
+        // opaque where there is no terrain drawn under it (far away) and where it is fogged, so the sky never shows through
+        alpha = max(alpha, smoothstep(uNear, uFar * .9, dw));
+        if (uWarOn > .5) { vec3 wf = texture2D(uWarFog, vPos.xz / ${SIZE.toFixed(1)}).rgb; alpha = mix(1., alpha, max(wf.r, wf.g)); }
         gl_FragColor = vec4(c, alpha);
         #include <tonemapping_fragment>
         #include <encodings_fragment>

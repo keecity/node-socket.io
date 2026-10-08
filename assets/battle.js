@@ -1105,7 +1105,7 @@ function destroyAirbase(b) { b.alive = false; b.queue = 0;
   log(b.team, `<b>${TEAM_NAME[b.team]}</b> air base destroyed`);
   if (b.team === 0 && window.onOutpostAlert) window.onOutpostAlert('AIR BASE DESTROYED', 'Its gunships have lost their home pads.', { x: b.x * S, z: b.z * S }); }
 // ground already levelled for a standing building is locked: later levelling (and its blend) never moves it
-function groundLocked(xw, zw, self) { const x = xw / S, z = wm(zw / S), xx = wm(x), m = 1.5 * SIZE / 512 / S;   // + a grid cell or so, so the pad's edge cells stay put
+function groundLocked(xw, zw, self) { const x = xw / S, z = wm(zw / S), xx = wm(x), m = 0.3;   // ~one terrain cell (demo units), so the pad's edge cells stay put; fixed, not tied to the map size
   for (const o of outposts) if (o !== self && o.alive && o.pad) { const dx = wd(xx - o.x), dz = wd(z - o.z), c = Math.cos(o.rot || 0), s = Math.sin(o.rot || 0); if (Math.abs(dx * c - dz * s) < o.pad + m && Math.abs(dx * s + dz * c) < o.pad + m) return true; }
   for (const b of airbases) if (b !== self && b.alive && wdist2(b.x, b.z, xx, z) < 4.5) { const { lx, lz } = abLocal(b, xx, z); const mm = 1 + m / AB_K; if (lx > AB_EXT[0] - mm && lx < AB_EXT[1] + mm && lz > AB_EXT[2] - mm && lz < AB_EXT[3] + mm) return true; }
   for (const p of pumpjacks) if (p !== self && p.alive && wdist2(p.x, p.z, xx, z) < 2) { if (inPumpLot(p, xx, z, 0.15 + m)) return true; }
