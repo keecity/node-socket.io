@@ -287,6 +287,14 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <div id="pwState" style="font-size:12px"></div>
     <div id="pwUsers" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
     <button class="abtn" id="pwUp" style="display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer;text-align:left"><img class="ico" src="assets/ui/power.png" alt="" style="width:18px;height:18px"><span id="pwUpT" style="flex:1"></span><small id="pwUpC" style="color:var(--gold);font-size:11px"></small></button></div></div>
+<div id="mkpanel" class="ui pn uihidden" style="left:50%;top:84px;transform:translateX(-50%);width:340px;font-size:13px;z-index:30"><div class="hd"><span>Market</span><img class="ico" id="mkClose" src="assets/ui/exit.png" alt="Close"></div>
+  <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:7px">
+    <div id="mkTabs" style="display:flex;gap:4px"></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--dim)">IN STOCK</span><b id="mkHave"></b></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--dim)">PRICE / UNIT</span><span><b id="mkBuyP" style="color:var(--gold)"></b> buy &nbsp; <b id="mkSellP"></b> sell</span></div>
+    <div id="mkAmts" style="display:flex;gap:4px"></div>
+    <div style="display:flex;gap:6px"><button class="abtn" id="mkBuy" style="flex:1;padding:6px;background:rgba(18,52,34,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer"></button><button class="abtn" id="mkSell" style="flex:1;padding:6px;background:rgba(52,24,18,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer"></button></div>
+    <div style="font-size:11px;color:var(--dim)">Prices rise as you buy and fall as you sell, then drift back.</div></div></div>
 <div id="czpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:300px;font-size:13px"><div class="hd"><span id="czName">Citizen</span><img class="ico" id="czClose" src="assets/ui/exit.png" alt="Close"></div>
   <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px">
     <div id="czInfo" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
@@ -2227,6 +2235,30 @@ function pwRender() { if (!pwOpen) return; const g = Battle.POWER[0], L = Battle
   $('pwState').innerHTML = g.supply === 0 ? '<span style="color:#ff7a6a">Plant offline</span>' : g.eff < 1 ? `<span style="color:#ff7a6a">Overloaded: buildings run at ${Math.round(g.eff * 100)}% speed</span>` : `<span style="color:#7ee08a">Grid OK — ${Math.round(g.supply - g.demand)} MW spare</span>`;
   $('pwUsers').innerHTML = Object.entries(g.users).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${PW_NAMES[k] || k}: ${Math.round(v)} MW`).join('<br>');
   const max = g.level >= L.length - 1; $('pwUpT').textContent = max ? 'Fully upgraded' : `Upgrade to ${L[g.level + 1]} MW`; $('pwUpC').textContent = max ? '' : costTxt(Battle.PLANT_UP[g.level]); $('pwUp').style.opacity = max || Battle.canAfford(0, Battle.PLANT_UP[g.level] || {}) ? .5 : 1; }
+// ---- market: click a resource in the top bar to buy what is running low (or sell a surplus) for credits
+const MK = { oil: { base: 4, name: 'Oil', el: 'rOil' }, wood: { base: 2, name: 'Wood', el: 'rWood' }, ore: { base: 3, name: 'Ore', el: 'rOre' }, food: { base: 1.5, name: 'Food', el: 'rFood' } };
+for (const k in MK) MK[k].mul = 1;
+let mkRes = 'oil', mkAmt = 100;
+const mkStock = k => ({ oil: Battle.OIL, wood: Battle.WOOD, ore: Battle.ORE, food: Battle.FOOD })[k][0];
+const mkBuyP = k => MK[k].base * MK[k].mul, mkSellP = k => MK[k].base * MK[k].mul * 0.5;
+function openMarket(k) { if (k) mkRes = k; $('mkpanel').classList.remove('uihidden'); mkRender(); }
+$('mkClose').addEventListener('click', () => $('mkpanel').classList.add('uihidden'));
+function mkRender() { if ($('mkpanel').classList.contains('uihidden')) return;
+  $('mkTabs').innerHTML = Object.entries(MK).map(([k, m]) => `<button data-k="${k}" style="flex:1;padding:4px;border:1px solid var(--line);background:${k === mkRes ? 'rgba(95,208,255,.25)' : 'rgba(18,34,52,.9)'};color:var(--text);font:600 12px Rajdhani,sans-serif;cursor:pointer">${m.name.toUpperCase()}</button>`).join('');
+  $('mkTabs').querySelectorAll('button').forEach(b => b.onclick = () => { mkRes = b.dataset.k; mkRender(); });
+  $('mkAmts').innerHTML = [50, 100, 250, 500].map(a => `<button data-a="${a}" style="flex:1;padding:3px;border:1px solid var(--line);background:${a === mkAmt ? 'rgba(255,210,122,.25)' : 'rgba(18,34,52,.9)'};color:var(--text);font:600 12px Rajdhani,sans-serif;cursor:pointer">${a}</button>`).join('');
+  $('mkAmts').querySelectorAll('button').forEach(b => b.onclick = () => { mkAmt = +b.dataset.a; mkRender(); });
+  const k = mkRes, have = Math.floor(mkStock(k)), buyC = Math.ceil(mkBuyP(k) * mkAmt), sellC = Math.floor(mkSellP(k) * mkAmt);
+  $('mkHave').textContent = have + ' ' + MK[k].name.toLowerCase() + '  ·  ' + Math.floor(Battle.CR[0]) + ' CR'; $('mkBuyP').textContent = mkBuyP(k).toFixed(2) + ' CR'; $('mkSellP').textContent = mkSellP(k).toFixed(2) + ' CR';
+  $('mkBuy').textContent = `BUY ${mkAmt} — ${buyC} CR`; $('mkBuy').style.opacity = Battle.CR[0] < buyC ? .45 : 1;
+  $('mkSell').textContent = `SELL ${mkAmt} — +${sellC} CR`; $('mkSell').style.opacity = have < mkAmt ? .45 : 1; }
+$('mkBuy').addEventListener('click', () => { const k = mkRes, c = Math.ceil(mkBuyP(k) * mkAmt); if (Battle.CR[0] < c) return feedMsg('Not enough credits: need ' + c + ' CR');
+  Battle.spend(0, { cr: c, [k]: -mkAmt }); MK[k].mul = Math.min(3, MK[k].mul * (1 + mkAmt / 2000)); mkRender(); });
+$('mkSell').addEventListener('click', () => { const k = mkRes; if (mkStock(k) < mkAmt) return feedMsg('Not enough ' + MK[k].name.toLowerCase() + ' to sell');
+  const c = Math.floor(mkSellP(k) * mkAmt); Battle.spend(0, { cr: -c, [k]: mkAmt }); MK[k].mul = Math.max(0.4, MK[k].mul * (1 - mkAmt / 2500)); mkRender(); });
+setInterval(() => { for (const k in MK) MK[k].mul += (1 - MK[k].mul) * 0.02; mkRender(); }, 1000);   // prices drift back to normal
+for (const k in MK) { const box = $(MK[k].el).closest('.res'); box.style.cursor = 'pointer'; box.title = 'Open the market: buy or sell ' + MK[k].name.toLowerCase(); box.addEventListener('click', () => openMarket(k)); }
+{ const box = $('rCredits').closest('.res'); box.style.cursor = 'pointer'; box.title = 'Open the market'; box.addEventListener('click', () => openMarket()); }
 // ---- citizen panel: click a person to meet them
 let czSel = null;
 function pickCitizen(x, y) { let best = null, bd = 22; for (const p of Battle.peds) { if (!p.shown) continue; const t = Battle.towns[p.ti]; if (t && t.idx !== 0 && !t.found && Battle.fogOn) continue;
