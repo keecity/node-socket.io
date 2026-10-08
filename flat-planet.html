@@ -1007,6 +1007,76 @@ scene.background = HORIZON;
 const FOG_NEAR0 = 450, FOG_FAR0 = 1250;
 scene.fog = new THREE.Fog(HORIZON, FOG_NEAR0, FOG_FAR0);   // used by trees and units (Lambert); terrain/water shaders fog themselves
 const camera = new THREE.PerspectiveCamera(45, 1, 1, 4000);
+// ---- real-time ambient occlusion (screen space) ----
+// The scene renders into an offscreen target with a depth texture; a half-resolution pass rebuilds view-space positions
+// and normals from depth and tests a small hemisphere of samples around each pixel; the full-resolution composite blurs
+// the occlusion edge-aware (by depth), darkens creases, contact points and the ground under buildings and vehicles,
+// and smooths edges with FXAA (offscreen targets have no MSAA). Toggle: OPTIONS button or the O key.
+const SSAO = { on: true, rt: null, ao: null };
+{ const kern = []; let s = 7;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (let i = 0; i < 12; i++) { let v = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 0.85 + 0.15).normalize(); const k = i / 12; v.multiplyScalar(0.25 + 0.75 * k * k); kern.push(v); }
+  SSAO.kernel = kern; }
+const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadGeo = new THREE.PlaneGeometry(2, 2);
+SSAO.aoMat = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, toneMapped: false, extensions: { derivatives: true },
+  uniforms: { tDepth: { value: null }, uProj: { value: new THREE.Matrix4() }, uInvProj: { value: new THREE.Matrix4() }, uKernel: { value: SSAO.kernel }, uRes: { value: new THREE.Vector2() } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: `
+    uniform sampler2D tDepth; uniform mat4 uProj, uInvProj; uniform vec3 uKernel[12]; uniform vec2 uRes; varying vec2 vUv;
+    vec3 viewPos(vec2 uv){ float d = texture2D(tDepth, uv).x; vec4 v = uInvProj * vec4(uv * 2. - 1., d * 2. - 1., 1.); return v.xyz / v.w; }
+    void main(){
+      float d = texture2D(tDepth, vUv).x; if (d >= 1.) { gl_FragColor = vec4(1., 0., 0., 1.); return; }
+      vec3 P = viewPos(vUv), N = normalize(cross(dFdx(P), dFdy(P)));
+      float R = clamp(-P.z * 0.018, 1.2, 14.);                                       // metres: wider when zoomed out so it still reads
+      float a = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+      vec3 rv = vec3(cos(a), sin(a), 0.), T = normalize(rv - N * dot(rv, N)), B = cross(N, T); mat3 TBN = mat3(T, B, N);
+      float occ = 0.;
+      for (int i = 0; i < 12; i++) { vec3 S = P + TBN * uKernel[i] * R; vec4 c = uProj * vec4(S, 1.); vec2 suv = c.xy / c.w * .5 + .5;
+        if (suv.x < 0. || suv.y < 0. || suv.x > 1. || suv.y > 1.) continue;
+        float sz = viewPos(suv).z, range = smoothstep(0., 1., R / abs(P.z - sz));
+        occ += (sz >= S.z + 0.1 * R ? 1. : 0.) * range; }
+      gl_FragColor = vec4(1. - smoothstep(.08, 1., occ / 12.), -P.z / 4000., 0., 1.); }` });   // small self-occlusion on flat ground is ignored
+SSAO.compMat = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, toneMapped: false,
+  uniforms: { tColor: { value: null }, tAO: { value: null }, uRes: { value: new THREE.Vector2() }, uAORes: { value: new THREE.Vector2() }, uStrength: { value: 1.0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: `
+    uniform sampler2D tColor, tAO; uniform vec2 uRes, uAORes; uniform float uStrength; varying vec2 vUv;
+    float lum(vec3 c){ return dot(c, vec3(.299, .587, .114)); }
+    vec3 fxaa(vec2 uv){ vec2 px = 1. / uRes; vec3 cM = texture2D(tColor, uv).rgb;
+      float lNW = lum(texture2D(tColor, uv + vec2(-1., -1.) * px).rgb), lNE = lum(texture2D(tColor, uv + vec2(1., -1.) * px).rgb),
+            lSW = lum(texture2D(tColor, uv + vec2(-1., 1.) * px).rgb), lSE = lum(texture2D(tColor, uv + vec2(1., 1.) * px).rgb), lM = lum(cM);
+      float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE))), lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+      if (lMax - lMin < max(.0312, lMax * .125)) return cM;
+      vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
+      float red = max((lNW + lNE + lSW + lSE) * .03125, 1. / 128.), rcp = 1. / (min(abs(dir.x), abs(dir.y)) + red);
+      dir = clamp(dir * rcp, -8., 8.) * px;
+      vec3 a = .5 * (texture2D(tColor, uv + dir * (1. / 3. - .5)).rgb + texture2D(tColor, uv + dir * (2. / 3. - .5)).rgb);
+      vec3 b = a * .5 + .25 * (texture2D(tColor, uv - dir * .5).rgb + texture2D(tColor, uv + dir * .5).rgb);
+      float lB = lum(b); return (lB < lMin || lB > lMax) ? a : b; }
+    void main(){
+      vec2 c0 = texture2D(tAO, vUv).rg; float sum = 0., wsum = 0.;
+      for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) { vec2 s = texture2D(tAO, vUv + vec2(float(i), float(j)) / uAORes).rg;
+        float w = exp(-abs(s.g - c0.g) * 4000. / max(c0.g * 4000. * .04, .5)) * (1. - .12 * float(i * i + j * j)); sum += s.r * w; wsum += w; }
+      float ao = sum / max(wsum, 1e-4); ao = mix(1., ao * ao, uStrength);
+      gl_FragColor = vec4(fxaa(vUv) * (.12 + .88 * ao), 1.); }` });
+SSAO.aoQuad = new THREE.Mesh(quadGeo, SSAO.aoMat); SSAO.compQuad = new THREE.Mesh(quadGeo, SSAO.compMat);
+SSAO.aoScene = new THREE.Scene(); SSAO.aoScene.add(SSAO.aoQuad); SSAO.compScene = new THREE.Scene(); SSAO.compScene.add(SSAO.compQuad);
+function ssaoTargets() { const v = renderer.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(2, v.x | 0), h = Math.max(2, v.y | 0);
+  if (SSAO.rt && SSAO.rt.width === w && SSAO.rt.height === h) return;
+  if (SSAO.rt) { SSAO.rt.dispose(); SSAO.ao.dispose(); }
+  SSAO.rt = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, encoding: THREE.sRGBEncoding });
+  SSAO.rt.depthTexture = new THREE.DepthTexture(w, h); SSAO.rt.depthTexture.type = THREE.UnsignedIntType;
+  SSAO.ao = new THREE.WebGLRenderTarget(Math.ceil(w / 2), Math.ceil(h / 2), { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, type: THREE.HalfFloatType });
+  SSAO.aoMat.uniforms.uRes.value.set(Math.ceil(w / 2), Math.ceil(h / 2)); SSAO.compMat.uniforms.uRes.value.set(w, h); SSAO.compMat.uniforms.uAORes.value.set(Math.ceil(w / 2), Math.ceil(h / 2)); }
+function renderFrame() {
+  if (!SSAO.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
+  ssaoTargets();
+  renderer.setRenderTarget(SSAO.rt); renderer.render(scene, camera);
+  const U = SSAO.aoMat.uniforms; U.tDepth.value = SSAO.rt.depthTexture; U.uProj.value.copy(camera.projectionMatrix); U.uInvProj.value.copy(camera.projectionMatrixInverse);
+  renderer.setRenderTarget(SSAO.ao); renderer.render(SSAO.aoScene, quadCam);
+  SSAO.compMat.uniforms.tColor.value = SSAO.rt.texture; SSAO.compMat.uniforms.tAO.value = SSAO.ao.texture;
+  renderer.setRenderTarget(null); renderer.render(SSAO.compScene, quadCam); }
+
 const SUN = new THREE.Vector3(-0.62, 0.42, 0.36).normalize();
 // real-time sun shadows for units and buildings; the terrain shader samples the same map (its own relief shadow stays baked)
 const TERR_SHOW = { value: 0 };   // territory overlay: shown while placing a building or when toggled on the map
@@ -1922,7 +1992,10 @@ addEventListener('keydown', e => { if (!placing) return; if (e.key === 'q' || e.
 addEventListener('keydown', e => { if (!placing) return; if (e.key === 'Escape') stopPlacing(); if (e.key === 'r' || e.key === 'R') rotatePlacing(placing.B.snap ? Math.PI : Math.PI / 2); });
 $('objToggle').addEventListener('click', () => { const b = $('objBody'); b.hidden = !b.hidden; $('objToggle').src = 'assets/ui/' + (b.hidden ? 'down' : 'up') + '.png'; });
 $('bPause').addEventListener('click', () => { PAUSED = !PAUSED; $('bPause').classList.toggle('on', PAUSED); $('pausedMsg').classList.toggle('uihidden', !PAUSED); });
-for (const [id, msg] of [['bOptions', 'Options are not available yet'], ['bSave', 'Saving is not available yet'], ['bExit', 'Exit is not available in this build']])
+const toggleAO = () => { SSAO.on = !SSAO.on; feedMsg('Ambient occlusion ' + (SSAO.on ? 'ON' : 'OFF')); $('bOptions').classList.toggle('on', SSAO.on); };
+$('bOptions').addEventListener('click', toggleAO); $('bOptions').title = 'Ambient occlusion on / off (O)';
+addEventListener('keydown', e => { if ((e.key === 'o' || e.key === 'O') && !e.repeat && e.target === document.body) toggleAO(); });
+for (const [id, msg] of [['bSave', 'Saving is not available yet'], ['bExit', 'Exit is not available in this build']])
   $(id).addEventListener('click', () => { const f = $('feed'); const d = document.createElement('div'); d.textContent = msg; f.append(d); setTimeout(() => d.remove(), 3000); });
 $('bFocus').addEventListener('click', () => { const s = Battle.selectables().filter(u => u.sel); if (!s.length) return; cam.x = s[0].pos.x * 12; cam.z = s[0].pos.z * 12; });
 addEventListener('keydown', e => { if (e.key === 'p' || e.key === 'P') $('bPause').click(); if (e.key === 'h' || e.key === 'H') Battle.command('hold'); if (e.key === 's' && e.ctrlKey) e.preventDefault(); if (e.key === 'a' || e.key === 'A') setCmd('attack'); });
@@ -2283,7 +2356,7 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     update(dt); placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now);
     waterMat.uniforms.uTime.value = now / 1000;
-    renderer.render(scene, camera);
+    renderFrame();
     drawMini(); updateUI(dt);
   });
 }, 30));
