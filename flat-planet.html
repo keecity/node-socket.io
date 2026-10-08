@@ -280,6 +280,13 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   <div class="bd" style="padding:6px 10px 8px;display:flex;flex-direction:column;gap:5px"><div class="barrow"><img class="ico" src="assets/ui/health.png" alt=""><div class="bar"><i id="dpHpBar" style="background:var(--green)"></i></div><span class="n" id="dpHp"></span></div>
     <div id="dpInfo" style="font-size:12px;color:var(--dim)"></div>
     <button class="abtn" id="dpTank" style="display:flex;align-items:center;gap:8px;width:100%;padding:4px 8px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer;text-align:left;position:relative;overflow:hidden"><img class="ico" src="assets/ui/deploy.png" alt="" style="width:18px;height:18px"><span style="flex:1">Build tank</span><small id="dpTankC" style="color:var(--gold);font-size:11px"></small><i id="dpTankP" style="position:absolute;left:0;bottom:0;height:3px;background:var(--cyan)"></i></button></div></div>
+<div id="pwpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:282px;font-size:13px"><div class="hd"><span>Power plant</span><img class="ico" id="pwClose" src="assets/ui/exit.png" alt="Close"></div>
+  <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--dim)">OUTPUT</span><b id="pwOut"></b></div>
+    <div class="bar" style="height:8px;background:rgba(255,255,255,.08)"><i id="pwBar" style="display:block;height:100%;background:var(--cyan)"></i></div>
+    <div id="pwState" style="font-size:12px"></div>
+    <div id="pwUsers" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
+    <button class="abtn" id="pwUp" style="display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;background:rgba(18,34,52,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer;text-align:left"><img class="ico" src="assets/ui/power.png" alt="" style="width:18px;height:18px"><span id="pwUpT" style="flex:1"></span><small id="pwUpC" style="color:var(--gold);font-size:11px"></small></button></div></div>
 <div id="abpanel" class="ui pn uihidden"><div class="hd"><span>Air base</span><img class="ico" id="abClose" src="assets/ui/exit.png" alt="Close"></div>
   <div class="bd"><div class="barrow"><img class="ico" src="assets/ui/health.png" alt=""><div class="bar"><i id="abHpBar" style="background:var(--green)"></i></div><span class="n" id="abHp"></span></div>
     <h6>LANDING PADS</h6><div id="abPads"></div>
@@ -1972,7 +1979,7 @@ function selectRect(ax, ay, bx, by, keepIfEmpty) {
   for (const u of Battle.selectables()) { const p = toScreen(u, v3); if (!p) continue;
     if (click ? Math.hypot(p.x - x1, p.y - y1) < 24 : p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) picked.push(u); }
   if (click && picked.length > 1) picked.length = 1;
-  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); } } }
+  if (click && !picked.length) { const t = pickGround(x1, y1), b = t && Battle.airbaseAt2D(t.x, t.z); if (b && b.team === 0 && b.alive) openAB(b); else { const h = t && Battle.hangarAt2D(t.x, t.z); if (h && h.team === 0) openHG(h); else { const w = t && Battle.warehouseAt2D(t.x, t.z); if (w && w.team === 0) openDP(w); else { const pt = t && Battle.plantAt2D(t.x, t.z); if (pt && pt.idx === 0) openPW(); } } } }
   if (keepIfEmpty && !picked.length) return; Battle.select(picked);
 }
 
@@ -2194,6 +2201,17 @@ $('pNo').addEventListener('click', () => stopPlacing());
 // building placement on phones: the ghost starts in the middle of the screen; drag it, then tap BUILD
 setInterval(() => { document.body.classList.toggle('placing', !!placing); if (placing && isMob() && !placing.at) placeAt(innerWidth / 2, innerHeight / 2); }, 150);
 function showAlert() {}
+// ---- power plant panel: output, what draws it, upgrade
+let pwOpen = false;
+function openPW() { pwOpen = true; for (const id of ['abpanel', 'hgpanel', 'dppanel']) $(id).classList.add('uihidden'); abSel = hgSel = dpSel = null; $('pwpanel').classList.remove('uihidden'); pwRender(); }
+$('pwClose').addEventListener('click', () => { pwOpen = false; $('pwpanel').classList.add('uihidden'); });
+$('pwUp').addEventListener('click', () => { const why = Battle.upgradePlant(0); if (why) feedMsg(why); pwRender(); });
+const PW_NAMES = { homes: 'Homes', hangar: 'Mech hangars', airbase: 'Air bases', mine: 'Mines', wh: 'Depots', pump: 'Oil pumps', outpost: 'Outposts', camp: 'Woodcutters', farm: 'Farms', water: 'Water towers' };
+function pwRender() { if (!pwOpen) return; const g = Battle.POWER[0], L = Battle.PLANT_CAP;
+  $('pwOut').textContent = `${Math.round(g.demand)} / ${g.supply} MW  (level ${g.level + 1})`; $('pwBar').style.width = Math.min(100, g.demand / Math.max(1, g.supply) * 100) + '%'; $('pwBar').style.background = g.eff < 1 ? '#ef4444' : 'var(--cyan)';
+  $('pwState').innerHTML = g.supply === 0 ? '<span style="color:#ff7a6a">Plant offline</span>' : g.eff < 1 ? `<span style="color:#ff7a6a">Overloaded: buildings run at ${Math.round(g.eff * 100)}% speed</span>` : `<span style="color:#7ee08a">Grid OK — ${Math.round(g.supply - g.demand)} MW spare</span>`;
+  $('pwUsers').innerHTML = Object.entries(g.users).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${PW_NAMES[k] || k}: ${Math.round(v)} MW`).join('<br>');
+  const max = g.level >= L.length - 1; $('pwUpT').textContent = max ? 'Fully upgraded' : `Upgrade to ${L[g.level + 1]} MW`; $('pwUpC').textContent = max ? '' : costTxt(Battle.PLANT_UP[g.level]); $('pwUp').style.opacity = max || Battle.canAfford(0, Battle.PLANT_UP[g.level] || {}) ? .5 : 1; }
 // ---- depot panel: builds tanks
 let dpSel = null;
 function openDP(w) { if (!w.done) return feedMsg('Depot under construction: ' + Math.ceil(Battle.siteLeft(w)) + ' s left'); dpSel = w; for (const id of ['abpanel', 'hgpanel']) $(id).classList.add('uihidden'); abSel = hgSel = null; $('dppanel').classList.remove('uihidden'); dpRender(); }
@@ -2258,9 +2276,9 @@ $('bTerr').addEventListener('click', () => { terrToggle = !terrToggle; $('bTerr'
 function updateUI(dt) {
   TERR_SHOW.value += ((terrToggle || placing ? 1 : 0) - TERR_SHOW.value) * Math.min(1, dt * 8);
   if (!PAUSED) { missionT += dt; for (const k in RES) RES[k] += RATE[k] / 60 * dt; }
-  uiT -= dt; if (uiT > 0) return; uiT = 0.15; abRender(); hgRender(); dpRender();
+  uiT -= dt; if (uiT > 0) return; uiT = 0.15; abRender(); hgRender(); dpRender(); pwRender();
   $('mclock').textContent = fmtT(missionT);
-  $('rPower').innerHTML = Math.floor(RES.power).toLocaleString() + `<i>+${RATE.power}/min</i>`;
+  { const g = Battle.POWER && Battle.POWER[0]; if (g) { $('rPower').innerHTML = `${Math.round(g.demand)}/${g.supply}<i>MW</i>`; $('rPower').style.color = g.eff < 1 ? '#ff7a6a' : ''; } }
   $('rCredits').innerHTML = Math.floor(Battle.CR[0]).toLocaleString() + `<i>+${Battle.CR_RATE}/min</i>`; refreshCosts();
   $('rAlloy').innerHTML = Math.floor(RES.alloy).toLocaleString() + `<i>+${RATE.alloy}/min</i>`;
   $('rOil').innerHTML = Math.floor(Battle.OIL[0]).toLocaleString() + `<i>+${Battle.oilRate(0)}/min</i>`;

@@ -585,7 +585,7 @@ function buildTown(t, idx) {
     root.add(plant.group); curTown.plant = plant;
     const half = 23 * PK;
     blockers.push({ x: gx, z: gz, hw: (half + 0.25) * TS, hd: (half + 0.25) * TS });
-    const pp = newProp('plant', px, pz, 0, half * 1.42, Hd(px, pz) + 38 * PK, { hw: half, hd: half, y0: Hd(px, pz) - 0.05 }); pp.total = 0; registerProp(pp);
+    const pp = newProp('plant', px, pz, 0, half * 1.42, Hd(px, pz) + 38 * PK, { hw: half, hd: half, y0: Hd(px, pz) - 0.05 }); pp.total = 0; registerProp(pp); curTown.plantProp = pp;
   }
   curTown.hq = buildTower(cx + 0.95, cz - 0.95, teamCol);   // in the corner lot beside the central crossing (the plaza is a street crossing now)
   TL = null;
@@ -1138,7 +1138,7 @@ function finishResearch(team, key) { HELI_UP[team][key]++;
   log(team, `<b>${TEAM_NAME[team]}</b> research complete: ${UPGRADES[key].name} ${['I', 'II', 'III'][HELI_UP[team][key] - 1]}`); }
 function updateAirbases(dt) { const c = camD();
   for (const b of airbases) { b.obj.position.set(disp(b.x, c.x), b.y, disp(b.z, c.z)); b.alertT = (b.alertT || 0) - dt; if (!b.alive) continue;
-    if (b.queue > 0 && b.done) { if (baseHelis(b) >= AB_CAP) b.queue = 0; else { b.buildT += dt; if (b.buildT >= HELI_BUILD) { b.buildT = 0; b.queue--; const p = b.pads.find(p => !p.heli || !(p.heli.alive || p.heli.falling));
+    if (b.queue > 0 && b.done) { if (baseHelis(b) >= AB_CAP) b.queue = 0; else { b.buildT += dt * pe(b.team); if (b.buildT >= HELI_BUILD) { b.buildT = 0; b.queue--; const p = b.pads.find(p => !p.heli || !(p.heli.alive || p.heli.falling));
           const h = makeHeli(b.team, p.x, p.z); h.home = b; h.pad = p; p.heli = h; h.mode = 'landed'; h.pos.set(p.x, p.y + h.skid, p.z); h.yaw = b.rot; h.rotor = 0; h.anchor = { x: p.x, z: p.z };
           log(b.team, `<b>${TEAM_NAME[b.team]}</b> new gunship ready on the pad`); } } }
     const sev = 1 - b.hp / b.maxHp; if (sev > 0.35 && chance(dt * 4 * sev)) { const p = abWorld(b, rand(-13, -5), rand(-20, 4)); FX.darkSmoke(new THREE.Vector3(p.x, b.y + 0.5, p.z), 1, 0.8 + sev); } }
@@ -1248,7 +1248,7 @@ function destroyPump(p) { p.alive = false; const v = new THREE.Vector3(p.x, p.y 
   log(p.team, `<b>${TEAM_NAME[p.team]}</b> oil pump destroyed`); }
 function updatePumps(dt) { const c = camD();
   for (const p of pumpjacks) { p.obj.position.set(disp(p.x, c.x), p.y, disp(p.z, c.z)); p.alertT = (p.alertT || 0) - dt; if (!p.alive || !p.done) continue;
-    OIL[p.team] += PJ_RATE / 60 * dt;
+    OIL[p.team] += PJ_RATE / 60 * dt * pe(p.team);
     if (p.mixer && Math.hypot(wd(p.x * S - cam.x), wd(p.z * S - cam.z)) < 900) p.mixer.update(dt); } }
 const oilRate = team => pumpjacks.filter(p => p.team === team && p.alive && p.done).length * PJ_RATE;
 // ------------------------------------------------------------------ woodcutter camps
@@ -1309,12 +1309,12 @@ function updateCamps(dt) { const c = camD();
   for (const p of camps) { p.obj.position.set(disp(p.x, c.x), p.y, disp(p.z, c.z)); p.alertT = (p.alertT || 0) - dt; if (!p.alive || !p.done || p.depleted) continue;
     let changed = false;
     // 1) fell the nearest standing tree in reach when the rack has room for its 2 logs
-    if (!p.noTrees && p.logs + 2 <= p.logCap) { p.fellT -= dt; if (p.fellT <= 0) { p.fellT = WC_FELL; const T = campTrees(p);
+    if (!p.noTrees && p.logs + 2 <= p.logCap) { p.fellT -= dt * pe(p.team); if (p.fellT <= 0) { p.fellT = WC_FELL; const T = campTrees(p);
         if (!T.length) { p.noTrees = true; log(p.team, `<b>${TEAM_NAME[p.team]}</b> woodcutter camp has no trees left in reach`); }
         else { T.sort((a, c) => a.d - c.d); const t = T[0]; if (fellTree(t)) { p.logs += 2; p.felled++; changed = true;
             FX.dust(new THREE.Vector3(wm(t.x / S), t.y / S + 0.05, wm(t.z / S)), 14, { size: [0.08, 0.4], life: [0.8, 1.6], vel: 0.35, up: 0.12, a: 0.45, col: [0.55, 0.47, 0.36] }); } } } }
     // 2) the saw cuts a log into boards while the drying stacks have room
-    if (p.logs > 0 && p.boards < p.boardCap && !p.pickT) { p.sawT -= dt; if (p.sawT <= 0) { p.sawT = WC_SAW; p.logs--; p.boards = Math.min(p.boardCap, p.boards + BOARDS_PER_LOG); changed = true;
+    if (p.logs > 0 && p.boards < p.boardCap && !p.pickT) { p.sawT -= dt * pe(p.team); if (p.sawT <= 0) { p.sawT = WC_SAW; p.logs--; p.boards = Math.min(p.boardCap, p.boards + BOARDS_PER_LOG); changed = true;
         const sp = wcWorld(p, -1 * WC_K, 0.7 * WC_K); FX.dust(new THREE.Vector3(sp.x, p.y + 0.15, sp.z), 6, { size: [0.03, 0.12], life: [0.5, 1], vel: 0.15, up: 0.06, a: 0.5, col: [0.85, 0.72, 0.5] }); } }
     // 3) full stacks (or the last boards once the forest is gone) are picked up and banked
     const last = p.noTrees && !p.logs && p.boards > 0;
@@ -1403,7 +1403,7 @@ function updateMines(dt) { const c = camD(), ax = BELT_B.clone().sub(BELT_A);
   for (const p of mines) { p.obj.position.set(disp(p.x, c.x), p.y, disp(p.z, c.z)); p.alertT = (p.alertT || 0) - dt; if (!p.alive || !p.done) continue;
     const full = p.bins.every(f => f >= 1), running = !full && p.hopper < 1; let changed = false;
     // the belt carries its ore up to the hopper; each chunk that drops off the head pulley adds to the hopper and a new one comes out of the tunnel
-    if (running) for (const b of p.belt) { b.t += dt / MN_BELT_T; if (b.t > 1.02) { b.t -= 1.04; p.hopper = Math.min(1, p.hopper + 1 / MN_LOAD); changed = true; }
+    if (running) for (const b of p.belt) { b.t += dt * pe(p.team) / MN_BELT_T; if (b.t > 1.02) { b.t -= 1.04; p.hopper = Math.min(1, p.hopper + 1 / MN_LOAD); changed = true; }
       b.o.visible = b.t > -0.02 && b.t < 1.0; b.o.position.copy(BELT_A).addScaledVector(ax, clamp(b.t, 0, 1)).add(b.off); b.o.rotation.x += dt * 0.5; }
     // a full hopper tips into the first storage bin with room
     if (p.hopper >= 1 && !p.dumpT) p.dumpT = 1;
@@ -1474,7 +1474,7 @@ function farmImpact(pt, radius, power, kind) { for (const p of farms) { if (!p.a
 // crops grow while the farm stands; ripe crops are harvested (food banked) and the plots replanted
 function updateFarms(dt) { const c = camD();
   for (const p of farms) { p.obj.position.set(disp(p.x, c.x), p.y, disp(p.z, c.z)); if (!p.alive || !p.done) continue;
-    if (p.grow < 1) { p.grow = Math.min(1, p.grow + dt / FM_GROW); setGrowth(p); }
+    if (p.grow < 1) { p.grow = Math.min(1, p.grow + dt * pe(p.team) / FM_GROW); setGrowth(p); }
     else if (hasWarehouse(p.team)) { if (!p.truck) sendTruck(p, 'food'); }   // ripe crops wait for a truck
     else { p.ripeT += dt; if (p.ripeT > 6) { p.ripeT = 0; p.grow = 0; FOOD[p.team] += FM_HARVEST; setGrowth(p);
         FX.dust(new THREE.Vector3(p.x, p.y + 0.05, p.z), 20, { size: [0.1, 0.5], life: [0.8, 1.6], vel: 0.5, up: 0.1, a: 0.4, col: [0.5, 0.4, 0.3] }); } } } }
@@ -1877,12 +1877,12 @@ function updateHangars(dt) { const c = camD();
     if (head && head.svc && !head.order && !(head.svc.head)) placeQueue(h);
     // work on the docked mech: repair, then the upgrade; out it goes when done
     const J = h.job; if (J) { const f = J.f; if (f.state === 'ko' || !robots.includes(f)) { h.bay = null; h.job = null; placeQueue(h); }
-      else { J.t += dt; const rate = f.maxHp / 30 * (1 + 0.5 * MECH_UP[f.team].repair); f.hp = Math.min(f.maxHp, f.hp + rate * dt); f.boost = 100;
+      else { J.t += dt; const rate = f.maxHp / 30 * (1 + 0.5 * MECH_UP[f.team].repair); f.hp = Math.min(f.maxHp, f.hp + rate * dt * pe(f.team)); f.boost = 100;
         if (chance(dt * 6)) { const sp = hgWorld(h, rand(-4, 4), rand(-2, 4)); FX.sparks(new THREE.Vector3(sp.x, h.y + rand(0.3, 1.2), sp.z), 3, [1, 0.8, 0.4], 0.8); }
         if (J.upTime && J.t >= J.upTime) { applyMechLevels(f, { ...MECH_UP[f.team] }); J.upTime = 0; delete mechLvl(f).repair; log(f.team, `<b>${unitName(f)}</b> upgraded at the hangar`); }
         if (!J.upTime && f.hp >= f.maxHp) undock(h); } }
     // building a mech: only with an empty bay
-    if (!h.bay && h.buildQ.length && !h.queue.some(f => f.svc && f.svc.head && wdist2(f.pos.x, f.pos.z, ...Object.values(hgWorld(h, HG_DOOR[0], HG_DOOR[1]))) < 1.5)) { h.building = true; h.buildT += dt;
+    if (!h.bay && h.buildQ.length && !h.queue.some(f => f.svc && f.svc.head && wdist2(f.pos.x, f.pos.z, ...Object.values(hgWorld(h, HG_DOOR[0], HG_DOOR[1]))) < 1.5)) { h.building = true; h.buildT += dt * pe(h.team);
       if (chance(dt * 8)) { const sp = hgWorld(h, rand(-4, 4), rand(-3, 3)); FX.sparks(new THREE.Vector3(sp.x, h.y + rand(0.2, 1.6), sp.z), 4, [1, 0.85, 0.5], 1); }
       if (h.buildT >= MECH_BUILD) { h.buildT = 0; h.building = false; const role = h.buildQ.shift(), b = hgWorld(h, HG_BAY[0], HG_BAY[1]), f = makeRobot(h.team, role, b.x, b.z); f.yaw = h.rot; applyMechLevels(f, { weapons: MECH_UP[h.team].weapons, armor: MECH_UP[h.team].armor, boost: MECH_UP[h.team].boost }); f.hp = f.maxHp;
         h.bay = f; f.docked = h; h.job = null; undock(h); log(h.team, `<b>${TEAM_NAME[h.team]}</b> new ${role} rolls out of the hangar`); } }
@@ -3215,7 +3215,7 @@ function updateTanks(dt) { const c = camD();
   updateShells(dt); }
 // ---- depots build tanks: one at a time, they roll out of the lot
 function queueTank(w) { if (!w.alive || !w.done) return 'Depot not ready'; w.tankQ = w.tankQ || 0; if (w.tankQ >= 3) return 'Build queue full'; w.tankQ++; if (w.tankQ === 1) w.tankT = 0; return null; }
-function updateDepots(dt) { for (const w of warehouses) { if (!w.alive || !w.done || !w.tankQ) continue; w.tankT = (w.tankT || 0) + dt;
+function updateDepots(dt) { for (const w of warehouses) { if (!w.alive || !w.done || !w.tankQ) continue; w.tankT = (w.tankT || 0) + dt * pe(w.team);
   if (w.tankT >= TANK_BUILD && tankProto) { w.tankT = 0; w.tankQ--; const p = whWorld(w, rand(-0.3, 0.3), WH_D / 2 + WH_LOT + 0.5), t = makeTank(w.team, p.x, p.z, w.rot);
     const o = whWorld(w, rand(-0.6, 0.6), WH_D / 2 + WH_LOT + 1.6); t.order = { type: 'move', x: o.x, z: o.z }; log(w.team, `<b>${TEAM_NAME[w.team]}</b> tank rolls out of the depot`); } } }
 // ------------------------------------------------------------------ economy: every building, vehicle, mech and research has a price
@@ -3303,6 +3303,24 @@ function updateDemolish(dt) { for (let i = demolishing.length - 1; i >= 0; i--) 
   b.y = d.y0 - Math.pow(Math.min(1, d.t / 2.5), 2) * 0.8; if (b.obj && b.obj.children[0]) b.obj.children[0].scale.y *= 1 - dt * 0.35;
   if (chance(dt * 10)) FX.dust(new THREE.Vector3(wm(b.x + rand(-0.6, 0.6)), d.y0 + 0.05, wm(b.z + rand(-0.6, 0.6))), 4, { size: [0.1, 0.5], vel: 0.3, a: 0.4 });
   if (d.t > 2.6) { if (b.obj) { b.obj.visible = false; if (b.obj.parent) b.obj.parent.remove(b.obj); } for (const [, L] of BLISTS()) { const k = L.indexOf(b); if (k >= 0) L.splice(k, 1); } demolishing.splice(i, 1); } } }
+// ------------------------------------------------------------------ electric grid
+// Each HQ's power plant supplies a limited number of megawatts (upgradeable); every structure draws from it, homes too.
+// When demand outruns supply the whole grid browns out: buildings work at supply / demand speed (never below 15%).
+const POWER_USE = { outpost: 6, airbase: 30, hangar: 40, pump: 8, camp: 4, mine: 20, farm: 3, wh: 10, home: 0.5 };
+const PLANT_CAP = [150, 260, 400, 600], PLANT_UP = [{ cr: 1500, ore: 200 }, { cr: 2500, ore: 400, oil: 200 }, { cr: 4000, ore: 700, oil: 400 }];
+const POWER = [0, 1].map(() => ({ level: 0, supply: PLANT_CAP[0], demand: 0, eff: 1, homes: 0, users: {} }));
+const pe = team => POWER[team] ? POWER[team].eff : 1;
+let powerT = 0, homeCountT = 0;
+function updatePower(dt) { powerT -= dt; homeCountT -= dt; if (powerT > 0) return; powerT = 0.5;
+  if (homeCountT <= 0) { homeCountT = 4; for (const team of [0, 1]) { const t = towns[team]; POWER[team].homes = t ? props.filter(p => p.kind === 'house' && p.alive && p.town === t).length : 0; } }
+  for (const team of [0, 1]) { const g = POWER[team], t = towns[team], plantOk = t && (!t.plantProp || t.plantProp.alive) && !t.hqDown;
+    g.supply = plantOk ? PLANT_CAP[g.level] : 0; g.users = { homes: g.homes * POWER_USE.home }; let d = g.users.homes;
+    for (const [key, L] of BLISTS()) for (const b of L) if (b.alive && b.team === team && b.done !== false) { const u = POWER_USE[key] || 0; d += u; g.users[key] = (g.users[key] || 0) + u; }
+    g.demand = d; const was = g.eff; g.eff = d <= g.supply ? 1 : Math.max(0.15, g.supply / Math.max(1, d));
+    if (team === 0 && was === 1 && g.eff < 1) log(0, `<b>Power shortage</b>: ${Math.round(d)} MW needed, ${g.supply} MW supplied — buildings slow down. Upgrade the power plant.`); } }
+function upgradePlant(team) { const g = POWER[team]; if (g.level >= PLANT_CAP.length - 1) return 'Power plant fully upgraded'; const c = PLANT_UP[g.level], poor = canAfford(team, c); if (poor) return poor;
+  spend(team, c); g.level++; powerT = 0; log(team, `<b>${TEAM_NAME[team]}</b> power plant upgraded: ${PLANT_CAP[g.level]} MW`); return null; }
+function plantAt2D(x, z) { for (const t of towns) { const pp = t.plantProp; if (pp && pp.alive && Math.abs(wd(x - pp.x)) < pp.hw && Math.abs(wd(z - pp.z)) < pp.hd) return t; } return null; }
 // ---- enemy AI helpers
 let aiEcoT = 20, aiSquadT = 120;
 const aiCount = (list, kind) => list.filter(p => p.alive && p.team === 1 && (!kind || p.kind === kind)).length;
@@ -3363,7 +3381,7 @@ function teamUpdate(dt) {
     if (mine.length && !research[1] && ORE[1] > 1500 && chance(0.3)) { const k = Object.keys(UPGRADES)[Math.floor(rand(0, 4))], lv = HELI_UP[1][k]; if (lv < UPGRADES[k].cost.length) { const c = researchPrice(UPGRADES[k].cost[lv]); if (!canAfford(1, c) && !startResearch(1, k)) spend(1, c); } } }
   // enemy AI: economy and support — outposts toward the player, pumps on its oil fields, a depot, woodcutters by forests,
   // farms, a mine in a hillside, a mech hangar; then keeps the hangar busy and sends its soldiers into battle by gunship
-  aiEcoT -= dt; if (aiEcoT <= 0 && !towns[1].hqDown) { aiEcoT = 9; if (missionClock > 45) aiBuildNext(); aiHangar(); aiDepot(); aiInfantry(); }
+  aiEcoT -= dt; if (aiEcoT <= 0 && !towns[1].hqDown) { aiEcoT = 9; if (missionClock > 45) aiBuildNext(); aiHangar(); aiDepot(); aiInfantry(); if (POWER[1].demand > POWER[1].supply * 0.9) upgradePlant(1); }
   missionClock += dt;
   for (const h of helis) if (h.team === 1 && h.alive && h.mode === 'landed' && h.fuel > h.fuelMax * 0.9 && h.hp > h.maxHp * 0.9 && chance(dt * 0.05)) h.sortie = true;
   // enemy AI: send attack waves toward the player's units / HQ
@@ -3440,7 +3458,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt);
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt);
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3492,6 +3510,7 @@ const Battle = {
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
   setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
+  POWER, POWER_USE, PLANT_CAP, PLANT_UP, upgradePlant, plantAt2D: (xw, zw) => plantAt2D(wm(xw / S), wm(zw / S)),
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },
