@@ -952,7 +952,7 @@ function startSite(b, rect, h, time, onDone) {
   for (let r = 0; r < rows; r++) { y0 = r * SC_H * k; side(x0, z1, x1, z1, 0); side(x1, z1, x1, z0, Math.PI / 2); side(x1, z0, x0, z0, Math.PI); side(x0, z0, x0, z1, -Math.PI / 2); }
   const nx = Math.max(1, Math.round((x1 - x0) / P)), nz = Math.max(1, Math.round((z1 - z0) / P)), cw = (x1 - x0) / nx, cd = (z1 - z0) / nz;
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const m = scPiece(scTopProto); m.scale.set(cw / SC_W, k, cd / SC_W); m.position.set(x0 + (i + 0.5) * cw, top, z0 + (j + 0.5) * cd); m.visible = false; g.add(m); covers.push({ o: m, y: top }); }
-  const N = walls.length + covers.length, step = Math.min(0.45, time * 0.7 / N);
+  const N = walls.length + covers.length, step = Math.min(0.06, time * 0.2 / N);   // the whole scaffold is up within a few seconds
   const s = { b, g, walls, covers, k, t: 0, time: Math.max(time, N * step + 0.6), step, phase: 'up', downT: 0, onDone }; b.site = s; sites.push(s); return s; }
 const easeOut = t => 1 - (1 - t) * (1 - t) * (1 - t);
 function sitePuff(s, lx, lz) { const c = Math.cos(s.b.rot), sn = Math.sin(s.b.rot), x = s.b.x + lx * c + lz * sn, z = s.b.z - lx * sn + lz * c; FX.dust(new THREE.Vector3(x, s.b.y + 0.02, z), 3, { size: [0.05, 0.25], life: [0.5, 1], vel: 0.3, up: 0.08, a: 0.35 }); }
@@ -961,16 +961,16 @@ function updateSites(dt) { const c = camD();
     if (!b.alive) { battleRoot.remove(s.g); sites.splice(i, 1); continue; }
     if (s.phase === 'up') {
       // walls first, tipping up from flat on the ground; then the covers drop on top
-      s.walls.forEach((w, j) => { const u = (s.t - j * s.step) / 0.5; if (u <= 0) return; const e = easeOut(Math.min(1, u)); if (!w.o.visible) { w.o.visible = true; if (!w.y) sitePuff(s, w.o.position.x, w.o.position.z); }
+      s.walls.forEach((w, j) => { const u = (s.t - j * s.step) / 0.25; if (u <= 0) return; const e = easeOut(Math.min(1, u)); if (!w.o.visible) { w.o.visible = true; if (!w.y) sitePuff(s, w.o.position.x, w.o.position.z); }
         if (w.y) w.o.position.y = w.y + (1 - e) * w.drop; else w.m.rotation.x = (1 - e) * Math.PI / 2; });   // ground row tips up, upper rows are lowered on top
-      s.covers.forEach((cv, j) => { const u = (s.t - (s.walls.length + j) * s.step) / 0.4; if (u <= 0) return; cv.o.visible = true; cv.o.position.y = cv.y + (1 - easeOut(Math.min(1, u))) * 0.5 * s.k * SC_H; });
+      s.covers.forEach((cv, j) => { const u = (s.t - (s.walls.length + j) * s.step) / 0.22; if (u <= 0) return; cv.o.visible = true; cv.o.position.y = cv.y + (1 - easeOut(Math.min(1, u))) * 0.5 * s.k * SC_H; });
       if (s.t >= s.time) { s.phase = 'down'; s.downT = 0; b.obj.visible = true; b.done = true; s.onDone(); } }
     else {
       // covers lift off, then the walls tip back down and vanish, in reverse order
-      s.downT += dt; const st = Math.min(0.25, s.step * 0.7), nc = s.covers.length;
-      s.covers.forEach((cv, j) => { const u = (s.downT - j * st) / 0.4; if (u <= 0 || !cv.o.visible) return; cv.o.position.y = cv.y + easeOut(Math.min(1, u)) * 0.8 * s.k * SC_H; if (u >= 1) cv.o.visible = false; });
-      s.walls.forEach((w, j) => { const u = (s.downT - (nc + s.walls.length - 1 - j) * st) / 0.45; if (u <= 0 || !w.o.visible) return; const e = easeOut(Math.min(1, u)); if (w.y) w.o.position.y = w.y + e * w.drop; else w.m.rotation.x = e * Math.PI / 2; if (u >= 1) { w.o.visible = false; if (!w.y) sitePuff(s, w.o.position.x, w.o.position.z); } });
-      if (s.downT > (nc + s.walls.length) * st + 0.6) { battleRoot.remove(s.g); sites.splice(i, 1); b.site = null; } } } }
+      s.downT += dt; const st = Math.min(0.035, s.step * 0.6), nc = s.covers.length;
+      s.covers.forEach((cv, j) => { const u = (s.downT - j * st) / 0.22; if (u <= 0 || !cv.o.visible) return; cv.o.position.y = cv.y + easeOut(Math.min(1, u)) * 0.8 * s.k * SC_H; if (u >= 1) cv.o.visible = false; });
+      s.walls.forEach((w, j) => { const u = (s.downT - (nc + s.walls.length - 1 - j) * st) / 0.25; if (u <= 0 || !w.o.visible) return; const e = easeOut(Math.min(1, u)); if (w.y) w.o.position.y = w.y + e * w.drop; else w.m.rotation.x = e * Math.PI / 2; if (u >= 1) { w.o.visible = false; if (!w.y) sitePuff(s, w.o.position.x, w.o.position.z); } });
+      if (s.downT > (nc + s.walls.length) * st + 0.35) { battleRoot.remove(s.g); sites.splice(i, 1); b.site = null; } } } }
 const siteLeft = b => b.site && b.site.phase === 'up' ? Math.max(0, b.site.time - b.site.t) : 0;
 // ------------------------------------------------------------------ territory + outposts
 // Territory = union of discs: each HQ town, plus every outpost. An outpost may only be built inside its team's territory,
