@@ -295,6 +295,11 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
     <div id="mkAmts" style="display:flex;gap:4px"></div>
     <div style="display:flex;gap:6px"><button class="abtn" id="mkBuy" style="flex:1;padding:6px;background:rgba(18,52,34,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer"></button><button class="abtn" id="mkSell" style="flex:1;padding:6px;background:rgba(52,24,18,.9);border:1px solid var(--line);color:var(--text);font:600 13px Rajdhani,sans-serif;cursor:pointer"></button></div>
     <div style="font-size:11px;color:var(--dim)">Prices rise as you buy and fall as you sell, then drift back.</div></div></div>
+<div id="cheat" class="ui pn uihidden" style="left:50%;top:84px;transform:translateX(-50%);width:360px;font-size:13px;z-index:40"><div class="hd"><span>Cheat codes</span><img class="ico" id="chClose" src="assets/ui/exit.png" alt="Close"></div>
+  <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:6px">
+    <input id="chIn" autocomplete="off" spellcheck="false" placeholder="Type a code, Enter" style="padding:6px 8px;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--text);font:600 14px Rajdhani,sans-serif;letter-spacing:.08em">
+    <div id="chMsg" style="font-size:12px;min-height:16px;color:#7ee08a"></div>
+    <div id="chList" style="font-size:12px;color:var(--dim);line-height:1.6"></div></div></div>
 <div id="czpanel" class="ui pn uihidden" style="right:20px;bottom:322px;width:300px;font-size:13px"><div class="hd"><span id="czName">Citizen</span><img class="ico" id="czClose" src="assets/ui/exit.png" alt="Close"></div>
   <div class="bd" style="padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px">
     <div id="czInfo" style="font-size:12px;color:var(--dim);line-height:1.5"></div>
@@ -2265,6 +2270,26 @@ for (const k in MK) { const box = $(MK[k].el).closest('.res'); box.style.cursor 
 let flagFor = null;
 addEventListener('keydown', e => { if (!flagFor) return; if (e.key === 'Escape') { flagFor = null; hint(''); } if (e.key === 'x' || e.key === 'X') { Battle.clearPickFlag(flagFor); feedMsg('Pickup flag removed: trucks pick the nearest clear spot'); flagFor = null; } });
 el.addEventListener('mousedown', e => { if (e.button === 2 && flagFor) { flagFor = null; hint(''); } });
+// ---- cheat codes: press ` (backtick) or tap the logo to open
+const CHEATS = {
+  unlimited: ['999,999 of every resource and credits', () => { for (const A of [Battle.CR, Battle.OIL, Battle.WOOD, Battle.ORE, Battle.FOOD]) A[0] = 999999; RES.alloy = 999999; }],
+  fullpower: ['Power plant fully upgraded', () => { Battle.POWER[0].level = Battle.PLANT_CAP.length - 1; }],
+  reveal: ['Fog of war off', () => { Battle.fogOn = false; }],
+  fog: ['Fog of war back on', () => { Battle.fogOn = true; }],
+  daytime: ['Jump to noon', () => { TOD.t = 0.5; }],
+  nighttime: ['Jump to midnight', () => { TOD.t = 0; }],
+  peace: ['Calm every town: no war fear, homes full of happy people', () => { for (const t of Battle.towns) { t.warHeat = 0; t.happy = 100; } }],
+  populate: ['Fill your town to every home', () => { const t = Battle.towns[0]; if (t && t.cap) t.pop = t.cap; }] };
+CHEATS.unlimted = CHEATS.unlimited;
+$('chList').innerHTML = Object.entries(CHEATS).filter(([k]) => k !== 'unlimted').map(([k, [d]]) => `<b style="color:var(--gold);letter-spacing:.06em">${k.toUpperCase()}</b> — ${d}`).join('<br>');
+function openCheat() { $('cheat').classList.remove('uihidden'); $('chIn').value = ''; $('chMsg').textContent = ''; setTimeout(() => $('chIn').focus(), 0); }
+function closeCheat() { $('cheat').classList.add('uihidden'); $('chIn').blur(); }
+$('chClose').addEventListener('click', closeCheat);
+$('logo').addEventListener('click', openCheat);
+addEventListener('keydown', e => { if ((e.key === '`' || e.key === '~') && e.target.id !== 'chIn') { e.preventDefault(); $('cheat').classList.contains('uihidden') ? openCheat() : closeCheat(); } });
+$('chIn').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') return closeCheat(); if (e.key !== 'Enter') return;
+  const c = CHEATS[$('chIn').value.trim().toLowerCase().replace(/\s+/g, '')]; $('chMsg').style.color = c ? '#7ee08a' : '#ff7a6a';
+  if (c) { c[1](); $('chMsg').textContent = 'Cheat activated: ' + c[0]; feedMsg('Cheat activated: ' + c[0]); } else $('chMsg').textContent = 'Unknown code'; $('chIn').value = ''; });
 // ---- citizen panel: click a person to meet them
 let czSel = null;
 function pickCitizen(x, y) { let best = null, bd = 22; for (const p of Battle.peds) { if (!p.shown) continue; const t = Battle.towns[p.ti]; if (t && t.idx !== 0 && !t.found && Battle.fogOn) continue;
