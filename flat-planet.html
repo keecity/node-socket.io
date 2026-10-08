@@ -143,9 +143,8 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   /* ---------- touch / phone layout ---------- */
   canvas, #mini { touch-action: none; -webkit-user-select: none; user-select: none; }
   #mobbar, #placebar, #zoombar { display: none; }
-  body.mob #zoombar { display: flex; position: fixed; right: 6px; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 8px; z-index: 30; } body.mob #zoombar .mbtn { width: 52px; height: 52px; }
-  body.mob #mobbar { display: flex; position: fixed; left: 6px; top: 100px; flex-direction: column; gap: 6px; z-index: 30; }
-  body.mob #objectives:has(#objBody:not([hidden])) ~ #mobbar { display: none; }
+  body.mob #zoombar { display: none; position: fixed; right: 6px; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 8px; z-index: 30; } body.mob #zoombar .mbtn { width: 52px; height: 52px; }
+  body.mob #mobbar { display: flex; position: fixed; right: 6px; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 6px; z-index: 30; }
   body.mob #placebar { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); gap: 8px; z-index: 31; }
   body.mob.placing #placebar { display: flex; }
   .mbtn { min-width: 48px; height: 48px; padding: 0 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: rgba(9,20,34,.88); border: 1px solid var(--line); color: var(--text, #dfe8ee); font: 700 10px Rajdhani, sans-serif; letter-spacing: .08em; }
@@ -172,6 +171,15 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   body.mob #feed { bottom: 144px; max-width: calc(100% - 80px); font-size: 11px; }
   body.mob #placeTip { left: 50% !important; top: 48px !important; transform: translateX(-50%); white-space: normal; max-width: 90vw; text-align: center; }
   body.mob #hud { display: none; }
+  #mbuild { display: none; }
+  body.mob #mbuild { display: flex; flex-direction: column; position: fixed; left: 6px; top: 96px; width: 168px; max-height: calc(100vh - 250px); z-index: 29; }
+  #mbuildHd { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; background: rgba(9,20,34,.92); border: 1px solid var(--line); color: var(--text, #dfe8ee); font: 700 12px Rajdhani, sans-serif; letter-spacing: .12em; }
+  #mbuildHd img { width: 14px; height: 14px; margin-left: auto; }
+  body.mob #mbuild #builds { position: static; display: flex !important; flex-direction: column; gap: 3px; padding: 4px; overflow-y: auto; overflow-x: hidden; background: rgba(9,20,34,.7); border: 1px solid var(--line2); border-top: 0; }
+  body.mob #mbuild.shut #builds { display: none !important; }
+  body.mob #mbuild #builds .cmd { width: 100%; height: 38px; flex-direction: row; justify-content: flex-start; gap: 8px; padding: 0 8px; font-size: 11px; }
+  body.mob #mbuild #builds .cmd .ico { width: 18px; height: 18px; } body.mob #mbuild #builds .cmd small { margin-left: auto; }
+  body.mob #cmdtabs .tab[data-tab="build"] { display: none; }
   @media (orientation: portrait) { body.mob #unitinfo { top: auto; bottom: 240px; right: 64px; } body.mob #objectives { width: calc(100% - 12px); } body.mob #cmdbar { right: 6px; bottom: 144px; } body.mob #mapwrap { left: auto; } body.mob #abpanel, body.mob #hgpanel, body.mob #dppanel { bottom: 240px !important; } body.mob #feed { bottom: 240px; max-width: calc(100% - 220px); } }
   #pausedMsg { position: fixed; inset: 0; display: grid; place-items: center; font: 700 42px 'Orbitron', sans-serif; letter-spacing: .3em; color: rgba(230,240,248,.85); pointer-events: none; text-shadow: 0 0 20px rgba(0,0,0,.8); }
 </style>
@@ -266,6 +274,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   <button title="Grid"><img class="ico" src="assets/ui/grid.png" alt=""></button><button title="Focus selection" id="bFocus"><img class="ico" src="assets/ui/focus.png" alt=""></button></div></div>
 <div id="placeTip" class="ui" style="position:fixed;pointer-events:none;display:none;padding:4px 9px;font:600 13px Rajdhani,sans-serif;background:rgba(9,20,34,.88);border:1px solid var(--line);color:#fff;white-space:nowrap;z-index:50"></div>
 <div id="mobbar" class="ui"><button class="mbtn" id="mBox" title="Box select: drag a box over your units"><img src="assets/ui/grid.png" alt="">BOX</button><button class="mbtn" id="mAll" title="Select every unit on screen"><img src="assets/ui/follow.png" alt="">ALL</button><button class="mbtn" id="mClear" title="Clear the selection"><img src="assets/ui/exit.png" alt="">CLEAR</button></div>
+<div id="mbuild" class="ui"><button id="mbuildHd">BUILD<img src="assets/ui/up.png" alt=""></button></div>
 <div id="zoombar" class="ui"><button class="mbtn" id="zIn" aria-label="Zoom in"><b style="font-size:24px;line-height:1">+</b></button><button class="mbtn" id="zOut" aria-label="Zoom out"><b style="font-size:24px;line-height:1">&minus;</b></button></div>
 <div id="placebar" class="ui"><button class="mbtn" id="pRot"><img src="assets/ui/patrol.png" alt="">ROTATE</button><button class="mbtn ok" id="pOk"><img src="assets/ui/deploy.png" alt="">BUILD</button><button class="mbtn" id="pNo"><img src="assets/ui/exit.png" alt="">CANCEL</button></div>
 <div id="pausedMsg" class="uihidden">PAUSED</div>
@@ -1856,7 +1865,7 @@ document.querySelectorAll('.cmd').forEach(b => b.addEventListener('click', () =>
   if (c === 'stop' || c === 'hold' || c === 'deploy') { Battle.command(c); setCmd(c); setTimeout(() => setCmd('move'), 350); return; }
   setCmd(c); }));
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  $('cmds').classList.toggle('uihidden', t.dataset.tab === 'build'); $('builds').classList.toggle('uihidden', t.dataset.tab !== 'build'); $('cmds').style.opacity = t.dataset.tab === 'special' ? 0.35 : 1; }));
+  $('cmds').classList.toggle('uihidden', t.dataset.tab === 'build'); if (!document.body.classList.contains('mob')) $('builds').classList.toggle('uihidden', t.dataset.tab !== 'build'); $('cmds').style.opacity = t.dataset.tab === 'special' ? 0.35 : 1; }));
 // ---- outpost placement: ghost follows the cursor, green where allowed (inside territory, clear ground), left-click builds
 let placing = null;
 const BUILDS = {
@@ -1931,6 +1940,11 @@ let lastAlert = null; $('alertbar').style.pointerEvents = 'auto'; $('alertbar').
 const isMob = () => matchMedia('(pointer: coarse)').matches || innerWidth < 900;
 function applyMob() { const m = isMob(); document.body.classList.toggle('mob', m); if (m && !applyMob.done) { applyMob.done = true; $('objBody').hidden = true; $('objToggle').src = 'assets/ui/down.png'; } }
 addEventListener('resize', applyMob); applyMob();
+function placeBuilds() { const m = document.body.classList.contains('mob'), b = $('builds');
+  if (m && b.parentNode !== $('mbuild')) { $('mbuild').append(b); b.classList.remove('uihidden'); }
+  else if (!m && b.parentNode === $('mbuild')) { $('cmds').after(b); b.classList.add('uihidden'); document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === 'command')); $('cmds').classList.remove('uihidden'); } }
+addEventListener('resize', placeBuilds); placeBuilds();
+$('mbuildHd').addEventListener('click', () => { const sh = $('mbuild').classList.toggle('shut'); $('mbuildHd').querySelector('img').src = 'assets/ui/' + (sh ? 'down' : 'up') + '.png'; });
 let tch = null, lpT = 0, boxMode = false;
 const tdist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), tang = (a, b) => Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
 function tapAt(x, y) {
@@ -1938,6 +1952,7 @@ function tapAt(x, y) {
   if (cmdMode === 'attack') return attackAt(x, y);
   const sel = Battle.selectables().filter(u => u.sel);
   let own = null, best = 30; for (const u of Battle.selectables()) { const p = toScreen(u, v3); if (p) { const d = Math.hypot(p.x - x, p.y - y); if (d < best) { best = d; own = u; } } }
+  if (own && sel.includes(own) && !sel.some(u => u.kind === 'soldier' && own.kind === 'heli')) return Battle.select(sel.filter(u => u !== own));   // tap a selected unit again: drop it
   if (own && !(sel.length === 1 && sel[0] === own)) { const heliPick = own.kind === 'heli' && sel.some(u => u.kind === 'soldier'); if (!heliPick) return Battle.select([own]); }
   if (sel.length) return issueMove(x, y);            // tap the ground / an enemy with units selected: move or attack
   selectRect(x, y, x, y);                            // nothing selected: open the building under the finger
@@ -1966,7 +1981,8 @@ el.addEventListener('touchmove', e => { e.preventDefault(); const T = e.touches;
 }, { passive: false });
 el.addEventListener('touchend', e => { e.preventDefault(); clearTimeout(lpT); if (!tch) return;
   if (e.touches.length) { if (tch.n === 2) tch = { n: 0 }; return; }      // lift the second finger first: ignore the leftover one
-  if (tch.n === 1) { if (tch.box) { selectRect(drag.x1, drag.y1, drag.x2, drag.y2, true); drag = null; box.hidden = true; boxMode = false; $('mBox').classList.remove('on'); }
+  if (tch.n === 1) { if (tch.box && !tch.moved) { drag = null; box.hidden = true; boxMode = false; $('mBox').classList.remove('on'); Battle.select([]); setCmd('move'); }   // long-press without dragging: clear the selection
+    else if (tch.box) { selectRect(drag.x1, drag.y1, drag.x2, drag.y2, true); drag = null; box.hidden = true; boxMode = false; $('mBox').classList.remove('on'); }
     else if (!tch.moved) tapAt(tch.x0, tch.y0); }
   tch = null; }, { passive: false });
 el.addEventListener('touchcancel', () => { clearTimeout(lpT); tch = null; drag = null; box.hidden = true; });
