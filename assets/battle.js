@@ -1600,20 +1600,27 @@ function lotBlocked(x, z, ex) { const m = 0.12;
   for (const pr of propsNear(x, z)) if (pr.alive && pr.kind !== 'lamp' && pr.kind !== 'car' && wdist2(pr.x, pr.z, x, z) < pr.r + m) return true;
   return false; }
 // off-road leg: straight if clear, otherwise A* on a fine grid around the obstacles
-function offroad(a, b, ex, foot) { const dx = wd(b.x - a.x), dz = wd(b.z - a.z), L = Math.hypot(dx, dz); let clear = true;
-  for (let s = 0.1; s < L - 0.1; s += 0.08) { const px = wm(a.x + dx * s / L), pz = wm(a.z + dz * s / L); if ((s > 0.35 && lotBlocked(px, pz, ex)) || (foot && Hd(px, pz) < 2 / S * 1.1)) { clear = false; break; } } if (clear) return [b];
+function offroad(a, b, ex, foot, blk = lotBlocked) { const dx = wd(b.x - a.x), dz = wd(b.z - a.z), L = Math.hypot(dx, dz); let clear = true;
+  for (let s = 0.1; s < L - 0.1; s += 0.08) { const px = wm(a.x + dx * s / L), pz = wm(a.z + dz * s / L); if ((s > 0.35 && blk(px, pz, ex)) || (foot && Hd(px, pz) < 2 / S * 1.1)) { clear = false; break; } } if (clear) return [b];
   const G = 0.12, pad = 2.5, nx = Math.ceil((Math.abs(dx) + pad * 2) / G), nz = Math.ceil((Math.abs(dz) + pad * 2) / G), ox = Math.min(0, dx) - pad, oz = Math.min(0, dz) - pad, N = nx * nz;
   const cell = (x, z) => Math.round((x - ox) / G) + Math.round((z - oz) / G) * nx, blocked = new Uint8Array(N).fill(255);
-  const isB = i => { if (blocked[i] === 255) { const x = (i % nx) * G + ox, z = Math.floor(i / nx) * G + oz; blocked[i] = Math.hypot(x, z) > 0.35 && (lotBlocked(wm(a.x + x), wm(a.z + z), ex) || (foot && Hd(wm(a.x + x), wm(a.z + z)) < 2 / S * 1.1)) ? 1 : 0; } return blocked[i]; };
+  const isB = i => { if (blocked[i] === 255) { const x = (i % nx) * G + ox, z = Math.floor(i / nx) * G + oz; blocked[i] = Math.hypot(x, z) > 0.35 && (blk(wm(a.x + x), wm(a.z + z), ex) || (foot && Hd(wm(a.x + x), wm(a.z + z)) < 2 / S * 1.1)) ? 1 : 0; } return blocked[i]; };
   const s0 = cell(0, 0), g0 = cell(dx, dz), gs = new Float32Array(N).fill(1e9), par = new Int32Array(N).fill(-1), open = [s0]; gs[s0] = 0;
   const h = i => Math.hypot((i % nx) - (g0 % nx), Math.floor(i / nx) - Math.floor(g0 / nx)); let it = 0;
   while (open.length && it++ < 40000) { let bi = 0; for (let k = 1; k < open.length; k++) if (gs[open[k]] + h(open[k]) < gs[open[bi]] + h(open[bi])) bi = k; const c = open.splice(bi, 1)[0]; if (c === g0) break;
     const cx = c % nx, cz = Math.floor(c / nx); for (let ddz = -1; ddz <= 1; ddz++) for (let ddx = -1; ddx <= 1; ddx++) { if (!ddx && !ddz) continue; const x2 = cx + ddx, z2 = cz + ddz; if (x2 < 0 || z2 < 0 || x2 >= nx || z2 >= nz) continue;
       const n = x2 + z2 * nx; if (n !== g0 && isB(n)) continue; const g = gs[c] + (ddx && ddz ? 1.414 : 1); if (g < gs[n]) { if (gs[n] === 1e9) open.push(n); gs[n] = g; par[n] = c; } } }
   if (par[g0] < 0) return [b]; const out = []; for (let c = g0, k = 0; c !== s0 && c >= 0; c = par[c], k++) if (k % 2 === 0) out.unshift({ x: wm(a.x + (c % nx) * G + ox), z: wm(a.z + Math.floor(c / nx) * G + oz) }); out.push(b); return out; }
-function planRoute(from, to, ex = []) { const ra = nearestRoad(from.x, from.z), rb = nearestRoad(to.x, to.z), pts = [from];
-  if (ra && rb && ra.d < 8 && rb.d < 8) { const r = roadRoute(ra, rb); if (r && r.length) { pts.push(...offroad(from, r[0], ex), ...r.slice(1)); pts.push(...offroad(r[r.length - 1], to, ex)); return pts; } }
-  pts.push(...offroad(from, to, ex)); return pts; }
+function planRoute(from, to, ex = [], blk = lotBlocked) { const ra = nearestRoad(from.x, from.z), rb = nearestRoad(to.x, to.z), pts = [from];
+  if (ra && rb && ra.d < 8 && rb.d < 8) { const r = roadRoute(ra, rb); if (r && r.length) { pts.push(...offroad(from, r[0], ex, false, blk), ...r.slice(1)); pts.push(...offroad(r[r.length - 1], to, ex, false, blk)); return pts; } }
+  pts.push(...offroad(from, to, ex, false, blk)); return pts; }
+// a semi needs room on every side: its whole footprint (cab and swinging trailer) must clear buildings, not just its centre
+const TRUCK_CLR = 0.22, TRUCK_OFF = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [.7, .7], [-.7, .7], [.7, -.7], [-.7, -.7]];
+const truckBlocked = (x, z, ex) => TRUCK_OFF.some(([a, b]) => lotBlocked(wm(x + a * TRUCK_CLR), wm(z + b * TRUCK_CLR), ex));
+// where to stop for a pickup: the clear spot nearest the producer's stock, so the rig never parks inside a building
+function approachPoint(p) { const q = pickupPoint(p); for (let r = 0; r <= 3; r += 0.1) { let best = null, bd = 1e9; const n = Math.max(1, Math.round(r * 50));
+    for (let k = 0; k < n; k++) { const a = k / n * 6.2832, x = wm(q.x + Math.cos(a) * r), z = wm(q.z + Math.sin(a) * r); if (truckBlocked(x, z, [])) continue; const d = wdist2(x, z, q.x, q.z) + wdist2(x, z, p.x, p.z) * 0.3; if (d < bd) { bd = d; best = { x, z }; } }
+    if (best) return best; } return q; }
 // ---- trucks
 function makeTruck(w, i) { const obj = new THREE.Group(), cab = makeCab(); obj.add(cab); battleRoot.add(obj);
   const tr = makeTrailer('flat'); battleRoot.add(tr); const tb = makeTrailer('box'); tb.visible = false; battleRoot.add(tb);
@@ -1631,9 +1638,9 @@ function sendTruck(p, kind) { if (!truckReq.has(p)) truckReq.set(p, missionClock
   const t = free.sort((a, b) => wdist2(a.x, a.z, p.x, p.z) - wdist2(b.x, b.z, p.x, p.z))[0], w = t.home;
   t.job = { p, kind }; t.trailer.visible = false; t.trailer = kind === 'wood' ? t.flat : t.box; t.trailer.visible = true;
   const bay = whWorld(w, 0, WH_D / 2 + 0.9), out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6);
-  t.path = [bay, out, ...planRoute(out, pickupPoint(p), [w, p]).slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
+  t.path = [bay, out, ...planRoute(out, approachPoint(p), [w], truckBlocked).slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
 function truckHome(t) { const w = t.home, out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6), bay = whWorld(w, 0, WH_D / 2 + 0.9), inside = whWorld(w, 0, -WH_D / 2 + 0.3);
-  t.path = [...planRoute({ x: t.x, z: t.z }, out, [w, t.job && t.job.p]), bay, inside]; t.pi = 0; t.state = 'back'; }
+  t.path = [...planRoute({ x: t.x, z: t.z }, out, [w], truckBlocked), bay, inside]; t.pi = 0; t.state = 'back'; }
 function updateTrucks(dt) { const c = camD();
   for (const t of trucks) { if (t.dead) { t.obj.visible = t.trailer.visible = false; continue; }
     if (t.path) { const tgt = t.path[t.pi], dx = wd(tgt.x - t.x), dz = wd(tgt.z - t.z), d = Math.hypot(dx, dz), last = t.pi === t.path.length - 1;
