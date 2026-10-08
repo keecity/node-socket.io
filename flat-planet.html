@@ -142,7 +142,8 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   .uihidden { display: none !important; }
   /* ---------- touch / phone layout ---------- */
   canvas, #mini { touch-action: none; -webkit-user-select: none; user-select: none; }
-  #mobbar, #placebar { display: none; }
+  #mobbar, #placebar, #zoombar { display: none; }
+  body.mob #zoombar { display: flex; position: fixed; right: 6px; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 8px; z-index: 30; } body.mob #zoombar .mbtn { width: 52px; height: 52px; }
   body.mob #mobbar { display: flex; position: fixed; left: 6px; top: 100px; flex-direction: column; gap: 6px; z-index: 30; }
   body.mob #objectives:has(#objBody:not([hidden])) ~ #mobbar { display: none; }
   body.mob #placebar { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); gap: 8px; z-index: 31; }
@@ -171,7 +172,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   body.mob #feed { bottom: 144px; max-width: calc(100% - 80px); font-size: 11px; }
   body.mob #placeTip { left: 50% !important; top: 48px !important; transform: translateX(-50%); white-space: normal; max-width: 90vw; text-align: center; }
   body.mob #hud { display: none; }
-  @media (orientation: portrait) { body.mob #unitinfo { top: auto; bottom: 240px; right: 6px; } body.mob #objectives { width: calc(100% - 12px); } body.mob #cmdbar { right: 6px; bottom: 144px; } body.mob #mapwrap { left: auto; } body.mob #abpanel, body.mob #hgpanel, body.mob #dppanel { bottom: 240px !important; } body.mob #feed { bottom: 240px; max-width: calc(100% - 220px); } }
+  @media (orientation: portrait) { body.mob #unitinfo { top: auto; bottom: 240px; right: 64px; } body.mob #objectives { width: calc(100% - 12px); } body.mob #cmdbar { right: 6px; bottom: 144px; } body.mob #mapwrap { left: auto; } body.mob #abpanel, body.mob #hgpanel, body.mob #dppanel { bottom: 240px !important; } body.mob #feed { bottom: 240px; max-width: calc(100% - 220px); } }
   #pausedMsg { position: fixed; inset: 0; display: grid; place-items: center; font: 700 42px 'Orbitron', sans-serif; letter-spacing: .3em; color: rgba(230,240,248,.85); pointer-events: none; text-shadow: 0 0 20px rgba(0,0,0,.8); }
 </style>
 <div id="topbar" class="ui">
@@ -265,6 +266,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   <button title="Grid"><img class="ico" src="assets/ui/grid.png" alt=""></button><button title="Focus selection" id="bFocus"><img class="ico" src="assets/ui/focus.png" alt=""></button></div></div>
 <div id="placeTip" class="ui" style="position:fixed;pointer-events:none;display:none;padding:4px 9px;font:600 13px Rajdhani,sans-serif;background:rgba(9,20,34,.88);border:1px solid var(--line);color:#fff;white-space:nowrap;z-index:50"></div>
 <div id="mobbar" class="ui"><button class="mbtn" id="mBox" title="Box select: drag a box over your units"><img src="assets/ui/grid.png" alt="">BOX</button><button class="mbtn" id="mAll" title="Select every unit on screen"><img src="assets/ui/follow.png" alt="">ALL</button><button class="mbtn" id="mClear" title="Clear the selection"><img src="assets/ui/exit.png" alt="">CLEAR</button></div>
+<div id="zoombar" class="ui"><button class="mbtn" id="zIn" aria-label="Zoom in"><b style="font-size:24px;line-height:1">+</b></button><button class="mbtn" id="zOut" aria-label="Zoom out"><b style="font-size:24px;line-height:1">&minus;</b></button></div>
 <div id="placebar" class="ui"><button class="mbtn" id="pRot"><img src="assets/ui/patrol.png" alt="">ROTATE</button><button class="mbtn ok" id="pOk"><img src="assets/ui/deploy.png" alt="">BUILD</button><button class="mbtn" id="pNo"><img src="assets/ui/exit.png" alt="">CANCEL</button></div>
 <div id="pausedMsg" class="uihidden">PAUSED</div>
 
@@ -1730,7 +1732,12 @@ addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 const el = renderer.domElement;
 el.addEventListener('contextmenu', e => e.preventDefault());
-el.addEventListener('wheel', e => { e.preventDefault(); cam.dist = Math.max(50, Math.min(650, cam.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
+el.addEventListener('wheel', e => { e.preventDefault(); const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  zoomAt(Math.exp(Math.max(-120, Math.min(120, d)) * 0.0012), e.clientX, e.clientY); }, { passive: false });
+// zoom keeping the ground under (sx, sy) where it is on screen
+function zoomAt(k, sx, sy) { const nd = Math.max(50, Math.min(650, cam.dist * k)); if (nd === cam.dist) return;
+  const a = sx != null && pickGround(sx, sy); cam.dist = nd; if (!a) return; placeCamera(); const b = pickGround(sx, sy); if (!b) return;
+  cam.x = mod(cam.x + wrapDelta(a.x - b.x, SIZE), SIZE); cam.z = mod(cam.z + wrapDelta(a.z - b.z, SIZE), SIZE); }
 el.addEventListener('mousemove', e => {
   mouse = { x: e.clientX, y: e.clientY };
   if (drag) { drag.x2 = e.clientX; drag.y2 = e.clientY; showBox(); }
@@ -1940,7 +1947,7 @@ el.addEventListener('touchstart', e => { e.preventDefault(); const T = e.touches
     if (tch.box) { drag = { x1: t.clientX, y1: t.clientY, x2: t.clientX, y2: t.clientY }; showBox(); }
     else if (placing) placeAt(t.clientX, t.clientY);
     else lpT = setTimeout(() => { if (tch && tch.n === 1 && !tch.moved) { tch.box = true; drag = { x1: tch.x, y1: tch.y, x2: tch.x, y2: tch.y }; showBox(); if (navigator.vibrate) navigator.vibrate(15); } }, 420); }
-  else if (T.length === 2) { if (drag) { drag = null; box.hidden = true; } tch = { n: 2, d: tdist(T[0], T[1]), a: tang(T[0], T[1]), my: (T[0].clientY + T[1].clientY) / 2, mx: (T[0].clientX + T[1].clientX) / 2 }; }
+  else if (T.length === 2) { if (drag) { drag = null; box.hidden = true; } const d = tdist(T[0], T[1]), a = tang(T[0], T[1]), my = (T[0].clientY + T[1].clientY) / 2, mx = (T[0].clientX + T[1].clientX) / 2; tch = { n: 2, d, a, my, mx, d0: d, a0: a, my0: my, g: null }; }
 }, { passive: false });
 el.addEventListener('touchmove', e => { e.preventDefault(); const T = e.touches; if (!tch) return;
   if (tch.n === 1 && T.length === 1) { const t = T[0], dx = t.clientX - tch.x, dy = t.clientY - tch.y;
@@ -1950,9 +1957,11 @@ el.addEventListener('touchmove', e => { e.preventDefault(); const T = e.touches;
     else if (tch.moved) panBy(dx, dy);
     tch.x = t.clientX; tch.y = t.clientY; }
   else if (tch.n === 2 && T.length === 2) { const d = tdist(T[0], T[1]), a = tang(T[0], T[1]), my = (T[0].clientY + T[1].clientY) / 2, mx = (T[0].clientX + T[1].clientX) / 2;
-    cam.dist = Math.max(50, Math.min(650, cam.dist * tch.d / Math.max(d, 1)));
-    let da = a - tch.a; da = Math.atan2(Math.sin(da), Math.cos(da)); cam.yaw -= da;
-    if (Math.abs(d - tch.d) < 6) cam.pitch = Math.max(0.25, Math.min(1.45, cam.pitch + (my - tch.my) * 0.004)); else panBy(mx - tch.mx, 0);
+    if (!tch.g) { let ta = a - tch.a0; ta = Math.atan2(Math.sin(ta), Math.cos(ta));
+      if (Math.abs(d - tch.d0) > 18) tch.g = 'pinch'; else if (Math.abs(ta) > 0.2) tch.g = 'twist'; else if (Math.abs(my - tch.my0) > 18) tch.g = 'tilt'; }
+    if (tch.g === 'pinch') zoomAt(tch.d / Math.max(d, 1), mx, my);
+    else if (tch.g === 'twist') { let da = a - tch.a; da = Math.atan2(Math.sin(da), Math.cos(da)); cam.yaw -= da; }
+    else if (tch.g === 'tilt') cam.pitch = Math.max(0.25, Math.min(1.45, cam.pitch + (my - tch.my) * 0.004));
     Object.assign(tch, { d, a, my, mx }); }
 }, { passive: false });
 el.addEventListener('touchend', e => { e.preventDefault(); clearTimeout(lpT); if (!tch) return;
@@ -1968,6 +1977,10 @@ $('mAll').addEventListener('click', () => { const list = Battle.selectables().fi
 $('mClear').addEventListener('click', () => { Battle.select([]); setCmd('move'); });
 $('pRot').addEventListener('click', () => rotatePlacing(placing && placing.B.snap ? Math.PI : Math.PI / 4));
 $('pOk').addEventListener('click', () => confirmPlace());
+for (const [id, k] of [['zIn', 0.97], ['zOut', 1 / 0.97]]) { const b = $(id); let t = 0;
+  const stop = () => { clearInterval(t); t = 0; };
+  b.addEventListener('pointerdown', e => { e.preventDefault(); stop(); zoomAt(k * k * k, innerWidth / 2, innerHeight / 2); t = setInterval(() => zoomAt(k, innerWidth / 2, innerHeight / 2), 30); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, stop); }
 $('pNo').addEventListener('click', () => stopPlacing());
 // building placement on phones: the ghost starts in the middle of the screen; drag it, then tap BUILD
 setInterval(() => { document.body.classList.toggle('placing', !!placing); if (placing && isMob() && !placing.at) placeAt(innerWidth / 2, innerHeight / 2); }, 150);
