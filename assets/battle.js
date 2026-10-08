@@ -571,8 +571,8 @@ function buildTown(t, idx) {
   }
   for (const k of ROADS) for (let s = -TOWN + 0.6; s < TOWN - 0.6; s += 0.9) {
     if (Math.hypot(s, k) > PLAZA_R + 0.2 && !onRoad(s, 0.3)) { buildLamp(cx + s, cz + k + ROAD_W / 2 + 0.05); buildLamp(cx + k - ROAD_W / 2 - 0.05, cz + s); }
-    if (r() < 0.3 && !onRoad(s, 0.3) && !(idx < 2 && s > 3.7 && k > 3)) buildCar(cx + s + 0.2, cz + k + (r() < .5 ? 0.1 : -0.1), Math.PI / 2, r);
-    if (r() < 0.3 && !onRoad(s, 0.3) && !(idx < 2 && s > 3.7 && k > 3)) buildCar(cx + k + (r() < .5 ? 0.1 : -0.1), cz + s + 0.2, 0, r);
+    r(); r(); r();   // (old block-built parked cars removed: the real car models park along the kerbs instead)
+    r(); r(); r();
   }
   const teamCol = idx === 0 ? 0xff5aa8 : idx === 1 ? 0x46b8ff : null;
   if (idx < 2 && window.PowerPlant) {
