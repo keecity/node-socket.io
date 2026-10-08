@@ -399,21 +399,23 @@ function chunkMaterial(opts, K, atlas = false) {       // per-instance planar te
 const T_FACADE = texLoader.load('assets/facade.jpg'), T_FACADE_H = texLoader.load('assets/facade_h.jpg');
 T_FACADE.encoding = THREE.sRGBEncoding; for (const t of [T_FACADE, T_FACADE_H]) { t.anisotropy = 8; t.generateMipmaps = true; }
 function rtex(f) { const t = texLoader.load('assets/' + f); t.encoding = THREE.sRGBEncoding; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; }
+// night factor (0 day .. 1 night) from the day/night cycle: lit windows and street lamps glow brighter after dark
+const NIGHT_U = { value: 0 };
 function facadeMaterial() {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, map: T_FACADE, roughness: .88 });
-  m.onBeforeCompile = sh => { sh.uniforms.tH = { value: T_FACADE_H };
+  m.onBeforeCompile = sh => { sh.uniforms.tH = { value: T_FACADE_H }; sh.uniforms.uNight = NIGHT_U;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aOff; attribute float aTile; varying vec2 vLUV; varying float vTile;')
       .replace('#include <uv_vertex>', `#include <uv_vertex>
         vec3 ap=abs(normal); vec2 pl = ap.y>0.5 ? position.xz : (ap.x>0.5 ? vec2(-position.z, position.y) : position.xy);
         vLUV = aOff + pl / 3.; vTile = aTile;`);
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vLUV; varying float vTile; uniform sampler2D tH;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vLUV; varying float vTile; uniform sampler2D tH; uniform float uNight;')
       .replace('#include <map_fragment>', `
         float tl = mod(vTile, 16.), lit = step(15.5, vTile); vec2 cell = vec2(mod(tl, 3.), floor(tl / 3.)); vec2 fr = clamp(vLUV, 0.004, 0.996);
         vec2 auv = vec2((cell.x + fr.x) / 3., 1. - (cell.y + 1. - fr.y) / 3.);
         vec4 texelColor = mapTexelToLinear(texture2D(map, auv)); float hh = texture2D(tH, auv).r;
         diffuseColor *= texelColor * mix(0.62, 1.08, hh);                              // height map as relief shading (grout, frames, recesses)
         float win = step(0.2, fr.x) * step(fr.x, 0.8) * step(0.37, fr.y) * step(fr.y, 0.76) * step(0.5, mod(tl, 3.)) * step(mod(tl, 3.), 1.5);
-        totalEmissiveRadiance += vec3(1.0, 0.68, 0.32) * 1.4 * win * lit * (1. - hh);`)
+        totalEmissiveRadiance += vec3(1.0, 0.68, 0.32) * (0.35 + 2.4 * uNight) * win * lit * (1. - hh);`)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>'); };
   m.customProgramCacheKey = () => 'facade'; return m;
 }
@@ -3489,6 +3491,7 @@ const Battle = {
   tanks, TANK_BUILD, queueTank, get tankError() { return TANK_ERR; }, _makeTank: (team, x, z, yaw) => makeTank(team, x, z, yaw), warehouseAt2D: (xw, zw) => { const x = wm(xw / S), z = wm(zw / S); return warehouses.find(w => w.alive && inWhLot(w, x, z, 0)) || null; },
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
+  setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
   buildAirbase: (xw, zw, rot) => buildAirbase(0, xw, zw, rot), airbaseGhost: () => airbaseProto ? makeAirbaseModel(true) : null, get airbaseError() { return AIRBASE_ERR; },

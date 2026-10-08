@@ -348,15 +348,15 @@ function build(opts = {}) {
   const pg = new THREE.BufferGeometry();
   pg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); pg.setAttribute('color', new THREE.BufferAttribute(col, 4)); pg.setAttribute('size', new THREE.BufferAttribute(size, 1));
   const pm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: true,
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: soft }, scale: { value: 400 } }]),
+    uniforms: Object.assign(THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: soft }, scale: { value: 400 } }]), { uTint: window.PP_TINT || (window.PP_TINT = { value: new THREE.Color(1, 1, 1) }) }),   // uTint: day/night light
     vertexShader: `attribute float size; attribute vec4 color; varying vec4 vC; uniform float scale;
       #include <fog_pars_vertex>
       void main(){ vec4 mvPosition = modelViewMatrix * vec4(position, 1.); gl_PointSize = size * scale / max(1., -mvPosition.z); gl_Position = projectionMatrix * mvPosition; vC = color;
       #include <fog_vertex>
       }`,
-    fragmentShader: `uniform sampler2D map; varying vec4 vC;
+    fragmentShader: `uniform sampler2D map; uniform vec3 uTint; varying vec4 vC;
       #include <fog_pars_fragment>
-      void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC.rgb, vC.a * t.a); if (gl_FragColor.a < .01) discard;
+      void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC.rgb * uTint, vC.a * t.a); if (gl_FragColor.a < .01) discard;
       #include <fog_fragment>
       #include <tonemapping_fragment>
       #include <encodings_fragment>

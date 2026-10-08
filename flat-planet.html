@@ -193,7 +193,7 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   <div class="res"><img class="ico" src="assets/ui/ore.png" onerror="this.onerror=null;this.src='assets/ui/alloy.png'" alt=""><div><div class="k">ORE</div><div class="v" id="rOre">0<i></i></div></div></div>
   <div class="res"><img class="ico" src="assets/ui/food.png" onerror="this.onerror=null;this.src='assets/ui/supply.png'" alt=""><div><div class="k">FOOD</div><div class="v" id="rFood">0<i></i></div></div></div>
   <div class="res"><img class="ico" src="assets/ui/supply.png" alt=""><div><div class="k">SUPPLY</div><div class="v" id="rSupply">0/60</div></div></div>
-  <div id="mtime"><div class="k">MISSION TIME</div><div class="v" id="mclock">00:00:00</div></div>
+  <div id="mtime"><div class="k">MISSION TIME <b id="todClock" style="color:#ffd27a;margin-left:6px;letter-spacing:.04em"></b></div><div class="v" id="mclock">00:00:00</div></div>
   <div id="tbright">
     <button class="tbtn" id="bPause"><img class="ico" src="assets/ui/pause.png" alt="">PAUSE</button>
     <button class="tbtn" id="bOptions"><img class="ico" src="assets/ui/options.png" alt="">OPTIONS</button>
@@ -1091,6 +1091,37 @@ function renderFrame() {
   renderer.setRenderTarget(null); renderer.render(SSAO.compScene, quadCam); }
 
 const SUN = new THREE.Vector3(-0.62, 0.42, 0.36).normalize();
+// ---- day / night: one day = 3 minutes. The light keeps its direction (terrain shadows are baked for it); its strength and colour,
+// the sky, the haze and the ambient change with the sun's height. Night: dim moonlight, lit windows and street lamps.
+const TOD = { t: 0.3, DAY: 180, day: 1, night: 0 };
+const H_DAY = HORIZON.clone(), Z_DAY = ZENITH.clone(), lc = h => new THREE.Color(h).convertSRGBToLinear();
+const H_DUSK = lc(0xc88a62), Z_DUSK = lc(0x3d4466), H_NIGHT = lc(0x161c26), Z_NIGHT = lc(0x05070d);
+const SUNC = { value: new THREE.Color(1, .93, .82) }, AMBC = { value: new THREE.Color(1, 1, 1) }, DAYK = { value: new THREE.Color(1, 1, 1) };
+const SKYU = { sunV: { value: new THREE.Vector3() }, night: { value: 0 }, time: { value: 0 }, dusk: { value: 0 } };
+const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+function updateDayNight(dt) {
+  TOD.t = (TOD.t + dt / TOD.DAY) % 1;
+  const e = Math.sin((TOD.t - 0.25) * Math.PI * 2);                         // sun height: sunrise 06:00, noon, sunset 18:00
+  const day = THREE.MathUtils.smoothstep(e, -0.06, 0.32), dusk = Math.exp(-(((e - 0.04) / 0.14) ** 2)), night = 1 - THREE.MathUtils.smoothstep(e, -0.22, 0.02);
+  TOD.day = day; TOD.night = night;
+  // sky and haze
+  HORIZON.copy(H_NIGHT).lerp(H_DAY, day).lerp(H_DUSK, dusk * 0.75); ZENITH.copy(Z_NIGHT).lerp(Z_DAY, day).lerp(Z_DUSK, dusk * 0.5);
+  if (scene.fog) scene.fog.color.copy(HORIZON);
+  // sun / moon light
+  const L = window.sunL; _c1.setRGB(1, .93, .82).lerp(_c2.setRGB(1, .55, .3), dusk * (1 - day * 0.6)); _c2.setRGB(.42, .52, .8);
+  const sunI = 1.1 * (0.14 + 0.86 * day), col = _c2.clone().lerp(_c1, THREE.MathUtils.smoothstep(e, -0.15, 0.08));
+  if (L) { L.color.copy(col); L.intensity = sunI; }
+  if (window.hemiL) { hemiL.intensity = 0.5 * (0.32 + 0.68 * day); hemiL.color.setRGB(.81, .85, .88).lerp(_c1.setRGB(.42, .5, .72), night * .8); }
+  SUNC.value.copy(col).multiplyScalar(sunI / 1.1); AMBC.value.setRGB(.36, .42, .62).lerp(_c1.setRGB(1, 1, 1), day).lerp(_c2.setRGB(1, .8, .65), dusk * .35);
+  DAYK.value.setRGB(.2, .24, .36).lerp(_c1.setRGB(1, 1, 1), day).lerp(_c2.setRGB(1, .72, .5), dusk * .4);
+  // the sun disc rises and sets along the light's own bearing
+  const az = Math.atan2(SUN.z, SUN.x), el = (TOD.t - 0.25) * Math.PI * 2;
+  SKYU.sunV.value.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)); SKYU.night.value = night; SKYU.dusk.value = dusk; SKYU.time.value += dt;
+  if (window.Battle && Battle.setNight) Battle.setNight(night);
+  (window.PP_TINT || (window.PP_TINT = { value: new THREE.Color(1, 1, 1) })).value.copy(DAYK.value);   // power-plant steam
+  const clk = document.getElementById('todClock'); if (clk) { const h = TOD.t * 24, hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 10) * 10; clk.textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + (night > .5 ? ' ☾' : ' ☀'); }
+}
+
 // real-time sun shadows for units and buildings; the terrain shader samples the same map (its own relief shadow stays baked)
 const TERR_SHOW = { value: 0 };   // territory overlay: shown while placing a building or when toggled on the map
 const SHADOW = { map: { value: null }, mat: { value: new THREE.Matrix4() }, on: { value: 0 }, texel: { value: 1 / 2048 } };
@@ -1100,13 +1131,28 @@ const FOG_NEAR = FOG_NEAR0, FOG_FAR = FOG_FAR0;
 
 // gradient sky dome that follows the camera
 const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), new THREE.ShaderMaterial({
-  side: THREE.BackSide, depthWrite: false,
-  uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSun: { value: SUN } },
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSunV: SKYU.sunV, uNight: SKYU.night, uDusk: SKYU.dusk, uT: SKYU.time },
   vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
-  fragmentShader: `uniform vec3 uH, uZ, uSun; varying vec3 vD;
-    void main(){ vec3 c = mix(uH, uZ, smoothstep(0.0, 0.6, vD.y));
-      c += vec3(1.0,.9,.75) * pow(max(dot(vD,uSun),0.),64.) * .6;
-      gl_FragColor = vec4(c,1.);
+  fragmentShader: `uniform vec3 uH, uZ, uSunV; uniform float uNight, uDusk, uT; varying vec3 vD;
+    float hs(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float ns(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f); return mix(mix(hs(i), hs(i + vec2(1,0)), f.x), mix(hs(i + vec2(0,1)), hs(i + vec2(1,1)), f.x), f.y); }
+    float fb(vec2 p){ float s = 0., a = .5; for (int i = 0; i < 5; i++) { s += a * ns(p); p = p * 2.02 + 7.3; a *= .5; } return s; }
+    void main(){
+      float up = vD.y; vec3 c = mix(uH, uZ, smoothstep(0.0, 0.6, up));
+      // sunset glow around the sun's bearing
+      float sd = max(dot(vD, uSunV), 0.); c += vec3(1., .45, .2) * pow(sd, 6.) * uDusk * .6 * (1. - smoothstep(0., .5, up));
+      // sun disc + halo
+      c += vec3(1., .92, .75) * (smoothstep(.9992, .9996, sd) * 18. + pow(sd, 200.) * 1.2 + pow(sd, 18.) * .12) * (1. - uNight * .9);
+      // moon opposite the sun, stars at night
+      float md = dot(vD, -uSunV); c += vec3(.75, .82, 1.) * (smoothstep(.99955, .9997, md) * 2.5 + pow(max(md, 0.), 60.) * .08) * uNight;
+      if (up > 0.) { vec2 sp = vD.xz / (up + .25) * 140.; float st = step(.996, hs(floor(sp))) * (.6 + .4 * sin(uT * 3. + hs(floor(sp) + 3.) * 40.));
+        c += vec3(.85, .9, 1.) * st * uNight * smoothstep(0., .25, up) * 1.2; }
+      // clouds: drifting fbm on a dome, lit by day, dark at night
+      if (up > 0.) { vec2 cp = vD.xz / (up + .12) * 1.6 + vec2(uT * .012, uT * .004); float cl = smoothstep(.52, .82, fb(cp));
+        vec3 cc = mix(vec3(.05, .06, .09), vec3(.95, .95, .97), 1. - uNight) * (1. + vec3(.5, .15, -.1) * uDusk);
+        c = mix(c, cc, cl * .55 * smoothstep(0., .18, up)); }
+      gl_FragColor = vec4(c, 1.);
       #include <tonemapping_fragment>
       #include <encodings_fragment>
     }`,
@@ -1321,7 +1367,7 @@ function buildTreeLibrary() {
 
   impostorMat = new THREE.ShaderMaterial({
     uniforms: { uAtlas: { value: rt.texture }, uVar: { value: treeLib.map(t => new THREE.Vector4(t.C.x, t.C.y, t.C.z, t.R)) },
-                uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on },
+                uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on, uDayK: DAYK },
     vertexShader: `
       attribute vec4 aInst; attribute vec2 aInst2; varying vec2 vWarXZ;
       uniform vec4 uVar[${NV}];
@@ -1340,12 +1386,12 @@ function buildTreeLibrary() {
         vShade = aInst2.y; vDist = -mv.z; vWarXZ = cen.xz;
       }`,
     fragmentShader: WAR_GLSL + `
-      uniform sampler2D uAtlas; uniform vec3 uH; uniform float uNear, uFar;
+      uniform sampler2D uAtlas; uniform vec3 uH, uDayK; uniform float uNear, uFar;
       varying vec2 vUv; varying float vShade, vDist; varying vec2 vWarXZ;
       void main(){
         vec4 t = texture2D(uAtlas, vUv);
         if (t.a < .45) discard;
-        vec3 c = t.rgb * vShade;                          // atlas colour is stored straight (not premultiplied)
+        vec3 c = t.rgb * vShade * uDayK;                  // atlas colour is stored straight (not premultiplied)
         c = mix(c, uH, smoothstep(uNear, uFar, vDist)); c = warShade(c, vWarXZ);
         gl_FragColor = vec4(c, 1.);
         #include <tonemapping_fragment>
@@ -1372,7 +1418,7 @@ function makeLeafDepthMaterial(tex) {
 }
 function makeLeafMaterial(tex, size) {
   return new THREE.ShaderMaterial({
-    uniforms: { map: { value: tex }, uSize: { value: size }, uScale: { value: 400 }, uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on },
+    uniforms: { map: { value: tex }, uSize: { value: size }, uScale: { value: 400 }, uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on, uDayK: DAYK },
     vertexShader: `
       attribute vec3 color; attribute float aSize; attribute vec4 aInst; attribute vec2 aInst2;
       uniform float uSize, uScale;
@@ -1387,12 +1433,12 @@ function makeLeafMaterial(tex, size) {
         vCol = color * aInst2.y; vDist = -mv.z; vWarXZ = (modelMatrix * vec4(p, 1.)).xz;
       }`,
     fragmentShader: WAR_GLSL + `
-      uniform sampler2D map; uniform vec3 uH; uniform float uNear, uFar;
+      uniform sampler2D map; uniform vec3 uH, uDayK; uniform float uNear, uFar;
       varying vec3 vCol; varying float vDist; varying vec2 vWarXZ;
       void main(){
         vec4 t = texture2D(map, vec2(gl_PointCoord.x, 1. - gl_PointCoord.y));
         if (t.a < .35) discard;
-        vec3 c = pow(t.rgb, vec3(2.2)) * vCol;
+        vec3 c = pow(t.rgb, vec3(2.2)) * vCol * uDayK;
         c = mix(c, uH, smoothstep(uNear, uFar, vDist)); c = warShade(c, vWarXZ);
         gl_FragColor = vec4(c, 1.);
         #include <tonemapping_fragment>
@@ -1516,7 +1562,7 @@ async function buildWorld() {
   terrainMat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     extensions: { derivatives: true },
-    uniforms: { uSun: { value: SUN }, uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR },
+    uniforms: { uSun: { value: SUN }, uSunC: SUNC, uAmbC: AMBC, uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR },
                 uAlb: { value: albedoArr }, uNrm: { value: normalArr },
                 uForest: { value: forestTex }, uSize: { value: SIZE },
                 uRoad: { value: (window.Battle && Battle.roadTex) || new THREE.DataTexture(new Uint8Array(4), 1, 1) }, uRoadW: { value: 0.46 * 12 },
@@ -1541,7 +1587,7 @@ async function buildWorld() {
         vec2 e = min(c.xy, 1. - c.xy); float edge = smoothstep(0., .06, min(e.x, e.y));      // fade out at the map's border
         return mix(1., lit / 9., edge);
       }
-      uniform vec3 uSun, uH, uZ; uniform float uNear, uFar;
+      uniform vec3 uSun, uH, uZ, uSunC, uAmbC; uniform float uNear, uFar;
       precision highp sampler2DArray; uniform sampler2DArray uAlb, uNrm;
       uniform sampler2D uForest, uRoad; uniform float uSize, uRoadW; uniform vec4 uSegs[128], uSegD[32]; uniform int uSegN;
       // green -> brown: turns the grass texture into dirt, stones (unsaturated) stay grey
@@ -1715,8 +1761,8 @@ async function buildWorld() {
         float baked = texture2D(uTreeSh, wp.xz / uSize).r * (smoothstep(uNearR * .8, uNearR, length(nd)));   // live tree shadows take over near the camera
         float diff = max(dot(bn, uSun), 0.0) * sh * dynShadow(vPos) * (1. - .7 * min(baked, 1.));
         float canopyAO = 1.0 - 0.6 * smoothstep(.05, .7, canopy);                        // sky blocked by the tree crowns
-        vec3 amb = mix(lin(vec3(.35,.30,.25)), uZ * 2.2, bn.y * .5 + .5) * ao * canopyAO;
-        vec3 c = col * (vec3(1.0,.93,.82) * diff * 2.0 * mix(1.0, canopyAO, .6) + amb * 0.75);
+        vec3 amb = mix(lin(vec3(.35,.30,.25)), mix(lin(vec3(.45,.48,.52)), uZ * 2.2, .5), bn.y * .5 + .5) * ao * canopyAO * uAmbC;
+        vec3 c = col * (uSunC * diff * 2.0 * mix(1.0, canopyAO, .6) + amb * 0.75);
         float d = length(cameraPosition - vPos);
         // territory borders: player cyan, enemy red; a glowing line on the 0.5 contour plus a faint tint inside
         vec2 tv = texture2D(uTerr, wp.xz / uSize).rg; vec2 fw = max(fwidth(tv), vec2(1e-4));
@@ -1735,7 +1781,7 @@ async function buildWorld() {
   });
 
   buildTreeLibrary();
-  scene.add(new THREE.HemisphereLight(0xcfd8e0, 0x4a4030, 0.5));
+  const hemiL = new THREE.HemisphereLight(0xcfd8e0, 0x4a4030, 0.5); scene.add(hemiL); window.hemiL = hemiL;
   const sunL = new THREE.DirectionalLight(0xfff0dd, 1.1); sunL.position.copy(SUN); scene.add(sunL); scene.add(sunL.target); window.sunL = sunL;
   sunL.castShadow = true; sunL.shadow.mapSize.set(2048, 2048); sunL.shadow.bias = -0.00008; sunL.shadow.normalBias = 0.12;
 
@@ -1752,12 +1798,12 @@ async function buildWorld() {
   depthTex.needsUpdate = true;
   waterMat = new THREE.ShaderMaterial({
     transparent: true, extensions: { derivatives: true },
-    uniforms: { uTime: { value: 0 }, uDepth: { value: depthTex }, uSize: { value: SIZE }, uSun: { value: SUN },
+    uniforms: { uTime: { value: 0 }, uDepth: { value: depthTex }, uSize: { value: SIZE }, uSun: { value: SUN }, uDayK: DAYK,
                 uH: { value: HORIZON }, uZ: { value: ZENITH }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on },
     vertexShader: `varying vec3 vPos; void main(){ vec4 w = modelMatrix * vec4(position,1.); vPos = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: NOISE_GLSL + `
       ` + WAR_GLSL + `
-      uniform float uTime, uSize, uNear, uFar; uniform sampler2D uDepth; uniform vec3 uSun, uH, uZ;
+      uniform float uTime, uSize, uNear, uFar; uniform sampler2D uDepth; uniform vec3 uSun, uH, uZ, uDayK;
       varying vec3 vPos;
       vec3 lin(vec3 c){ return pow(c, vec3(2.2)); }
       float wh(vec2 p){ float t = uTime;
@@ -1783,6 +1829,7 @@ async function buildWorld() {
         float alpha = mix(.45, .96, smoothstep(0.0, .35, depth)) ;
         alpha = max(alpha, foam);
         float dw = length(cameraPosition - vPos);
+        c *= uDayK;
         c = mix(c, uH, smoothstep(uNear, uFar, dw));
         c = warShade(c, vPos.xz);
         // opaque where there is no terrain drawn under it (far away) and where it is fogged, so the sky never shows through
@@ -2371,7 +2418,7 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   let last = performance.now();
   renderer.setAnimationLoop(now => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    update(dt); placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now);
+    update(dt); if (!PAUSED) updateDayNight(dt); placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now);
     waterMat.uniforms.uTime.value = now / 1000;
     renderFrame();
     drawMini(); updateUI(dt);
