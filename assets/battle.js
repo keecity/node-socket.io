@@ -20,7 +20,7 @@ const S = BATTLE_S, W = SIZE / S;
 const wd = d => d - W * Math.round(d / W);                          // shortest wrapped delta
 const wm = x => ((x % W) + W) % W;
 const wdist2 = (ax, az, bx, bz) => Math.hypot(wd(bx - ax), wd(bz - az));
-const Hd = (x, z) => heightAt(x * S, z * S) / S;                     // terrain height, demo units
+const Hd = (x, z) => TL ? heightAt((TL.cx + TS * (x - TL.cx)) * S, (TL.cz + TS * (z - TL.cz)) * S) / S / TS : heightAt(x * S, z * S) / S;   // terrain height, demo units (town-local while a town is built)
 function HN(x, z, out) { const e = 0.05; return out.set(Hd(x - e, z) - Hd(x + e, z), 2 * e, Hd(x, z - e) - Hd(x, z + e)).normalize(); }
 const RNG = Math.random, rand = (a, b) => a + RNG() * (b - a), chance = p => RNG() < p;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -41,17 +41,23 @@ const RUN_SLASH_X = [0.0, 0.03609, 0.0694, 0.09994, 0.1277, 0.15268, 0.17489, 0.
 const GAIT = { Walk_Forward: 0.5279, Walk_Back: 0.3495, Walk_Strafe_L: 0.25, Walk_Strafe_R: 0.25, Run_Forward: 1.1243 };
 
 // ------------------------------------------------------------------ towns & roads (planned before the light bake)
-const TOWN = 6.4, ROADS = [0, -3.2, 3.2], ROAD_W = 0.46, PLAZA_R = 1.35;
+// real-world scale, set by the people (1.7 m): towns and the map are 2.5x the original layout so houses, streets and blocks
+// are house-sized next to a person. The town builder still works in the original (local) units; every piece it places is
+// mapped out from the town centre by TS, together with the terrain heights it reads (see Hd / addChunk / registerProp).
+const TS = 2.5, MS = 2.5;
+const TOWN0 = 6.4, ROADS0 = [0, -3.2, 3.2], ROAD_W0 = 0.46, PLAZA_R0 = 1.35;
+const TOWN = TOWN0 * TS, ROADS = ROADS0.map(v => v * TS), ROAD_W = ROAD_W0 * TS * 0.8, PLAZA_R = PLAZA_R0 * TS;
+let TL = null;                                                       // town being built: {cx, cz} in demo units
 const TOWNS = [], TOWN_TREES = []; let Battle_roadSegs = [];                    // {x,z} centres in demo units, [0] = player HQ, [1] = enemy HQ
 const RM = 2048;                     // road mask resolution (2 world units per texel)
 const roadMask = new Float32Array(RM * RM), roadPerp = new Float32Array(RM * RM), roadDir = new Float32Array(RM * RM * 2), roadJunc = new Uint8Array(RM * RM), roadSeg = new Float32Array(RM * RM * 2);   // coverage, distance from centre line, doubled-angle direction
 let roadTex = null, ROAD_NET = null;
-const ROAD_HW = ROAD_W / 2 * S + 0.8;   // half of the painted road width incl. kerbs and sidewalks (world units)
+const ROAD_HW = ROAD_W / 2 * S + 2.0;   // half of the painted road width incl. kerbs and sidewalks (world units)
 function roadAt(xw, zw) { const i = Math.floor(mod(xw, SIZE) / SIZE * RM), j = Math.floor(mod(zw, SIZE) / SIZE * RM); return roadMask[j * RM + i]; }
 function noTreesAt(xw, zw) {                    // world units: keep forests off roads and out of towns
   if (roadAt(xw, zw) > 0.02) return true;
-  for (const t of TOWNS) if (Math.hypot(wd(xw / S - t.x), wd(zw / S - t.z)) < TOWN + 1.6) return true;
-  for (let i = 0; i < Math.min(2, TOWNS.length); i++) { const t = TOWNS[i]; if (Math.abs(wd(xw / S - t.x - 5.3)) < 2.6 && Math.abs(wd(zw / S - t.z - 5.3)) < 2.6) return true; }   // power plant lots
+  for (const t of TOWNS) if (Math.hypot(wd(xw / S - t.x), wd(zw / S - t.z)) < TOWN + 1.6 * TS) return true;
+  for (let i = 0; i < Math.min(2, TOWNS.length); i++) { const t = TOWNS[i]; if (Math.abs(wd(xw / S - t.x - 5.3 * TS)) < 2.6 * TS && Math.abs(wd(zw / S - t.z - 5.3 * TS)) < 2.6 * TS) return true; }   // power plant lots
   for (const o of outposts) if (wdist2(o.x, o.z, xw / S, zw / S) < OUTPOST_W * 0.8) return true;
   for (const b of airbases) if (inAirbaseLot(b, xw / S, zw / S)) return true;
   for (const p of pumpjacks) if (PJ_BOX && inPumpLot(p, wm(xw / S), wm(zw / S), 0.3)) return true;
@@ -65,11 +71,11 @@ function noTreesAt(xw, zw) {                    // world units: keep forests off
 // terrain-aware link route (demo units in/out): A* over a coarse grid that penalises grade, high ground and water,
 // then smoothed into a gentle curve that leaves and enters the towns along their streets
 function routeRoad(ax, az, aox, aoz, bx, bz, box, boz) {
-  const G = 16, NG = Math.round(SIZE / G), lead = 4.6;
+  const G = 16 * MS, NG = Math.round(SIZE / G), lead = 4.6 * TS;
   const used = routeRoad.used || (routeRoad.used = new Uint8Array(NG * NG));
   // towns (streets + ring) are off limits to link routes: a link never runs back through a town's own streets
   if (!routeRoad.town) { routeRoad.town = new Uint8Array(NG * NG); for (let j = 0; j < NG; j++) for (let i = 0; i < NG; i++)
-    if (TOWNS.some(t => Math.hypot(wd(i * G / S - t.x), wd(j * G / S - t.z)) < TOWN + 3.3)) routeRoad.town[j * NG + i] = 1; }
+    if (TOWNS.some(t => Math.hypot(wd(i * G / S - t.x), wd(j * G / S - t.z)) < TOWN + 3.3 * TS)) routeRoad.town[j * NG + i] = 1; }
   const townC = routeRoad.town;   // cells near earlier links: avoid running alongside them
   const sx = (ax + aox * lead) * S, sz = (az + aoz * lead) * S, ex = (bx + box * lead) * S, ez = (bz + boz * lead) * S;
   const cell = (x, z) => [mod(Math.round(x / G), NG), mod(Math.round(z / G), NG)], hc = (i, j) => heightAt(i * G, j * G);
@@ -98,7 +104,7 @@ function routeRoad(ax, az, aox, aoz, bx, bz, box, boz) {
   else { path = [[ax, az], [ax + aox * lead, az + aoz * lead], [bx + box * lead, bz + boz * lead], [bx, bz]]; }
   // smooth (Chaikin) while pinning the two street stubs so the road leaves and enters straight along the streets
   // straight 1.5-unit stubs out of each junction are pinned; everything between them is smoothed (Chaikin) into a curve
-  { const S0 = [ax + aox * 1.5, az + aoz * 1.5], E = path[path.length - 1], E0 = [E[0] + box * 1.5, E[1] + boz * 1.5];
+  { const S0 = [ax + aox * 1.5 * TS, az + aoz * 1.5 * TS], E = path[path.length - 1], E0 = [E[0] + box * 1.5 * TS, E[1] + boz * 1.5 * TS];
     let mid2 = [S0, ...path.slice(1, -1), E0];
     for (let it = 0; it < 5; it++) { const o = [mid2[0]]; for (let k = 0; k + 1 < mid2.length; k++) { const p = mid2[k], q = mid2[k + 1]; o.push([p[0] * .75 + q[0] * .25, p[1] * .75 + q[1] * .25], [p[0] * .25 + q[0] * .75, p[1] * .25 + q[1] * .75]); } o.push(mid2[mid2.length - 1]); mid2 = o; }
     path = [path[0], ...mid2, E]; }
@@ -110,17 +116,17 @@ function planTowns() {
   // 1) pick flat, dry sites far apart and away from the wrap seam
   const cands = [];
   for (let k = 0; k < 2500; k++) {
-    const x = 200 + r() * (SIZE - 400), z = 200 + r() * (SIZE - 400), h0 = hAt(x, z);
+    const x = 200 * MS + r() * (SIZE - 400 * MS), z = 200 * MS + r() * (SIZE - 400 * MS), h0 = hAt(x, z);
     if (h0 < 4 || h0 > 45) continue;
     let s = 0, lo = 1e9, hi = -1e9;
-    for (let a = 0; a < 12; a++) for (const rr of [40, 80]) { const h = hAt(x + Math.cos(a / 12 * 6.283) * rr, z + Math.sin(a / 12 * 6.283) * rr); lo = Math.min(lo, h); hi = Math.max(hi, h); s += Math.abs(h - h0); }
+    for (let a = 0; a < 12; a++) for (const rr of [40 * TS, 80 * TS]) { const h = hAt(x + Math.cos(a / 12 * 6.283) * rr, z + Math.sin(a / 12 * 6.283) * rr); lo = Math.min(lo, h); hi = Math.max(hi, h); s += Math.abs(h - h0); }
     if (lo < 2) continue;
     cands.push({ x, z, score: s + (hi - lo) * 4 });
   }
   cands.sort((a, b) => a.score - b.score);
   for (const c of cands) {
     if (TOWNS.length >= 5) break;
-    if (TOWNS.every(t => Math.hypot(wd(c.x / S - t.x), wd(c.z / S - t.z)) * S > 700)) TOWNS.push({ x: c.x / S, z: c.z / S });
+    if (TOWNS.every(t => Math.hypot(wd(c.x / S - t.x), wd(c.z / S - t.z)) * S > 700 * MS)) TOWNS.push({ x: c.x / S, z: c.z / S });
   }
   // HQs: the two towns furthest apart
   let best = [0, 1], bd = -1;
@@ -129,7 +135,7 @@ function planTowns() {
   const rest = TOWNS.filter((_, i) => i !== a && i !== b); TOWNS.length = 0; TOWNS.push(ta, tb, ...rest);
 
   // 2) flatten the ground under each town
-  const R0 = (TOWN + 3.6) * S, R1 = R0 * 1.6;
+  const R0 = (TOWN + 3.6 * TS) * S, R1 = R0 * 1.6;
   for (const t of TOWNS) {
     const cx = t.x * S, cz = t.z * S; let sum = 0, n = 0;
     for (let k = 0; k < 200; k++) { const a2 = r() * 6.283, rr = Math.sqrt(r()) * R0; sum += hAt(cx + Math.cos(a2) * rr, cz + Math.sin(a2) * rr); n++; }
@@ -144,7 +150,7 @@ function planTowns() {
   // 3) road network. The graph is laid out first (nodes + edges), pass-through nodes are merged into continuous
   //    chains, and everything downstream (terrain cut/fill, the mask, the road meshes, car routes) works on chains:
   //    one polyline and one running distance per road, so the surface never breaks at a join.
-  const E = TOWN + 1, OFF = [...ROADS].sort((a, b) => a - b);
+  const E = TOWN + 1 * TS, OFF = [...ROADS].sort((a, b) => a - b);
   const nodes = [], edges = [];
   const node = (x, z, kind) => { nodes.push({ id: nodes.length, x, z, kind, edges: [] }); return nodes.length - 1; };
   const edge = (a, b, pts) => { edges.push({ id: edges.length, a, b, pts }); nodes[a].edges.push(edges.length - 1); nodes[b].edges.push(edges.length - 1); };
@@ -225,7 +231,7 @@ function planTowns() {
         eid = nodes[cur].edges.find(x => x !== eid); if (seen.has(eid)) break; }
       chains.push({ a: n0.id, b: cur, pts }); } }
   // resample every chain evenly in world units, with tangents and one smoothed height profile per chain
-  const STEP = 1.5, HW = ROAD_HW, inTown = (x, z) => TOWNS.some(t => Math.hypot(wd(x / S - t.x), wd(z / S - t.z)) < TOWN + 1.3);
+  const STEP = 2.5, HW = ROAD_HW, inTown = (x, z) => TOWNS.some(t => Math.hypot(wd(x / S - t.x), wd(z / S - t.z)) < TOWN + 1.3 * TS);
   for (const c of chains) {
     const P = c.pts.map(p => [p[0] * S, p[1] * S]), cum = [0];
     for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -440,6 +446,7 @@ const CH = [];                                   // chunk registry {grp, i, c, r
 const _M = new THREE.Matrix4(), _P = new THREE.Vector3(), _Q = new THREE.Quaternion(), _S = new THREE.Vector3(), _C = new THREE.Color();
 let curTown = null;
 function addChunk(g, pos, quat, scale, color, prop, meta, tile = 0, off = null) {
+  if (TL) { pos = new THREE.Vector3(TL.cx + TS * (pos.x - TL.cx), pos.y * TS, TL.cz + TS * (pos.z - TL.cz)); scale = scale.clone().multiplyScalar(TS); }
   const grp = curTown.G[g]; if (grp.n >= grp.im.instanceMatrix.count) return -1; const i = grp.n++; grp.im.count = grp.n;
   if (off) { const oa = grp.im.geometry.attributes.aOff; oa.setXY(i, off[0], off[1]); oa.needsUpdate = true; }
   const ta = grp.im.geometry.attributes.aTile; ta.setX(i, tile); ta.needsUpdate = true;
@@ -448,7 +455,8 @@ function addChunk(g, pos, quat, scale, color, prop, meta, tile = 0, off = null) 
 }
 const props = []; const propGrid = new Map(); const GRID = 0.6;
 const gk = (x, z) => Math.floor(wm(x) / GRID) + ',' + Math.floor(wm(z) / GRID);
-function registerProp(p) { props.push(p); for (let x = p.x - p.r; x <= p.x + p.r + GRID; x += GRID) for (let z = p.z - p.r; z <= p.z + p.r + GRID; z += GRID) { const k = gk(x, z); if (!propGrid.has(k)) propGrid.set(k, new Set()); propGrid.get(k).add(p); } }
+function registerProp(p) { if (TL && !p.mapped) { p.mapped = true; p.x = TL.cx + TS * (p.x - TL.cx); p.z = TL.cz + TS * (p.z - TL.cz); for (const k of ['r', 'h', 'y0', 'hw', 'hd']) if (typeof p[k] === 'number') p[k] *= TS; }
+  props.push(p); for (let x = p.x - p.r; x <= p.x + p.r + GRID; x += GRID) for (let z = p.z - p.r; z <= p.z + p.r + GRID; z += GRID) { const k = gk(x, z); if (!propGrid.has(k)) propGrid.set(k, new Set()); propGrid.get(k).add(p); } }
 function propsNear(x, z) { return propGrid.get(gk(x, z)) || []; }
 function newProp(kind, x, z, rotY, r, h, extra = {}) { return Object.assign({ kind, x, z, rotY, r, h, y0: Hd(x, z), chunks: [], alive: true, detached: 0, hits: 0, town: curTown }, extra); }
 const ROOFC = [0xffffff, 0xc0503a, 0x4a6a9a, 0x3f6e4a, 0x5a5560, 0x8a5a3a, 0x2f7a7a, 0xa83a4a, 0xc8a060, 0x6a4a7a];
@@ -542,18 +550,19 @@ function buildTower(x, z, teamCol) { const y = Hd(x, z), p = newProp('tower', x,
   addChunk('winLit', new THREE.Vector3(x, y + 0.4, z + 0.081), q, new THREE.Vector3(0.06, 0.06, 0.004), 0xffffff, p, { glass: true });
   for (let k = 0; k < 3; k++) addChunk('roof', new THREE.Vector3(x, y + 0.53 + k * 0.045, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 4, 0)), new THREE.Vector3(0.16 - k * 0.05, 0.045, 0.16 - k * 0.05), teamCol || 0xa0a8c0, p, { roof: true });
   p.total = p.chunks.length; registerProp(p); return p; }
-const onRoad = (v, m = 0) => ROADS.some(k => Math.abs(v - k) < ROAD_W / 2 + m);
+const onRoad = (v, m = 0) => ROADS0.some(k => Math.abs(v - k) < ROAD_W0 / 2 + m);   // town-local units
 const towns = [];
 function buildTown(t, idx) {
   const root = new THREE.Group(); battleRoot.add(root);
   curTown = { root, G: makeTownGroups(root), x: t.x, z: t.z, idx, props: [] };
-  const r = mulberry(seed + idx * 977); const STEP = 0.5, cx = t.x, cz = t.z;
+  const r = mulberry(seed + idx * 977); const STEP = 0.5, cx = t.x, cz = t.z; TL = { cx, cz };
+  const TOWN = TOWN0, ROADS = ROADS0, ROAD_W = ROAD_W0, PLAZA_R = PLAZA_R0;   // the layout below is in town-local units
   for (let x = -TOWN + 0.3; x <= TOWN - 0.3; x += STEP) for (let z = -TOWN + 0.3; z <= TOWN - 0.3; z += STEP) {
     const jx = x + (r() - .5) * 0.08, jz = z + (r() - .5) * 0.08, rr = Math.hypot(jx, jz);
     if (rr < PLAZA_R + 0.35 || onRoad(jx, 0.25) || onRoad(jz, 0.25) || rr > TOWN) continue;
     if (idx < 2 && jx > 3.9 && jz > 3.9) continue;                   // power plant lot
     const nearX = ROADS.some(k => Math.abs(jz - k) < 0.8), nearZ = ROADS.some(k => Math.abs(jx - k) < 0.8);
-    if (r() < ((nearX || nearZ) ? 0.62 : 0.3)) {
+    if (r() < ((nearX || nearZ) ? 0.78 : 0.42)) {
       const nearestZ = ROADS.reduce((a, k) => Math.abs(jz - k) < Math.abs(jz - a) ? k : a, 99), nearestX = ROADS.reduce((a, k) => Math.abs(jx - k) < Math.abs(jx - a) ? k : a, 99);
       const rot = nearX ? (jz > nearestZ ? Math.PI : 0) : (jx > nearestX ? -Math.PI / 2 : Math.PI / 2);
       buildHouse(cx + jx, cz + jz, rot + (r() - .5) * 0.08, r);
@@ -569,13 +578,15 @@ function buildTown(t, idx) {
   if (idx < 2 && window.PowerPlant) {
     const PK = 2.2 / 46, px = cx + 5.3, pz = cz + 5.3;   // inside the ring road              // ~43 world units across, just outside the houses
     const plant = PowerPlant.build({ accent: idx === 0 ? 0xe0579c : 0x2f6fd6 });
-    plant.group.scale.setScalar(PK); plant.group.position.set(px, Hd(px, pz) - 0.02, pz); plant.group.rotation.y = Math.PI;   // front faces the plaza
+    const gx = cx + TS * (px - cx), gz = cz + TS * (pz - cz);
+    plant.group.scale.setScalar(PK * TS); plant.group.position.set(gx, Hd(px, pz) * TS - 0.02 * TS, gz); plant.group.rotation.y = Math.PI;   // front faces the plaza
     root.add(plant.group); curTown.plant = plant;
     const half = 23 * PK;
-    blockers.push({ x: px, z: pz, hw: half + 0.25, hd: half + 0.25 });
+    blockers.push({ x: gx, z: gz, hw: (half + 0.25) * TS, hd: (half + 0.25) * TS });
     const pp = newProp('plant', px, pz, 0, half * 1.42, Hd(px, pz) + 38 * PK, { hw: half, hd: half, y0: Hd(px, pz) - 0.05 }); pp.total = 0; registerProp(pp);
   }
   curTown.hq = buildTower(cx + 0.95, cz - 0.95, teamCol);   // in the corner lot beside the central crossing (the plaza is a street crossing now)
+  TL = null;
   for (const k in curTown.G) { curTown.G[k].im.instanceMatrix.needsUpdate = true; curTown.G[k].im.instanceColor.needsUpdate = true; }
   towns.push(curTown); curTown.total = props.filter(p => p.town === curTown && p.kind !== 'plant').length; curTown.destroyed = 0;
   return curTown;
@@ -843,7 +854,7 @@ function updateRoadTiles() { const cx = cam.x, cz = cam.z, far = FOG_FAR + 400;
 
 // ------------------------------------------------------------------ traffic: cars drive the chains, turning at intersections
 const cars = []; let carProto = null;
-const CAR_LEN = 2.0, LANE = 1.35;   // world units; sized against the houses and the semi trucks
+const CAR_LEN = 4.5, LANE = 2.8;   // world units; sized against the houses and the semi trucks
 // the car model is a parts sheet: four vehicle bodies stacked in rows (top to bottom: sedan, SUV, pickup, box truck), each with its tire beside it.
 // Split the single mesh into connected pieces (vertices welded by position), group the pieces into rows, and per row keep the body and its tire.
 function splitVehicles(root) {
@@ -894,7 +905,7 @@ function spawnCars(count) {
   ROAD_NET.at = nodes.map(() => []); chains.forEach((c, i) => { ROAD_NET.at[c.a].push({ i, start: true }); ROAD_NET.at[c.b].push({ i, start: false }); });
   // which town each node belongs to, and the in-town chains that have kerbside parking
   nodes.forEach(n => { let b = 0, bd = 1e9; TOWNS.forEach((t, i) => { const d = wdist2(n.x, n.z, t.x, t.z); if (d < bd) { bd = d; b = i; } }); n.town = b; });
-  ROAD_NET.park = TOWNS.map((_, ti) => chains.map((c, i) => ({ c, i })).filter(o => nodes[o.c.a].town === ti && nodes[o.c.b].town === ti && o.c.len < 60 && o.c.len > 20).map(o => o.i));
+  ROAD_NET.park = TOWNS.map((_, ti) => chains.map((c, i) => ({ c, i })).filter(o => nodes[o.c.a].town === ti && nodes[o.c.b].town === ti && o.c.len < 60 * TS && o.c.len > 20).map(o => o.i));
   const total = chains.reduce((a, c) => a + c.len, 0), weights = [0.4, 0.3, 0.2, 0.1];
   for (let n = 0; n < count; n++) {
     let r = Math.random() * total, ci = 0; while (r > chains[ci].len && ci < chains.length - 1) { r -= chains[ci].len; ci++; }
@@ -989,7 +1000,7 @@ const terrDiscs = team => { if (!HQ_SHAPES) HQ_SHAPES = [blobShape(seed ^ 0x7a11
   const d = []; const t = towns[team]; if (t) d.push([t.x, t.z, HQ_SHAPES[team]]); for (const o of outposts) if (o.team === team && o.alive && o.done !== false) d.push([o.x, o.z, o.shape]); return d; };
 const shapeR = (fn, cx, cz, x, z) => fn(Math.atan2(wd(z - cz), wd(x - cx)));
 function inTerritory(team, x, z) { for (const [cx, cz, fn] of terrDiscs(team)) if (wdist2(cx, cz, x, z) < shapeR(fn, cx, cz, x, z)) return true; return false; }
-const TERR_N = 512, terrData = new Uint8Array(TERR_N * TERR_N * 4), terrTex = new THREE.DataTexture(terrData, TERR_N, TERR_N, THREE.RGBAFormat);
+const TERR_N = 1024, terrData = new Uint8Array(TERR_N * TERR_N * 4), terrTex = new THREE.DataTexture(terrData, TERR_N, TERR_N, THREE.RGBAFormat);
 terrTex.wrapS = terrTex.wrapT = THREE.RepeatWrapping; terrTex.magFilter = terrTex.minFilter = THREE.LinearFilter;
 function rebuildTerritory() {   // r = player territory, g = enemy: 0.5 at the border, a signed distance ramp around it
   terrData.fill(0); const px = W / TERR_N;
@@ -1114,7 +1125,7 @@ function assignHome(h) { const f = freePad(h.team, h.pos);
   if (f) { if (h.pad && h.pad.heli === h) h.pad.heli = null; h.home = f[0]; h.pad = f[1]; f[1].heli = h; return true; }
   if (h.home || !hqHome[h.team].alive) return false;
   // no free air base pad: set down on open ground beside the HQ (slower service, no limit)
-  const t = towns[h.team], k = helis.filter(e => e.team === h.team && e.home && e.home.hq).length, x = wm(t.x + 1.5 + (k % 3) * 0.7), z = wm(t.z - 0.7 + Math.floor(k / 3) * 0.7);
+  const t = towns[h.team], k = helis.filter(e => e.team === h.team && e.home && e.home.hq).length, x = wm(t.x + 1.2 * TS + (k % 3) * 1.5), z = wm(t.z + (Math.floor(k / 3) % 2 ? -1 : 0) * 1.2 * TS);
   h.home = hqHome[h.team]; h.pad = { x, z, y: Hd(x, z), heli: h }; return true; }
 function queueHeli(b) { if (!b.alive || baseHelis(b) + b.queue >= AB_CAP) return 'All 3 pads are taken'; b.queue++; if (b.queue === 1) b.buildT = 0; return null; }
 function startResearch(team, key) { if (research[team]) return 'Already researching'; if (!airbases.some(b => b.alive && b.done && b.team === team)) return 'Needs a finished air base';
@@ -1160,7 +1171,7 @@ function heliService(h, dt) {
   h.fuelWarn = (h.fuelWarn || 0) - dt;
   return false; }
 // ---- oil fields: dark oil seeps on the ground; an oil pump can only be built on one (one pump per field)
-const oilFields = [], OIL_R = 0.8;   // about half the length of a field, demo units
+const oilFields = [], OIL_R = 0.45;   // about half the length of a field, demo units
 // a field is sized to sit under the pump's pad and runs along it (the pump is turned to match), so a pump covers it
 const oilSize = () => PJ_BOX ? [(PJ_BOX.z1 - PJ_BOX.z0) * 0.9, (PJ_BOX.x1 - PJ_BOX.x0) * 0.9] : [0.55, 1.5];
 const pjCentre = () => PJ_BOX ? [(PJ_BOX.x0 + PJ_BOX.x1) / 2, (PJ_BOX.z0 + PJ_BOX.z1) / 2] : [0, 0];
@@ -1182,14 +1193,14 @@ function placeOilFields() { const r = mulberry(seed ^ 0x0115);
   for (let team = 0; team < 2; team++) { const t = towns[team]; for (let k = 0; k < 400; k++) { const a = r() * 6.283, d = TOWN + 2.5 + r() * (TERR_HQ_R - TOWN - 5), x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
       let inside = inTerritory(team, wm(x), wm(z)); for (let q = 0; q < 12 && inside; q++) inside = inTerritory(team, wm(x + Math.cos(q * 0.5236) * OIL_R * 1.4), wm(z + Math.sin(q * 0.5236) * OIL_R * 1.4));   // whole field well inside, so a pump fits
       if (inside && oilFieldOk(x, z)) { add(x, z); break; } } }
-  for (let k = 0; k < 4000 && oilFields.length < 20; k++) { const x = r() * W, z = r() * W; if (oilFieldOk(x, z)) add(x, z); } }
+  for (let k = 0; k < 4000 && oilFields.length < 60; k++) { const x = r() * W, z = r() * W; if (oilFieldOk(x, z)) add(x, z); } }
 function refreshOilNear(x, z, R) { for (const f of oilFields) if (wdist2(f.x, f.z, x, z) < R + OIL_R * 1.5) { f.mesh.geometry.dispose(); f.mesh.geometry = oilGeo(f); } }
 const fieldAt = (x, z) => oilFields.find(f => wdist2(f.x, f.z, x, z) < OIL_R * 0.75) || null;
 function updateOilFields() { const c = camD(); for (const f of oilFields) f.mesh.position.set(disp(f.x, c.x), 0, disp(f.z, c.z)); }
 // ------------------------------------------------------------------ oil pumps
 // A pump jack generates oil for its team while it stands. Built inside your territory like the other buildings.
 let pumpProto = null, pumpClip = null, PUMP_ERR = null, PJ_BOX = null; const pumpjacks = [], OIL = [400, 400];
-const PJ_K = 0.13, PJ_COST = 800, PJ_HP = 900, PJ_RATE = 60;   // demo units per model unit, credits, hull, oil per minute
+const PJ_K = 0.072, PJ_COST = 800, PJ_HP = 900, PJ_RATE = 60;   // demo units per model unit, credits, hull, oil per minute
 function preparePump(g) { pumpProto = g.scene; pumpClip = g.animations && g.animations[0];
   // unnamed animated nodes are bound by uuid, which a clone does not keep: give them names the clones share
   if (pumpClip) for (const tr of pumpClip.tracks) { const dot = tr.name.lastIndexOf('.'), id = tr.name.slice(0, dot), o = pumpProto.getObjectByProperty('uuid', id);
@@ -1315,7 +1326,7 @@ const woodRate = team => camps.filter(p => p.team === team && p.alive && p.done 
 // ------------------------------------------------------------------ mines
 // Dug into a mountain side: ore rides the conveyor out of the tunnel into the hopper; a full hopper tips into the three storage
 // bins; when all bins are full the pickup (the truck, later) empties them and the ore is banked.
-let mineProto = null, MINE_ERR = null; const mines = [], ORE = [600, 600], MN_COST = 1200, MN_HP = 1600, MN_SLOPE = 0.55, MN_ORE_PER_LOAD = 300, MN_K = 0.07;
+let mineProto = null, MINE_ERR = null; const mines = [], ORE = [600, 600], MN_COST = 1200, MN_HP = 1600, MN_SLOPE = 0.25, MN_ORE_PER_LOAD = 300, MN_K = 0.07;
 // model-space layout (units of the mine model): the yard that is levelled, and the tunnel that runs into the hill
 const MN_YARD = [-4.6, 13.4, -12.9, 5.5], MN_TUN = [-15.2, -3.9, -14.8, -3.6], MN_UP = Math.atan2(-0.9, -0.43);   // MN_UP: direction of the tunnel, into the hill
 const MN_EXT = MN_YARD.map(v => v * MN_K);
@@ -1470,7 +1481,7 @@ const foodRate = team => Math.round(farms.filter(p => p.team === team && p.alive
 // Trucks wait inside their warehouse. When a lumber mill or mine has a full load, a truck drives out, takes the roads to it,
 // loads (the stock disappears), drives back and pulls into the warehouse, where the load is banked. Spare trailers rest on
 // their landing gear in the lot. Without a warehouse, loads are collected the old way.
-let semiParts = null, SEMI_ERR = null; const warehouses = [], trucks = [], SEMI_K = 0.5;   // demo units per model unit (a trailer is ~16 world units long)
+let semiParts = null, SEMI_ERR = null; const warehouses = [], trucks = [], SEMI_K = 0.82;   // demo units per model unit (a trailer is ~16 world units long)
 const WH_COST = 1000, WH_HP = 2000, WH_W = 2.0, WH_D = 1.35, WH_H = 0.62, WH_LOT = 1.5, WH_TRUCKS = 2;
 // split the model sheet into cab, box trailer, flatbed trailer and landing-gear stand; each re-centred so it sits on y = 0,
 // the cab's origin at its fifth wheel and each trailer's origin at its kingpin, both facing -x
@@ -2958,7 +2969,7 @@ function separate() {
 }
 
 // ------------------------------------------------------------------ gunships
-const HELI_S = 0.55, HELI_HP = 300; let HELI_SKID = 0.12;
+const HELI_S = 0.85, HELI_HP = 300; let HELI_SKID = 0.12;
 function makeHeli(team, x, z) {
   if (!makeHeli.sk) { makeHeli.sk = 1; const bx = new THREE.Box3().setFromObject(heliProto); HELI_SKID = -bx.min.y * HELI_S; }
   const root = new THREE.Group(); const model = heliProto.clone(true); model.scale.setScalar(HELI_S); model.rotation.y = Math.PI / 2; root.add(model); battleRoot.add(root);
@@ -3113,7 +3124,7 @@ function checkVictory() {
 // The model has no rig: it is split into Hull, Turret (turns about Y), Gun (pivots about X for elevation) and 14 road wheels, so it is
 // animated part by part here — the hull follows the ground's pitch and roll, the turret tracks its target, the gun elevates and recoils,
 // and the wheels spin with the distance travelled (in opposite directions per side when turning on the spot). Built at a depot.
-let tankProto = null, TANK_ERR = null; const tanks = [], shells = [], TANK_K = 0.045, TANK_HP = 1400, TANK_RANGE = 4.5, TANK_RELOAD = 3.2, TANK_DMG = 170, TANK_SPEED = 0.42, TANK_TURN = 1.1, TANK_BUILD = 30;
+let tankProto = null, TANK_ERR = null; const tanks = [], shells = [], TANK_K = 0.095, TANK_HP = 1400, TANK_RANGE = 6, TANK_RELOAD = 3.2, TANK_DMG = 170, TANK_SPEED = 0.6, TANK_TURN = 1.1, TANK_BUILD = 30;
 const TANK_MATS = [new Map(), new Map()], TANK_TINT = [[0.78, 0.86, 1.05], [0.82, 0.82, 0.8]];
 const shellGeo = new THREE.SphereGeometry(0.012, 6, 4), shellMat = new THREE.MeshBasicMaterial({ color: 0xffd27a, toneMapped: false });
 function prepareTank(g) { tankProto = g.scene; }
@@ -3124,7 +3135,7 @@ function makeTank(team, x, z, yaw = 0) { const model = tankProto.clone(true); mo
   const t = { kind: 'tank', team, col: TEAM_COL[team], root, model, turret: model.getObjectByName('Turret'), gun: model.getObjectByName('Gun'), wheels,
     pos: new THREE.Vector3(wm(x), 0, wm(z)), vel: new THREE.Vector3(), yaw, tur: 0, elev: 0, hp: TANK_HP, maxHp: TANK_HP, alive: true, sel: false, order: null, target: null, path: null,
     v: 0, w: 0, reload: rand(0.5, 1.5), recoil: 0, deadT: 0, pitchG: 0, rollG: 0, repathT: 0, stuckT: 0 };
-  t.gun0 = t.gun.position.z; t.pos.y = Hd(t.pos.x, t.pos.z); makeBars(t, 0.25, 0.26); tanks.push(t); return t; }
+  t.gun0 = t.gun.position.z; t.pos.y = Hd(t.pos.x, t.pos.z); makeBars(t, 0.5, 0.4); tanks.push(t); return t; }
 const tankFoes = t => [...robots.filter(r => r.team !== t.team && r.state !== 'ko'), ...tanks.filter(o => o.team !== t.team && o.alive), ...soldiers.filter(s => s.team !== t.team && s.alive && !s.inHeli)];
 function tankAcquire(t) { let best = null, bd = TANK_RANGE * 1.15; for (const e of tankFoes(t)) { const d = wdist2(t.pos.x, t.pos.z, e.pos.x, e.pos.z); if (d < bd) { bd = d; best = e; } }
   if (!best) for (const L of [hangars, warehouses, airbases, pumpjacks, camps, mines, farms, outposts]) for (const b of L) if (b.alive && b.team !== t.team && b.pos) { const d = wdist2(t.pos.x, t.pos.z, b.x, b.z); if (d < bd) { bd = d; best = b; } }
@@ -3135,7 +3146,7 @@ function tankHit(t, amount, by) { if (!t.alive) return; if (by && by.kind === 's
     t.model.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.22); } }); t.turret.rotation.z = rand(-0.25, 0.25); t.turret.position.y += 0.3;
     if (t.bar) t.bar.g.visible = false; if (t.ring) t.ring.visible = false; log(t.team, `<b>${unitName(t)}</b> destroyed${by ? ' by <b>' + unitName(by) + '</b>' : ''}`); }
   return 'hit'; }
-function tankImpact(pt, radius, power, kind) { for (const t of tanks) { if (!t.alive || kind === 'step' || kind === 'body') continue; const d = wdist2(t.pos.x, t.pos.z, pt.x, pt.z); if (d > radius + 0.16 || pt.y > t.pos.y + 0.18 + radius) continue;
+function tankImpact(pt, radius, power, kind) { for (const t of tanks) { if (!t.alive || kind === 'step' || kind === 'body') continue; const d = wdist2(t.pos.x, t.pos.z, pt.x, pt.z); if (d > radius + 0.34 || pt.y > t.pos.y + 0.38 + radius) continue;
   tankHit(t, kind === 'bullet' ? 4 : kind === 'shell' ? 0 : 120 * power, null); } }
 function tankFire(t, e) { const a = t.yaw + t.tur, mz = (1.18 + 3.13) * TANK_K, m = new THREE.Vector3(wm(t.pos.x + Math.sin(a) * mz), t.pos.y + 2.33 * TANK_K, wm(t.pos.z + Math.cos(a) * mz));
   const to = new THREE.Vector3(e.pos.x, (e.kind === 'robot' ? groundY(e) + 0.4 * RS : e.pos.y + (e.kind === 'soldier' ? SOLD_H * 0.5 : 0.08)), e.pos.z), miss = chance(0.15) ? rand(0.15, 0.35) : 0;
@@ -3174,7 +3185,7 @@ function updateTanks(dt) { const c = camD();
       if (!moving) t.v += (0 - t.v) * Math.min(1, dt * 3);
       // move, keep clear of other vehicles and mechs, follow the ground
       const ox = t.pos.x, oz = t.pos.z; t.yaw += t.w * dt; t.pos.x = wm(t.pos.x + Math.sin(t.yaw) * t.v * dt); t.pos.z = wm(t.pos.z + Math.cos(t.yaw) * t.v * dt);
-      for (const o of [...tanks, ...robots]) { if (o === t || (o.kind === 'tank' ? !o.alive : o.state === 'ko')) continue; const r = o.kind === 'tank' ? 0.3 : 0.34, dx = wd(t.pos.x - o.pos.x), dz = wd(t.pos.z - o.pos.z), d = Math.hypot(dx, dz);
+      for (const o of [...tanks, ...robots]) { if (o === t || (o.kind === 'tank' ? !o.alive : o.state === 'ko')) continue; const r = o.kind === 'tank' ? 0.62 : 0.5, dx = wd(t.pos.x - o.pos.x), dz = wd(t.pos.z - o.pos.z), d = Math.hypot(dx, dz);
         if (d < r && d > 1e-4) { t.pos.x = wm(t.pos.x + dx / d * (r - d) * 0.5); t.pos.z = wm(t.pos.z + dz / d * (r - d) * 0.5); } }
       const bad = (x, z) => lotBlocked(x, z, []) || Hd(x, z) < 2 / S * 1.05;
       if (bad(t.pos.x, t.pos.z)) { const step = Math.hypot(wd(t.pos.x - ox), wd(t.pos.z - oz)); let ok = false; t.pos.x = ox; t.pos.z = oz;
@@ -3192,13 +3203,13 @@ function updateTanks(dt) { const c = camD();
       t.elev += ((e ? clamp(ed * 0.012, 0, 0.12) : 0) - t.elev) * Math.min(1, dt * 3);
       if (e && Math.abs(da) < 0.06 && ed < TANK_RANGE && t.reload <= 0) tankFire(t, e);
     }
-    const ax = 0.15, ay = 0.09, fx = Math.sin(t.yaw), fz = Math.cos(t.yaw), hF = Hd(wm(t.pos.x + fx * ax), wm(t.pos.z + fz * ax)), hB = Hd(wm(t.pos.x - fx * ax), wm(t.pos.z - fz * ax));
+    const ax = 0.32, ay = 0.19, fx = Math.sin(t.yaw), fz = Math.cos(t.yaw), hF = Hd(wm(t.pos.x + fx * ax), wm(t.pos.z + fz * ax)), hB = Hd(wm(t.pos.x - fx * ax), wm(t.pos.z - fz * ax));
     const hL = Hd(wm(t.pos.x + fz * ay), wm(t.pos.z - fx * ay)), hR = Hd(wm(t.pos.x - fz * ay), wm(t.pos.z + fx * ay));
     t.pos.y = Math.max((hF + hB + hL + hR) / 4, 2 / S * 1.05); t.pitchG = Math.atan2(hB - hF, 2 * ax); t.rollG = Math.atan2(hL - hR, 2 * ay);
     t.root.position.set(disp(t.pos.x, c.x), t.pos.y, disp(t.pos.z, c.z)); t.root.rotation.set(t.pitchG - t.recoil * 0.04, t.yaw, t.rollG, 'YXZ');
     t.turret.rotation.y = t.tur; t.gun.rotation.x = -t.elev; t.gun.position.z = t.gun0 - t.recoil * 0.45;
     placeBar(t, disp(t.pos.x, c.x) * S, t.pos.y * S, disp(t.pos.z, c.z) * S, t.alive);
-    if (t.sel && t.alive) { const r = ringFor(t); r.visible = true; r.position.set(disp(t.pos.x, c.x), t.pos.y + 0.01, disp(t.pos.z, c.z)); r.scale.setScalar(0.72); } else if (t.ring) t.ring.visible = false; }
+    if (t.sel && t.alive) { const r = ringFor(t); r.visible = true; r.position.set(disp(t.pos.x, c.x), t.pos.y + 0.01, disp(t.pos.z, c.z)); r.scale.setScalar(1.5); } else if (t.ring) t.ring.visible = false; }
   updateShells(dt); }
 // ---- depots build tanks: one at a time, they roll out of the lot
 function queueTank(w) { if (!w.alive || !w.done) return 'Depot not ready'; w.tankQ = w.tankQ || 0; if (w.tankQ >= 3) return 'Build queue full'; w.tankQ++; if (w.tankQ === 1) w.tankT = 0; return null; }
@@ -3223,7 +3234,7 @@ function spend(team, c) { for (const [k, v] of Object.entries(c)) { if (k === 'c
 // A map-wide grid: r = in sight right now, g = explored at some point. Your units and buildings light it up every few frames;
 // the terrain, water and every lit object are darkened by it (black where never explored, dim grey where explored but out of sight),
 // enemy units only show while in sight and enemy buildings once their ground has been explored.
-const FOG_N = 256, FOG_C = W / FOG_N, fogVis = new Float32Array(FOG_N * FOG_N), fogExp = new Uint8Array(FOG_N * FOG_N), fogData = new Uint8Array(FOG_N * FOG_N * 4);
+const FOG_N = 512, FOG_C = W / FOG_N, fogVis = new Float32Array(FOG_N * FOG_N), fogExp = new Uint8Array(FOG_N * FOG_N), fogData = new Uint8Array(FOG_N * FOG_N * 4);
 const fogTex = new THREE.DataTexture(fogData, FOG_N, FOG_N, THREE.RGBAFormat); fogTex.wrapS = fogTex.wrapT = THREE.RepeatWrapping; fogTex.magFilter = fogTex.minFilter = THREE.LinearFilter;
 let fogT = 0, FOG_ON = true, fogDirty = true; const fogDist = new Float32Array(FOG_N * FOG_N), FOG_FADE = 16;   // cells over which the undiscovered dark deepens
 const fogIdx = (x, z) => (Math.floor(wm(z) / FOG_C) % FOG_N) * FOG_N + (Math.floor(wm(x) / FOG_C) % FOG_N);
@@ -3338,7 +3349,7 @@ function teamUpdate(dt) {
     if (reinforceT[team] <= 0) { reinforceT[team] = 40; if (false) { const f = spawnRobot(team, chance(0.35) ? 'gunner' : 'striker', n); applyMechLevels(f, { weapons: MECH_UP[team].weapons, armor: MECH_UP[team].armor, boost: MECH_UP[team].boost }); f.hp = f.maxHp;
         const p = towns[team]; FX.flash(new THREE.Vector3(f.pos.x, Hd(f.pos.x, f.pos.z) + 0.4, f.pos.z), 0.8, f.col); FX.sparks(new THREE.Vector3(f.pos.x, Hd(f.pos.x, f.pos.z) + 0.3, f.pos.z), 30, f.col, 1.6);
         log(team, `<b>${TEAM_NAME[team]}</b> reinforcement arrives at HQ`); }
-      if (false) { const t = towns[team]; const h = makeHeli(team, t.x + 1.5, t.z); log(team, `<b>${TEAM_NAME[team]}</b> replacement gunship arrives`); } }
+      if (false) { const t = towns[team]; const h = makeHeli(team, t.x + 1.2 * TS, t.z); log(team, `<b>${TEAM_NAME[team]}</b> replacement gunship arrives`); } }
   }
   // enemy AI: builds an air base after a while, keeps its pads full and researches upgrades
   aiAirT -= dt; if (aiAirT <= 0 && !towns[1].hqDown) { aiAirT = 12;
@@ -3378,25 +3389,25 @@ const Battle = {
     TOWNS.forEach((t, i) => buildTown(t, i));
     // neighbourhood trees: single trees in yards and along streets, clear of houses, roads, lots and the HQ corner
     TOWN_TREES.length = 0; TOWNS.forEach((t, idx) => { const r = mulberry(seed + idx * 131 + 7);
-      for (let x = -TOWN - 0.8; x <= TOWN + 0.8; x += 0.32) for (let z = -TOWN - 0.8; z <= TOWN + 0.8; z += 0.32) {
-        const jx = x + (r() - .5) * 0.22, jz = z + (r() - .5) * 0.22, wx = t.x + jx, wz = t.z + jz;
+      for (let x = -TOWN0 - 0.8; x <= TOWN0 + 0.8; x += 0.32) for (let z = -TOWN0 - 0.8; z <= TOWN0 + 0.8; z += 0.32) {
+        const jx = x + (r() - .5) * 0.22, jz = z + (r() - .5) * 0.22, wx = t.x + jx * TS, wz = t.z + jz * TS;
         if (r() > 0.2) continue;
-        if (Math.hypot(jx, jz) < PLAZA_R + 0.4 || (idx < 2 && jx > 2.4 && jz > 2.4) || (Math.abs(jx - 0.95) < 0.4 && Math.abs(jz + 0.95) < 0.4)) continue;
-        if (roadAt(wx * S, wz * S) > 0.01 || roadAt((wx + 0.25) * S, wz * S) > 0.01 || roadAt((wx - 0.25) * S, wz * S) > 0.01 || roadAt(wx * S, (wz + 0.25) * S) > 0.01 || roadAt(wx * S, (wz - 0.25) * S) > 0.01) continue;
-        let blocked = false; for (const p of propsNear(wx, wz)) if (p.kind !== 'lamp' && wdist2(p.x, p.z, wx, wz) < p.r + 0.12) { blocked = true; break; }
+        if (Math.hypot(jx, jz) < PLAZA_R0 + 0.4 || (idx < 2 && jx > 2.4 && jz > 2.4) || (Math.abs(jx - 0.95) < 0.4 && Math.abs(jz + 0.95) < 0.4)) continue;
+        { const m = 0.25 * TS; if (roadAt(wx * S, wz * S) > 0.01 || roadAt((wx + m) * S, wz * S) > 0.01 || roadAt((wx - m) * S, wz * S) > 0.01 || roadAt(wx * S, (wz + m) * S) > 0.01 || roadAt(wx * S, (wz - m) * S) > 0.01) continue; }
+        let blocked = false; for (const p of propsNear(wx, wz)) if (p.kind !== 'lamp' && wdist2(p.x, p.z, wx, wz) < p.r + 0.12 * TS) { blocked = true; break; }
         if (!blocked) TOWN_TREES.push([wm(wx) * S, wm(wz) * S, r()]); } });
     if (soldierKinds) for (const team of [0, 1]) spawnSquad(team, 6);
-    placeBridges(); buildRoadMeshes(); placeOilFields(); spawnCars(40); spawnPeds(140); rebuildTerritory();
+    placeBridges(); buildRoadMeshes(); placeOilFields(); spawnCars(90); spawnPeds(260); rebuildTerritory();
     const roles = [];   // mechs are precious: none to start, every one is built at a hangar
     for (const team of [0, 1]) roles.forEach((r, k) => spawnRobot(team, r, k));
-    for (const team of [0, 1]) { const t = towns[team]; makeHeli(team, t.x + 1.5, t.z); }
+    for (const team of [0, 1]) { const t = towns[team]; makeHeli(team, t.x + 1.2 * TS, t.z); }
     log(null, 'Destroy the <b>Cobalt</b> forces and their HQ tower. Build a mech hangar to field more mechs.');
     return { x: towns[0].x * S, z: (towns[0].z + 2) * S };
   },
   selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive && !s.inHeli), ...tanks.filter(t => t.team === 0 && t.alive)]; },
   enemiesVisible() { return [...tanks.filter(t => t.team === 1 && t.alive && fogSeen(t)), ...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
-  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.kind === 'tank' ? u.pos.y + 0.09 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
+  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.kind === 'tank' ? u.pos.y + 0.19 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   // commands from the interface
   board: (sel, h) => orderBoard(sel, h),
   command(kind, sel) { sel = sel || Battle.selectables().filter(u => u.sel);
