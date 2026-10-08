@@ -1139,7 +1139,7 @@ const SUN = new THREE.Vector3(-0.62, 0.42, 0.36).normalize();
 // the sky, the haze and the ambient change with the sun's height. Night: dim moonlight, lit windows and street lamps.
 const TOD = { t: 0.3, DAY: 180, day: 1, night: 0 };
 const H_DAY = HORIZON.clone(), Z_DAY = ZENITH.clone(), lc = h => new THREE.Color(h).convertSRGBToLinear();
-const H_DUSK = lc(0xc88a62), Z_DUSK = lc(0x3d4466), H_NIGHT = lc(0x161c26), Z_NIGHT = lc(0x05070d);
+const H_DUSK = lc(0xc88a62), Z_DUSK = lc(0x3d4466), H_NIGHT = lc(0x2c3a52), Z_NIGHT = lc(0x0b1222);
 const SUNC = { value: new THREE.Color(1, .93, .82) }, AMBC = { value: new THREE.Color(1, 1, 1) }, DAYK = { value: new THREE.Color(1, 1, 1) };
 const SKYU = { sunV: { value: new THREE.Vector3() }, night: { value: 0 }, time: { value: 0 }, dusk: { value: 0 } };
 const _c1 = new THREE.Color(), _c2 = new THREE.Color();
@@ -1152,12 +1152,12 @@ function updateDayNight(dt) {
   HORIZON.copy(H_NIGHT).lerp(H_DAY, day).lerp(H_DUSK, dusk * 0.75); ZENITH.copy(Z_NIGHT).lerp(Z_DAY, day).lerp(Z_DUSK, dusk * 0.5);
   if (scene.fog) scene.fog.color.copy(HORIZON);
   // sun / moon light
-  const L = window.sunL; _c1.setRGB(1, .93, .82).lerp(_c2.setRGB(1, .55, .3), dusk * (1 - day * 0.6)); _c2.setRGB(.42, .52, .8);
-  const sunI = 1.1 * (0.14 + 0.86 * day), col = _c2.clone().lerp(_c1, THREE.MathUtils.smoothstep(e, -0.15, 0.08));
+  const L = window.sunL; _c1.setRGB(1, .93, .82).lerp(_c2.setRGB(1, .55, .3), dusk * (1 - day * 0.6)); _c2.setRGB(.62, .72, 1);
+  const sunI = 1.1 * (0.45 + 0.55 * day), col = _c2.clone().lerp(_c1, THREE.MathUtils.smoothstep(e, -0.15, 0.08));
   if (L) { L.color.copy(col); L.intensity = sunI; }
-  if (window.hemiL) { hemiL.intensity = 0.5 * (0.32 + 0.68 * day); hemiL.color.setRGB(.81, .85, .88).lerp(_c1.setRGB(.42, .5, .72), night * .8); }
-  SUNC.value.copy(col).multiplyScalar(sunI / 1.1); AMBC.value.setRGB(.36, .42, .62).lerp(_c1.setRGB(1, 1, 1), day).lerp(_c2.setRGB(1, .8, .65), dusk * .35);
-  DAYK.value.setRGB(.2, .24, .36).lerp(_c1.setRGB(1, 1, 1), day).lerp(_c2.setRGB(1, .72, .5), dusk * .4);
+  if (window.hemiL) { hemiL.intensity = 0.5 * (0.62 + 0.38 * day); hemiL.color.setRGB(.81, .85, .88).lerp(_c1.setRGB(.42, .5, .72), night * .8); }
+  SUNC.value.copy(col).multiplyScalar(sunI / 1.1); AMBC.value.setRGB(.62, .7, .92).lerp(_c1.setRGB(1, 1, 1), day).lerp(_c2.setRGB(1, .8, .65), dusk * .35);
+  DAYK.value.setRGB(.5, .57, .75).lerp(_c1.setRGB(1, 1, 1), day).lerp(_c2.setRGB(1, .72, .5), dusk * .4);
   // the sun disc rises and sets along the light's own bearing
   const az = Math.atan2(SUN.z, SUN.x), el = (TOD.t - 0.25) * Math.PI * 2;
   SKYU.sunV.value.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)); SKYU.night.value = night; SKYU.dusk.value = dusk; SKYU.time.value += dt;
