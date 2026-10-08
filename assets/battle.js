@@ -3113,7 +3113,7 @@ function checkVictory() {
 // The model has no rig: it is split into Hull, Turret (turns about Y), Gun (pivots about X for elevation) and 14 road wheels, so it is
 // animated part by part here — the hull follows the ground's pitch and roll, the turret tracks its target, the gun elevates and recoils,
 // and the wheels spin with the distance travelled (in opposite directions per side when turning on the spot). Built at a depot.
-let tankProto = null, TANK_ERR = null; const tanks = [], shells = [], TANK_K = 0.03, TANK_HP = 1400, TANK_RANGE = 4.5, TANK_RELOAD = 3.2, TANK_DMG = 170, TANK_SPEED = 0.42, TANK_TURN = 1.1, TANK_BUILD = 30;
+let tankProto = null, TANK_ERR = null; const tanks = [], shells = [], TANK_K = 0.045, TANK_HP = 1400, TANK_RANGE = 4.5, TANK_RELOAD = 3.2, TANK_DMG = 170, TANK_SPEED = 0.42, TANK_TURN = 1.1, TANK_BUILD = 30;
 const TANK_MATS = [new Map(), new Map()], TANK_TINT = [[0.78, 0.86, 1.05], [0.82, 0.82, 0.8]];
 const shellGeo = new THREE.SphereGeometry(0.012, 6, 4), shellMat = new THREE.MeshBasicMaterial({ color: 0xffd27a, toneMapped: false });
 function prepareTank(g) { tankProto = g.scene; }
@@ -3124,7 +3124,7 @@ function makeTank(team, x, z, yaw = 0) { const model = tankProto.clone(true); mo
   const t = { kind: 'tank', team, col: TEAM_COL[team], root, model, turret: model.getObjectByName('Turret'), gun: model.getObjectByName('Gun'), wheels,
     pos: new THREE.Vector3(wm(x), 0, wm(z)), vel: new THREE.Vector3(), yaw, tur: 0, elev: 0, hp: TANK_HP, maxHp: TANK_HP, alive: true, sel: false, order: null, target: null, path: null,
     v: 0, w: 0, reload: rand(0.5, 1.5), recoil: 0, deadT: 0, pitchG: 0, rollG: 0, repathT: 0, stuckT: 0 };
-  t.gun0 = t.gun.position.z; t.pos.y = Hd(t.pos.x, t.pos.z); makeBars(t, 0.17, 0.22); tanks.push(t); return t; }
+  t.gun0 = t.gun.position.z; t.pos.y = Hd(t.pos.x, t.pos.z); makeBars(t, 0.25, 0.26); tanks.push(t); return t; }
 const tankFoes = t => [...robots.filter(r => r.team !== t.team && r.state !== 'ko'), ...tanks.filter(o => o.team !== t.team && o.alive), ...soldiers.filter(s => s.team !== t.team && s.alive && !s.inHeli)];
 function tankAcquire(t) { let best = null, bd = TANK_RANGE * 1.15; for (const e of tankFoes(t)) { const d = wdist2(t.pos.x, t.pos.z, e.pos.x, e.pos.z); if (d < bd) { bd = d; best = e; } }
   if (!best) for (const L of [hangars, warehouses, airbases, pumpjacks, camps, mines, farms, outposts]) for (const b of L) if (b.alive && b.team !== t.team && b.pos) { const d = wdist2(t.pos.x, t.pos.z, b.x, b.z); if (d < bd) { bd = d; best = b; } }
@@ -3135,7 +3135,7 @@ function tankHit(t, amount, by) { if (!t.alive) return; if (by && by.kind === 's
     t.model.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.22); } }); t.turret.rotation.z = rand(-0.25, 0.25); t.turret.position.y += 0.3;
     if (t.bar) t.bar.g.visible = false; if (t.ring) t.ring.visible = false; log(t.team, `<b>${unitName(t)}</b> destroyed${by ? ' by <b>' + unitName(by) + '</b>' : ''}`); }
   return 'hit'; }
-function tankImpact(pt, radius, power, kind) { for (const t of tanks) { if (!t.alive || kind === 'step' || kind === 'body') continue; const d = wdist2(t.pos.x, t.pos.z, pt.x, pt.z); if (d > radius + 0.11 || pt.y > t.pos.y + 0.12 + radius) continue;
+function tankImpact(pt, radius, power, kind) { for (const t of tanks) { if (!t.alive || kind === 'step' || kind === 'body') continue; const d = wdist2(t.pos.x, t.pos.z, pt.x, pt.z); if (d > radius + 0.16 || pt.y > t.pos.y + 0.18 + radius) continue;
   tankHit(t, kind === 'bullet' ? 4 : kind === 'shell' ? 0 : 120 * power, null); } }
 function tankFire(t, e) { const a = t.yaw + t.tur, mz = (1.18 + 3.13) * TANK_K, m = new THREE.Vector3(wm(t.pos.x + Math.sin(a) * mz), t.pos.y + 2.33 * TANK_K, wm(t.pos.z + Math.cos(a) * mz));
   const to = new THREE.Vector3(e.pos.x, (e.kind === 'robot' ? groundY(e) + 0.4 * RS : e.pos.y + (e.kind === 'soldier' ? SOLD_H * 0.5 : 0.08)), e.pos.z), miss = chance(0.15) ? rand(0.15, 0.35) : 0;
@@ -3174,7 +3174,7 @@ function updateTanks(dt) { const c = camD();
       if (!moving) t.v += (0 - t.v) * Math.min(1, dt * 3);
       // move, keep clear of other vehicles and mechs, follow the ground
       const ox = t.pos.x, oz = t.pos.z; t.yaw += t.w * dt; t.pos.x = wm(t.pos.x + Math.sin(t.yaw) * t.v * dt); t.pos.z = wm(t.pos.z + Math.cos(t.yaw) * t.v * dt);
-      for (const o of [...tanks, ...robots]) { if (o === t || (o.kind === 'tank' ? !o.alive : o.state === 'ko')) continue; const r = o.kind === 'tank' ? 0.2 : 0.3, dx = wd(t.pos.x - o.pos.x), dz = wd(t.pos.z - o.pos.z), d = Math.hypot(dx, dz);
+      for (const o of [...tanks, ...robots]) { if (o === t || (o.kind === 'tank' ? !o.alive : o.state === 'ko')) continue; const r = o.kind === 'tank' ? 0.3 : 0.34, dx = wd(t.pos.x - o.pos.x), dz = wd(t.pos.z - o.pos.z), d = Math.hypot(dx, dz);
         if (d < r && d > 1e-4) { t.pos.x = wm(t.pos.x + dx / d * (r - d) * 0.5); t.pos.z = wm(t.pos.z + dz / d * (r - d) * 0.5); } }
       const bad = (x, z) => lotBlocked(x, z, []) || Hd(x, z) < 2 / S * 1.05;
       if (bad(t.pos.x, t.pos.z)) { const step = Math.hypot(wd(t.pos.x - ox), wd(t.pos.z - oz)); let ok = false; t.pos.x = ox; t.pos.z = oz;
@@ -3192,13 +3192,13 @@ function updateTanks(dt) { const c = camD();
       t.elev += ((e ? clamp(ed * 0.012, 0, 0.12) : 0) - t.elev) * Math.min(1, dt * 3);
       if (e && Math.abs(da) < 0.06 && ed < TANK_RANGE && t.reload <= 0) tankFire(t, e);
     }
-    const ax = 0.1, ay = 0.06, fx = Math.sin(t.yaw), fz = Math.cos(t.yaw), hF = Hd(wm(t.pos.x + fx * ax), wm(t.pos.z + fz * ax)), hB = Hd(wm(t.pos.x - fx * ax), wm(t.pos.z - fz * ax));
+    const ax = 0.15, ay = 0.09, fx = Math.sin(t.yaw), fz = Math.cos(t.yaw), hF = Hd(wm(t.pos.x + fx * ax), wm(t.pos.z + fz * ax)), hB = Hd(wm(t.pos.x - fx * ax), wm(t.pos.z - fz * ax));
     const hL = Hd(wm(t.pos.x + fz * ay), wm(t.pos.z - fx * ay)), hR = Hd(wm(t.pos.x - fz * ay), wm(t.pos.z + fx * ay));
     t.pos.y = Math.max((hF + hB + hL + hR) / 4, 2 / S * 1.05); t.pitchG = Math.atan2(hB - hF, 2 * ax); t.rollG = Math.atan2(hL - hR, 2 * ay);
     t.root.position.set(disp(t.pos.x, c.x), t.pos.y, disp(t.pos.z, c.z)); t.root.rotation.set(t.pitchG - t.recoil * 0.04, t.yaw, t.rollG, 'YXZ');
     t.turret.rotation.y = t.tur; t.gun.rotation.x = -t.elev; t.gun.position.z = t.gun0 - t.recoil * 0.45;
     placeBar(t, disp(t.pos.x, c.x) * S, t.pos.y * S, disp(t.pos.z, c.z) * S, t.alive);
-    if (t.sel && t.alive) { const r = ringFor(t); r.visible = true; r.position.set(disp(t.pos.x, c.x), t.pos.y + 0.01, disp(t.pos.z, c.z)); r.scale.setScalar(0.5); } else if (t.ring) t.ring.visible = false; }
+    if (t.sel && t.alive) { const r = ringFor(t); r.visible = true; r.position.set(disp(t.pos.x, c.x), t.pos.y + 0.01, disp(t.pos.z, c.z)); r.scale.setScalar(0.72); } else if (t.ring) t.ring.visible = false; }
   updateShells(dt); }
 // ---- depots build tanks: one at a time, they roll out of the lot
 function queueTank(w) { if (!w.alive || !w.done) return 'Depot not ready'; w.tankQ = w.tankQ || 0; if (w.tankQ >= 3) return 'Build queue full'; w.tankQ++; if (w.tankQ === 1) w.tankT = 0; return null; }
@@ -3396,7 +3396,7 @@ const Battle = {
   selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive && !s.inHeli), ...tanks.filter(t => t.team === 0 && t.alive)]; },
   enemiesVisible() { return [...tanks.filter(t => t.team === 1 && t.alive && fogSeen(t)), ...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
-  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.kind === 'tank' ? u.pos.y + 0.06 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
+  screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.kind === 'tank' ? u.pos.y + 0.09 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   // commands from the interface
   board: (sel, h) => orderBoard(sel, h),
   command(kind, sel) { sel = sel || Battle.selectables().filter(u => u.sel);
