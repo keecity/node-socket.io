@@ -843,7 +843,7 @@ function updateRoadTiles() { const cx = cam.x, cz = cam.z, far = FOG_FAR + 400;
 
 // ------------------------------------------------------------------ traffic: cars drive the chains, turning at intersections
 const cars = []; let carProto = null;
-const CAR_LEN = 4.2, LANE = 1.35;
+const CAR_LEN = 2.0, LANE = 1.35;   // world units; sized against the houses and the semi trucks
 // the car model is a parts sheet: four vehicle bodies stacked in rows (top to bottom: sedan, SUV, pickup, box truck), each with its tire beside it.
 // Split the single mesh into connected pieces (vertices welded by position), group the pieces into rows, and per row keep the body and its tire.
 function splitVehicles(root) {
