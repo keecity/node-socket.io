@@ -2475,7 +2475,7 @@ function afterChunks(nearList, nearKey) {
 }
 function evictChunks() {                                  // free detailed geometry not drawn for ~10 s
   for (const ch of chunks) for (let l = 0; l < 2; l++) {
-    if (!ch.geos[l] || frameNo - ch.last[l] < 600) continue;
+    if (!ch.geos[l] || frameNo - ch.last[l] < 3600) continue;
     for (const m of ch.pool['m' + l] || []) { scene.remove(m); allChunkObjs.delete(m); }
     ch.pool['m' + l] = []; ch.geos[l].dispose(); ch.geos[l] = null;
   }
@@ -2494,22 +2494,23 @@ function showChunks() {
       const X = ch.cx + ox * SIZE, Z = ch.cz + oz * SIZE;
       const d = Math.max(0, Math.hypot(X - cpx, Z - cpz) - ch.r);
       if (d > FOG_FAR) continue;
-      if (d < NEAR_TREES) {
+      const dn = Math.max(0, Math.hypot(X - cam.x, Z - cam.z) - ch.r);   // detailed trees sit around the point you look at, so orbiting never reshuffles them
+      if (dn < NEAR_TREES) {
         if (ch.trees === undefined) { ch.trees = makeTrees(ch); builds++; }
         if (ch.trees) { nearList.push([ch, ox, oz]); nearKey += ch.idx + ':' + ox + ':' + oz + '|'; }
       }
       sphere.center.set(X, ch.cy, Z); sphere.radius = ch.r;
       if (!frustum.intersectsSphere(sphere)) continue;
       let lod = d < 350 ? 0 : d < 800 ? 1 : 2;
-      if (!ch.geos[lod] && builds < 6) { ch.geos[lod] = chunkGeo(ch.ci, ch.cj, [1, 2, 4][lod]); builds++; }
+      if (!ch.geos[lod] && builds < 1) { ch.geos[lod] = chunkGeo(ch.ci, ch.cj, [1, 2, 4][lod]); builds++; }
       while (!ch.geos[lod]) lod++;                      // not built yet this frame: use a coarser one
       ch.last[lod] = frameNo;
       const geo = ch.geos[lod];
       const m = take(ch, 'm' + lod, () => new THREE.Mesh(geo, terrainMat));
       m.position.set(ox * SIZE, 0, oz * SIZE); m.visible = true;
       if (d < TREE_DIST) {
-        if (ch.trees === undefined && builds < 8) { ch.trees = makeTrees(ch); builds++; }
-        if (ch.trees && d >= NEAR_TREES) {
+        if (ch.trees === undefined && builds < 1) { ch.trees = makeTrees(ch); builds++; }
+        if (ch.trees && dn >= NEAR_TREES) {
           const t = take(ch, 't', () => new THREE.Mesh(ch.trees.geo, impostorMat));
           t.position.set(ox * SIZE, 0, oz * SIZE); t.visible = true;
         }
@@ -2532,7 +2533,7 @@ function updateShadows(now) {
       if (!m || m.transparent || m.isShaderMaterial || m.isMeshBasicMaterial || m.blending === THREE.AdditiveBlending) return; o.castShadow = o.receiveShadow = true; }); }
   if (L.shadow.map) { SHADOW.map.value = L.shadow.map.texture; SHADOW.mat.value = L.shadow.matrix; SHADOW.on.value = 1; }
   // near trees (built around the camera position) cast live shadows; the baked ones fade out over the same area
-  TREE_SH.nearC.value.set(camera.position.x, camera.position.z); TREE_SH.nearR.value = Math.min(NEAR_TREES - 15, half);
+  TREE_SH.nearC.value.set(cam.x, cam.z); TREE_SH.nearR.value = Math.min(NEAR_TREES - 15, half);
 }
 // bake every tree's shadow into a map-wide texture: crown ellipse thrown along the sun direction, plus a trunk streak
 function bakeTreeShadows() {
