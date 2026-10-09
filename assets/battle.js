@@ -693,7 +693,7 @@ const CARRY_BONES = ['Shoulder_R', 'UpperArm_R', 'ForeArm_R', 'Hand_R'], CARRY_Q
 let FOOT_SOLE = 0, MECH_K = 1, BL_BASE = new THREE.Vector3(), BL_TIP = new THREE.Vector3(0, 0.3, 0);
 function prepMech(g) { const sc = g.scene; sc.updateMatrixWorld(true);
   const box = new THREE.Box3(); sc.traverse(o => { if (o.isMesh) { o.geometry.computeBoundingBox(); box.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
-  MECH_K = 0.92 / Math.max(0.1, box.max.y - Math.min(0, box.min.y));
+  MECH_K = 1.5 / Math.max(0.1, box.max.y - Math.min(0, box.min.y));
   { const fl = sc.getObjectByName('Foot_L'), fr = sc.getObjectByName('Foot_R'); if (fl && fr) FOOT_SOLE = Math.min(fl.getWorldPosition(new THREE.Vector3()).y, fr.getWorldPosition(new THREE.Vector3()).y) - box.min.y; }   // ankle height above the sole in bind pose
   // blade segment in the blade node's local frame: the long axis of its bounding box, tip = end farthest from the hilt
   // blade segment in the SaberBlade bone's frame. The blade is skinned into the body mesh, so take its vertices from bind space into that bone's space
@@ -1829,7 +1829,7 @@ function orderDrop(h, x, z) { h.tr = { phase: 'drop', x, z }; h.target = null; h
 // One bay per hangar. Mechs come in to be repaired, to be brought up to the team's researched upgrades, and new mechs are
 // built in the bay. Mechs waiting their turn stand in line on the apron. Research here is team-wide: mechs built afterwards
 // come out with it, older mechs get it by visiting a hangar (UPGRADE).
-let hangarProto = null, hangarClips = null, HANGAR_ERR = null; const hangars = [], HG_K = 0.075, HG_COST = 1800, HG_HP = 3000, MECH_BUILD = 40;
+let hangarProto = null, hangarClips = null, HANGAR_ERR = null; const hangars = [], HG_K = 0.1, HG_COST = 1800, HG_HP = 3000, MECH_BUILD = 40;
 const HG_EXT = [-20, 20, -13.5, 22], HG_BAY = [0, 0], HG_DOOR = [0, 16.5], HG_OUT = [0, 30];
 const MECH_UP = [0, 1].map(() => ({ weapons: 0, armor: 0, boost: 0, repair: 0 })), mechResearch = [null, null];
 const MECH_UPGRADES = {
