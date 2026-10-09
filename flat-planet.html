@@ -1299,7 +1299,7 @@ const VARIANTS = [
   ['Massive Crown', 5, 'Mossy Gnarled', .13], ['Wind Bent', 9, 'Rugged Layered', .10], ['Gnarled Ancient', 31, 'Mossy Gnarled', .10],
   ['Column Cypress', 13, 'Peeling Pale', .09], ['Dead Snag', 3, 'Peeling Pale', .04],
 ];
-const NV = VARIANTS.length, ATLAS_CELL = 256, NEAR_CAP = 4000, NEAR_TREES = 150;
+const NV = VARIANTS.length, ATLAS_CELL = 256, NEAR_CAP = 4000, NEAR_TREES = 90;
 function pickVariant(h, r) {
   if (h > 60) return r < .92 ? Math.floor(r / .92 * 3) : NV - 1;          // high ground: conifers and snags
   let acc = 0; for (let v = 0; v < NV; v++) { acc += VARIANTS[v][3]; if (r < acc) return v; }
@@ -1382,7 +1382,8 @@ function buildTreeLibrary() {
     // near: instanced trunks + instanced leaf sprites
     const trunk = new THREE.InstancedMesh(trunkGeo, barkMat, NEAR_CAP);
     trunk.setColorAt(NEAR_CAP - 1, new THREE.Color(1, 1, 1));
-    trunk.count = 0; trunk.frustumCulled = false; trunk.visible = false; trunk.castShadow = true; scene.add(trunk);
+    trunk.count = 0; trunk.frustumCulled = false; trunk.visible = false; trunk.castShadow = false;   // tree shadows come from the baked map: live ones doubled the cost of thousands of trees
+    scene.add(trunk);
     let leaves = null;
     if (fGeo) {
       const ig = new THREE.InstancedBufferGeometry();
@@ -1391,7 +1392,7 @@ function buildTreeLibrary() {
       ig.setAttribute('aInst2', new THREE.InstancedBufferAttribute(new Float32Array(NEAR_CAP * 2), 2));
       ig.instanceCount = 0;
       leaves = new THREE.Points(ig, makeLeafMaterial(leafRaw, fSize));
-      leaves.frustumCulled = false; leaves.visible = false; leaves.castShadow = true; leaves.customDepthMaterial = makeLeafDepthMaterial(leafRaw); scene.add(leaves);
+      leaves.frustumCulled = false; leaves.visible = false; leaves.castShadow = false; leaves.customDepthMaterial = makeLeafDepthMaterial(leafRaw); scene.add(leaves);
     }
 
     // capture impostor
@@ -2017,11 +2018,13 @@ mini.addEventListener('mousedown', e => {
   cam.x = (e.clientX - r.left) / r.width * SIZE; cam.z = (e.clientY - r.top) / r.height * SIZE;
 });
 function drawMini() {
+  const nowT = performance.now(); if (nowT - (drawMini.t || 0) < 100) return; drawMini.t = nowT;   // the minimap redraws 10x a second, not every frame
   const s = mini.width / SIZE;
   mctx.drawImage(miniBase, 0, 0, mini.width, mini.height);
   if (Battle.fogOn) { const N = Battle.FOG_N, D = Battle.fogData; if (!drawMini.fc) { drawMini.fc = document.createElement('canvas'); drawMini.fc.width = drawMini.fc.height = N; drawMini.fi = drawMini.fc.getContext('2d').createImageData(N, N); }
+    if (nowT - (drawMini.ft || 0) > 500) { drawMini.ft = nowT;   // the fog layer (512x512 pixels) is rebuilt twice a second
     const px = drawMini.fi.data; for (let i = 0; i < N * N; i++) { px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = 4; px[i * 4 + 3] = D[i * 4 + 1] > 128 ? 130 * (1 - D[i * 4] / 255) : 170 + D[i * 4 + 2] * 0.34; }
-    drawMini.fc.getContext('2d').putImageData(drawMini.fi, 0, 0); mctx.imageSmoothingEnabled = true; mctx.drawImage(drawMini.fc, 0, 0, mini.width, mini.height); }
+    drawMini.fc.getContext('2d').putImageData(drawMini.fi, 0, 0); } mctx.imageSmoothingEnabled = true; mctx.drawImage(drawMini.fc, 0, 0, mini.width, mini.height); }
   if (terrToggle || placing) for (const [team, col] of [[0, 'rgba(95,208,255,.35)'], [1, 'rgba(255,80,70,.3)']]) { mctx.fillStyle = col;
     for (const [cx, cz, fn] of Battle.terrDiscs(team)) { mctx.beginPath(); for (let i = 0; i <= 64; i++) { const a = i / 64 * 6.283, r = fn(a) * 12 * s; mctx[i ? 'lineTo' : 'moveTo'](cx * 12 * s + Math.cos(a) * r, cz * 12 * s + Math.sin(a) * r); } mctx.fill(); } }
   for (const f of Battle.oilFields) { if (!Battle.fogExplored(f.x, f.z)) continue; mctx.fillStyle = '#1a1208'; mctx.strokeStyle = '#c89a3a'; mctx.lineWidth = 1; mctx.beginPath(); mctx.arc(f.x * 12 * s, f.z * 12 * s, 3.5, 0, 7); mctx.fill(); mctx.stroke(); }
@@ -2270,6 +2273,15 @@ for (const k in MK) { const box = $(MK[k].el).closest('.res'); box.style.cursor 
 let flagFor = null;
 addEventListener('keydown', e => { if (!flagFor) return; if (e.key === 'Escape') { flagFor = null; hint(''); } if (e.key === 'x' || e.key === 'X') { Battle.clearPickFlag(flagFor); feedMsg('Pickup flag removed: trucks pick the nearest clear spot'); flagFor = null; } });
 el.addEventListener('mousedown', e => { if (e.button === 2 && flagFor) { flagFor = null; hint(''); } });
+// ---- performance overlay (cheat PERF): frame time split into game logic, terrain streaming, drawing and UI
+renderer.info.autoReset = false;
+const PERF = { on: false, n: 0, acc: [0, 0, 0, 0], worst: 0, last: 0, t0: 0 };
+function perfTick(now, a, b, c, d) { const P = PERF; P.n++; P.acc[0] += a; P.acc[1] += b; P.acc[2] += c; P.acc[3] += d; P.worst = Math.max(P.worst, now - (P.last || now)); P.last = now;
+  if (now - P.t0 < 1000) return; const n = P.n, f = v => (v / n).toFixed(1), ri = renderer.info.render; let el = $('perfBox');
+  if (!el) { el = document.createElement('div'); el.id = 'perfBox'; el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:60;background:rgba(0,0,0,.75);color:#9f9;font:12px monospace;padding:6px 8px;white-space:pre;pointer-events:none'; document.body.append(el); }
+  const B = Battle, cnt = L => L ? L.filter(x => x.alive !== false).length : 0;
+  el.textContent = `FPS ${Math.round(n * 1000 / (now - P.t0))}  worst frame ${P.worst.toFixed(0)} ms\nlogic ${f(P.acc[0])}  stream ${f(P.acc[1])}  draw ${f(P.acc[2])}  ui ${f(P.acc[3])} ms\ndraw calls ${ri.calls}  tris ${(ri.triangles / 1000).toFixed(0)}k  SSAO ${SSAO.on ? 'on' : 'off'}\nunits ${B.selectables().length}  mechs ${B.selectables().filter(u => u.kind === 'robot').length}  buildings ${B.BLISTS ? '' : ''}${[B.outposts, B.airbases, B.pumpjacks, B.camps, B.mines, B.farms, B.warehouses, B.hangars, B.waterTowers].reduce((s, L) => s + cnt(L), 0)}`;
+  P.n = 0; P.acc = [0, 0, 0, 0]; P.worst = 0; P.t0 = now; }
 // ---- cheat codes: press ` (backtick) or tap the logo to open
 const CHEATS = {
   unlimited: ['999,999 of every resource and credits', () => { for (const A of [Battle.CR, Battle.OIL, Battle.WOOD, Battle.ORE, Battle.FOOD]) A[0] = 999999; RES.alloy = 999999; }],
@@ -2279,6 +2291,7 @@ const CHEATS = {
   daytime: ['Jump to noon', () => { TOD.t = 0.5; }],
   nighttime: ['Jump to midnight', () => { TOD.t = 0; }],
   peace: ['Calm every town: no war fear, homes full of happy people', () => { for (const t of Battle.towns) { t.warHeat = 0; t.happy = 100; } }],
+  perf: ['Show / hide the performance overlay', () => { PERF.on = !PERF.on; PERF.t0 = performance.now(); const el = $('perfBox'); if (el) el.style.display = PERF.on ? '' : 'none'; }],
   populate: ['Fill your town to every home', () => { const t = Battle.towns[0]; if (t && t.cap) t.pop = t.cap; }] };
 CHEATS.unlimted = CHEATS.unlimited;
 $('chList').innerHTML = Object.entries(CHEATS).filter(([k]) => k !== 'unlimted').map(([k, [d]]) => `<b style="color:var(--gold);letter-spacing:.06em">${k.toUpperCase()}</b> — ${d}`).join('<br>');
@@ -2533,7 +2546,7 @@ function updateShadows(now) {
       if (!m || m.transparent || m.isShaderMaterial || m.isMeshBasicMaterial || m.blending === THREE.AdditiveBlending) return; o.castShadow = o.receiveShadow = true; }); }
   if (L.shadow.map) { SHADOW.map.value = L.shadow.map.texture; SHADOW.mat.value = L.shadow.matrix; SHADOW.on.value = 1; }
   // near trees (built around the camera position) cast live shadows; the baked ones fade out over the same area
-  TREE_SH.nearC.value.set(cam.x, cam.z); TREE_SH.nearR.value = Math.min(NEAR_TREES - 15, half);
+  TREE_SH.nearC.value.set(cam.x, cam.z); TREE_SH.nearR.value = 0;
 }
 // bake every tree's shadow into a map-wide texture: crown ellipse thrown along the sun direction, plus a trunk streak
 function bakeTreeShadows() {
@@ -2583,10 +2596,11 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   let last = performance.now();
   renderer.setAnimationLoop(now => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    update(dt); if (!PAUSED) updateDayNight(dt); placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now);
-    waterMat.uniforms.uTime.value = now / 1000;
-    renderFrame();
-    drawMini(); updateUI(dt);
+    renderer.info.reset(); const P = PERF.on, t0 = P && performance.now();
+    update(dt); if (!PAUSED) updateDayNight(dt); const t1 = P && performance.now(); placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now);
+    waterMat.uniforms.uTime.value = now / 1000; const t2 = P && performance.now();
+    renderFrame(); const t3 = P && performance.now();
+    drawMini(); updateUI(dt); if (P) perfTick(now, t1 - t0, t2 - t1, t3 - t2, performance.now() - t3);
   });
 }, 30));
 </script>
