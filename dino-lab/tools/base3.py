@@ -5,7 +5,7 @@ from scipy.spatial import cKDTree
 from scipy import ndimage
 from skimage import measure
 from wrap import sample, laplacian
-heads=np.load('heads2_aligned.npy',allow_pickle=True)
+heads=np.load('heads3_aligned.npy',allow_pickle=True)
 vox=0.004
 lo=np.min([np.percentile(H['Q'],1,0) for H in heads],0)-0.03; hi=np.max([np.percentile(H['Q'],99,0) for H in heads],0)+0.03
 dims=np.ceil((hi-lo)/vox).astype(int)+1
@@ -31,4 +31,4 @@ ft=f[keep[f[:,0]]]; vs=np.unique(ft); rm=-np.ones(n,int); rm[vs]=np.arange(len(v
 Lap=laplacian(len(v),f)
 for it in range(40): v=v+(0.5 if it%2==0 else -0.53)*(Lap@v-v)
 M=v.copy(); M[:,2]*=-1; _,mi=cKDTree(v).query(M); v=0.5*(v+np.c_[v[mi,0],v[mi,1],-v[mi,2]])
-np.save('base9.npy',dict(v=v,f=f),allow_pickle=True); print('base9',len(v),'verts',len(f),'tris')
+np.save('base3.npy',dict(v=v,f=f),allow_pickle=True); print('base3',len(v),'verts',len(f),'tris')

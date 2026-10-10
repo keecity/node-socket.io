@@ -1,7 +1,7 @@
 """Adaptive refinement: wrap every species, find where the base falls short by a near amount (cheeks, ridges,
 bosses), subdivide the base only there (symmetrically, crack-free), re-wrap, repeat.
 Far gaps (horns, spikes, crests) are left for fused residual pieces."""
-import sys; sys.path.insert(0,'/tmp/claude-0/-home-user-node-socket-io/16203f93-b1ad-5b15-91e7-2cd92cb90144/scratchpad/dino')
+import sys; sys.path.insert(0,'.')
 import numpy as np, time
 from scipy.spatial import cKDTree
 from wrap import wrap, prefit, sample

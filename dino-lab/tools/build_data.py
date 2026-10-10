@@ -1,6 +1,6 @@
 """Package the shared-topology dino heads for the viewer and export a rigged GLB.
 inputs (scratch): base.npy, wrap0-2.npy, uvs.npy, heads_aligned.npy, atlas.png"""
-import sys; sys.path.insert(0,'/tmp/claude-0/-home-user-node-socket-io/16203f93-b1ad-5b15-91e7-2cd92cb90144/scratchpad/dino')
+import sys; sys.path.insert(0,'.')
 import numpy as np, json, struct, io
 from PIL import Image
 from rig import jaw_weights, jaw_pivot

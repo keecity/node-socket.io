@@ -1,6 +1,6 @@
 """Split a Tripo sheet of heads laid out in a grid (columns along x, rows along y), straighten each by symmetry.
 usage: split_grid.py <in.glb> <cols> <rows> <out.npy>"""
-import sys; sys.path.insert(0,'/tmp/claude-0/-home-user-node-socket-io/16203f93-b1ad-5b15-91e7-2cd92cb90144/scratchpad/dino')
+import sys; sys.path.insert(0,'.')
 from glbio import load
 import numpy as np
 from scipy.spatial import cKDTree

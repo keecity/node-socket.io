@@ -57,7 +57,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 <div class="app">
   <div class="stage">
     <canvas id="cv"></canvas>
-    <div class="hud"><h1>Dino Lab</h1><div class="tag">9 sculpts → one rigged base → splice → incubate</div></div>
+    <div class="hud"><h1>Dino Lab</h1><div class="tag">9 sculpts → one rigged base → splice</div></div>
     <div class="stat" id="stat">Loading specimens…</div>
     <div class="err" id="err" hidden></div>
   </div>
@@ -87,11 +87,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="freq">Scale size</label><output id="freqOut"></output><input id="freq" type="range" min="4" max="24" step="0.5" value="9"></div>
       <div class="slider"><label for="bump">Relief</label><output id="bumpOut"></output><input id="bump" type="range" min="0" max="3" step="0.05" value="1"></div>
       <div class="row" style="margin-bottom:8px"><label for="backCol">Back</label><input type="color" id="backCol" value="#6b5c40"><label for="bellyCol">Belly</label><input type="color" id="bellyCol" value="#ccb88c"><button class="btn" id="autoCol">Species colours</button></div>
-    </section>
-    <section>
-      <h2>Incubation</h2>
-      <button class="btn primary" id="incubate">Incubate</button>
-      <p class="note" id="incubateOut" style="margin-top:8px">The preview is the spliced base. Incubate to grow the species' horns, crests and frills into one fused head.</p>
+      <div class="row" style="margin-bottom:8px"><label for="gumCol">Gums</label><input type="color" id="gumCol" value="#6b171c"><label for="kerCol">Beak / dome</label><input type="color" id="kerCol" value="#807869"></div>
+      <div class="toggles"><label><input type="checkbox" id="showRegions"> Show ID regions (mouth, keratin, sites)</label></div>
     </section>
     <section>
       <h2>Jaw rig</h2>
@@ -105,7 +102,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     </section>
     <section>
       <h2>How it is built</h2>
-      <p class="note">Nine sculpts were split from one sheet, straightened by symmetry and aligned at the jaw joint. A generic base (the median of their shapes, so no species' sockets, horns or crests) is rigged with a skull and a jaw bone in the cheek and wrapped onto each sculpt, so splicing is a per-vertex blend on 28,142 shared vertices. What the base cannot reach (horns, frills, crests) is stored per species as a solid feature patch and fused on at incubation, scaled by that species' share of the genome.</p>
+      <p class="note">Nine sculpts, painted with ID colours (pink mouth, yellow beak and dome keratin, green attachment sites), were split from one sheet, straightened by symmetry and aligned at the jaw joint. A generic base (the median of their shapes) is rigged with a skull and a jaw bone in the cheek and wrapped onto each sculpt, so splicing is a per-vertex blend on <span id="nverts">the</span> shared vertices. Each species' ID regions are carried onto the base through its wrap and mixed by the same DNA, then cut at one half, so a beak or gum line moves with the genome without smearing. The ID colours never show: the skin is procedural.</p>
     </section>
   </aside>
 </div>
@@ -135,6 +132,7 @@ async function loadGlb(url) {
   return {
     P: acc(at.POSITION), I: acc(pr.indices),
     W: acc(at.WEIGHTS_0), D: pr.targets.map(t => acc(t.POSITION)),
+    R: Object.keys(at).filter(k => k.startsWith('_REGION_')).sort((a, b) => a.split('_')[2] - b.split('_')[2]).map(k => acc(at[k])),
     names: g.meshes[0].extras.targetNames, gapes: g.meshes[0].extras.speciesGapes, restGape: g.nodes[2].extras.restGapeDeg, pivot: g.nodes[2].translation || [0, 0, 0]
   };
 }
@@ -181,6 +179,8 @@ const DINO_SURF = `
 #define DINO_SURF
 uniform sampler2D uScales, uCamo;
 uniform float uTileA, uTileB, uFreq, uCamoTile, uCamoFreq;
+vec3 dinoN() { vec2 xy = vVertexColor.rg * 2.0 - 1.0; return normalize(vec3(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))))); }   // |z| is all the projection needs
+float dinoMask(float v) { return smoothstep(0.44, 0.56, v); }   // DNA-mixed regions cut at one half: edges move, never smear
 vec4 dinoTile(float tile, vec2 q, vec2 dx, vec2 dy) {
   vec2 m = abs(mod(q, 2.0) - 1.0);                              // mirrored repeat: no tile edges
   vec2 cell = vec2(mod(tile, 3.0), floor(tile / 3.0));
@@ -193,7 +193,7 @@ vec4 dinoTri(float tile, vec3 p, vec3 w) {
 }
 vec3 dinoCamo() {   // colour pattern: same three-sided projection, larger scale, from the camo sheet
   vec3 p = vec3(vUv0.x, vUv0.y, vUv1.x) * uCamoFreq;
-  vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
+  vec3 n = dinoN();
   vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
   vec3 dx = dFdx(p), dy = dFdy(p);
   vec2 cell = vec2(mod(uCamoTile, 3.0), floor(uCamoTile / 3.0));
@@ -209,9 +209,12 @@ vec3 dinoCamo() {   // colour pattern: same three-sided projection, larger scale
 }
 vec4 dinoSurface() {
   vec3 p = vec3(vUv0.x, vUv0.y, vUv1.x) * uFreq;
-  vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
+  vec3 n = dinoN();
   vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
-  return mix(dinoTri(uTileA, p, w), dinoTri(uTileB, p, w), smoothstep(0.0, 1.0, vVertexColor.a));
+  vec4 s = mix(dinoTri(uTileA, p, w), dinoTri(uTileB, p, w), smoothstep(0.0, 1.0, vVertexColor.a));
+  float soft = max(dinoMask(vUv2.x), dinoMask(vUv2.y));          // gums and keratin: no scales
+  s.a = mix(s.a, 0.5 + (s.a - 0.5) * 0.12, soft); s.r = mix(s.r, 0.5 + (s.r - 0.5) * 0.25, soft);
+  return s;
 }
 #endif
 `;
@@ -219,14 +222,20 @@ const chunks = mat.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
 chunks.set('diffusePS', DINO_SURF + `
 uniform vec3 material_diffuse;
 uniform vec3 uBack, uBelly;
-uniform float uWeightView, uCamoOn;
+uniform float uWeightView, uCamoOn, uRegionView;
+uniform vec3 uGum, uKeratin;
 void getAlbedo() {
   vec4 s = dinoSurface();
-  vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
+  vec3 n = dinoN();
   vec3 back = mix(uBack, dinoCamo() * 0.85, uCamoOn);
   vec3 base = mix(back, uBelly, smoothstep(0.0, 1.0, vVertexColor.a) * mix(1.0, 0.85, uCamoOn));
   base *= mix(1.0, 0.72, smoothstep(0.35, 0.95, n.y));          // darker along the top of the head
   vec3 col = base * (0.7 + 0.6 * s.r) * (0.78 + 0.4 * s.a);      // pattern albedo and cavities, kept soft
+  float mouth = dinoMask(vUv2.x), ker = dinoMask(vUv2.y), site = dinoMask(vVertexColor.b);
+  col = mix(col, uKeratin * (0.82 + 0.3 * s.r), ker);
+  col = mix(col, uGum * (0.8 + 0.35 * s.r), mouth);
+  vec3 ids = mix(mix(mix(vec3(0.45, 0.2, 0.55), vec3(0.95, 0.85, 0.15), ker), vec3(0.3, 0.75, 0.25), site), vec3(0.95, 0.35, 0.5), mouth);
+  col = mix(col, ids, uRegionView);
   float jw = vUv1.y;
   dAlbedo = mix(col, mix(vec3(0.15, 0.35, 0.95), vec3(1.0, 0.45, 0.1), jw), uWeightView);
 }
@@ -257,13 +266,13 @@ const SKINS = [   // per species: back / belly tint, back / belly scale tile, ca
   { back: [0.30, 0.38, 0.24], belly: [0.78, 0.74, 0.52], a: 5, b: 8, camo: 8 }    // Beaked grazer
 ];
 const PATTERN_NAMES = ['Fine beads', 'Overlapping scales', 'Large polygons', 'Hex scales', 'Pebble boss', 'Lizard scales', 'Croc scutes', 'Belly plates', 'Small beads'];
-const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null, camo: -1, camoFreq: 2.2 };
+const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null, camo: -1, camoFreq: 2.2, gum: [0.42, 0.09, 0.11], keratin: [0.5, 0.47, 0.41] };
 const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert stripes', 'River teal', 'Olive ochre', 'Dusk violet', 'Jungle spots'];
 
 
 let D = null, mesh = null, head = null, bones = {};
 const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12 };
-const view = { bones: false, weights: false, idle: true };
+const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
   D = data;
@@ -276,11 +285,14 @@ function build(data) {
   // the standard shader only declares the uv0/uv1 varyings when a map uses them: bind the scales to
   // diffuse (uv0) and to emissive (uv1, black emissive so it adds nothing)
   mat.diffuseMap = tex; mat.diffuseMapUv = 0; mat.emissiveMap = tex; mat.emissiveMapUv = 1;
+  // uv2 carries the ID regions (mouth, keratin): a plain white AO map makes the shader declare it, and adds no shading
+  const white = new pc.Texture(dev, { width: 1, height: 1, format: pc.PIXELFORMAT_RGBA8, mipmaps: false });
+  white.lock().fill(255); white.unlock(); mat.aoMap = white; mat.aoMapUv = 2;
   mat.update();
 
   mesh = new pc.Mesh(dev);
   mesh.setPositions(D.P); mesh.setNormals(new Float32Array(D.P.length));
-  mesh.setUvs(0, new Float32Array(n * 2)); mesh.setUvs(1, new Float32Array(n * 2));
+  mesh.setUvs(0, new Float32Array(n * 2)); mesh.setUvs(1, new Float32Array(n * 2)); mesh.setUvs(2, new Float32Array(n * 2));
   mesh.setColors32(new Uint8Array(n * 4).fill(255));
   mesh.setIndices(D.I);
   const bi = new Uint8Array(n * 4), bw = new Float32Array(n * 4);
@@ -297,7 +309,7 @@ function build(data) {
   const skin = new pc.Skin(dev, [new pc.Mat4(), jawIbm], ['skull', 'jaw']);
   mesh.skin = skin;
   const si = new pc.SkinInstance(skin); si.bones = [bones.skull, bones.jaw]; si.rootBone = head;
-  const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; meshInst = mi;
+  const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false;
   head.addComponent('render', { meshInstances: [mi] });
   rebuild();
 }
@@ -334,12 +346,15 @@ function rebuild() {
   }
   for (let v = 0; v < n; v++) { const l = Math.hypot(nrm[v*3], nrm[v*3+1], nrm[v*3+2]) || 1; nrm[v*3] /= l; nrm[v*3+1] /= l; nrm[v*3+2] /= l; }
   const jwv = new Float32Array(n); for (let v = 0; v < n; v++) jwv[v] = D.W[v*4+1] / 255;
-  setSurface(mesh, pos, nrm, jwv);
-  showMesh(mesh); incubated = null; $('incubate').disabled = false; $('incubateOut').textContent = 'Genome changed: incubate to grow its horns, crests and frills.';
+  // ID regions (mouth, keratin, sites), mixed by the same DNA weights
+  const reg = new Float32Array(n * 3);
+  w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
+  setSurface(mesh, pos, nrm, jwv, reg);
   applySkin(w);
   const gape = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
   $('stat').innerHTML = `<b>${(n).toLocaleString()}</b> shared vertices · <b>2</b> bones (skull, jaw) · splice ${w.map((x, i) => `${D.names[i]} <b>${Math.round(x * 100)}%</b>`).join(' · ')} · sculpted gape ${gape.toFixed(0)}° · drag to orbit`;
   renderBar(w);
+  $('nverts').textContent = n.toLocaleString();
 }
 function applySkin(w) {
   const dom = w.indexOf(Math.max(...w)), mixc = k => [0, 1, 2].map(a => SKINS.reduce((s2, sk, i) => s2 + w[i] * sk[k][a], 0));
@@ -347,7 +362,8 @@ function applySkin(w) {
   mat.setParameter('uBack', new Float32Array(back)); mat.setParameter('uBelly', new Float32Array(belly));
   mat.setParameter('uTileA', skinUi.a >= 0 ? skinUi.a : SKINS[dom].a); mat.setParameter('uTileB', skinUi.b >= 0 ? skinUi.b : SKINS[dom].b);
   mat.setParameter('uFreq', skinUi.freq); mat.setParameter('uBump', skinUi.bump * 0.006);
-  mat.setParameter('uWeightView', view.weights ? 1 : 0);
+  mat.setParameter('uWeightView', view.weights ? 1 : 0); mat.setParameter('uRegionView', view.regions ? 1 : 0);
+  mat.setParameter('uGum', new Float32Array(skinUi.gum)); mat.setParameter('uKeratin', new Float32Array(skinUi.keratin));
   const camo = skinUi.camo === -1 ? SKINS[dom].camo : skinUi.camo;   // -1 species default, -2 none
   mat.setParameter('uCamoOn', camo >= 0 ? 1 : 0); mat.setParameter('uCamoTile', Math.max(camo, 0)); mat.setParameter('uCamoFreq', skinUi.camoFreq);
 }
@@ -363,235 +379,18 @@ function vertexNormals(pos, I) {
   for (let v = 0; v < n; v++) { const l = Math.hypot(nrm[v*3], nrm[v*3+1], nrm[v*3+2]) || 1; nrm[v*3] /= l; nrm[v*3+1] /= l; nrm[v*3+2] /= l; }
   return nrm;
 }
-function setSurface(m, pos, nrm, jw) {
-  const n = pos.length / 3, uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), cl = new Uint8Array(n * 4);
+function setSurface(m, pos, nrm, jw, reg) {
+  const n = pos.length / 3, uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), uv2 = new Float32Array(n * 2), cl = new Uint8Array(n * 4);
   for (let v = 0; v < n; v++) {
     uv0[v*2] = pos[v*3]; uv0[v*2+1] = pos[v*3+1]; uv1[v*2] = pos[v*3+2]; uv1[v*2+1] = jw[v];
     const ny = nrm[v*3+1], belly = smooth(0.15, 0.7, -ny) * (1 - smooth(0.02, 0.09, pos[v*3+1] + 0.02));
-    cl[v*4] = (nrm[v*3] * 0.5 + 0.5) * 255; cl[v*4+1] = (ny * 0.5 + 0.5) * 255; cl[v*4+2] = (nrm[v*3+2] * 0.5 + 0.5) * 255; cl[v*4+3] = belly * 255;
+    cl[v*4] = (nrm[v*3] * 0.5 + 0.5) * 255; cl[v*4+1] = (ny * 0.5 + 0.5) * 255; cl[v*4+2] = reg[v*3+2] * 255; cl[v*4+3] = belly * 255;
+    uv2[v*2] = reg[v*3]; uv2[v*2+1] = reg[v*3+1];
   }
-  m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv0); m.setUvs(1, uv1); m.setColors32(cl);
+  m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv0); m.setUvs(1, uv1); m.setUvs(2, uv2); m.setColors32(cl);
   m.update(pc.PRIMITIVE_TRIANGLES, false);
 }
-let meshInst = null, incubated = null;
-function showMesh(m) { if (meshInst && meshInst.mesh !== m) meshInst.mesh = m; }
 function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; return genes.mix.map(x => x / s); }
-
-// ---------- Incubation: fuse the spliced base with each species' far features into one watertight head ----------
-const BIG = 1e20;
-function edt1d(f, d, v, z, n) {
-  let k = 0; v[0] = 0; z[0] = -BIG; z[1] = BIG;
-  for (let q = 1; q < n; q++) {
-    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
-    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
-    k++; v[k] = q; z[k] = s; z[k + 1] = BIG;
-  }
-  k = 0;
-  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
-}
-function edt3d(grid, nx, ny, nz) {
-  const m = Math.max(nx, ny, nz);
-  const f = new Float64Array(m), d = new Float64Array(m), v = new Int32Array(m), z = new Float64Array(m + 1);
-  const pass = (n, count, at) => {
-    for (let l = 0; l < count; l++) {
-      for (let i = 0; i < n; i++) f[i] = grid[at(l, i)];
-      edt1d(f, d, v, z, n);
-      for (let i = 0; i < n; i++) grid[at(l, i)] = d[i];
-    }
-  };
-  pass(nx, ny * nz, (l, i) => i + nx * l);
-  pass(ny, nx * nz, (l, i) => (l % nx) + nx * (i + ny * Math.floor(l / nx)));
-  pass(nz, nx * ny, (l, i) => l + nx * ny * i);
-  for (let i = 0; i < grid.length; i++) grid[i] = Math.sqrt(grid[i]);
-  return grid;
-}
-
-function closestOnTri(px, py, pz, P, a, b, c, out) {
-  const ax = P[a], ay = P[a+1], az = P[a+2];
-  const abx = P[b]-ax, aby = P[b+1]-ay, abz = P[b+2]-az, acx = P[c]-ax, acy = P[c+1]-ay, acz = P[c+2]-az;
-  const apx = px-ax, apy = py-ay, apz = pz-az;
-  const d1 = abx*apx + aby*apy + abz*apz, d2 = acx*apx + acy*apy + acz*apz;
-  let u, v, w;
-  if (d1 <= 0 && d2 <= 0) { u = 1; v = 0; w = 0; }
-  else {
-    const bpx = px-P[b], bpy = py-P[b+1], bpz = pz-P[b+2];
-    const d3 = abx*bpx + aby*bpy + abz*bpz, d4 = acx*bpx + acy*bpy + acz*bpz;
-    if (d3 >= 0 && d4 <= d3) { u = 0; v = 1; w = 0; }
-    else {
-      const vc = d1*d4 - d3*d2;
-      if (vc <= 0 && d1 >= 0 && d3 <= 0) { const t = d1 / (d1 - d3); u = 1 - t; v = t; w = 0; }
-      else {
-        const cpx = px-P[c], cpy = py-P[c+1], cpz = pz-P[c+2];
-        const d5 = abx*cpx + aby*cpy + abz*cpz, d6 = acx*cpx + acy*cpy + acz*cpz;
-        if (d6 >= 0 && d5 <= d6) { u = 0; v = 0; w = 1; }
-        else {
-          const vb = d5*d2 - d1*d6;
-          if (vb <= 0 && d2 >= 0 && d6 <= 0) { const t = d2 / (d2 - d6); u = 1 - t; v = 0; w = t; }
-          else {
-            const va = d3*d6 - d5*d4;
-            if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) { const t = (d4 - d3) / ((d4 - d3) + (d5 - d6)); u = 0; v = 1 - t; w = t; }
-            else { const den = 1 / (va + vb + vc); v = vb * den; w = vc * den; u = 1 - v - w; }
-          }
-        }
-      }
-    }
-  }
-  out[0] = ax + abx * v + acx * w; out[1] = ay + aby * v + acy * w; out[2] = az + abz * v + acz * w;
-  out[3] = u; out[4] = v; out[5] = w;
-}
-
-// features.bin: per species, solid signed-distance patches (int8) pinned to an anchor vertex of the base
-function parseFeatures(buf) {
-  const hl = new DataView(buf).getUint32(0, true);
-  const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl)));
-  const base = 4 + hl;
-  for (const sp of meta.species) for (const b of sp.boxes) b.data = new Int8Array(buf, base + b.off, b.dims[0] * b.dims[1] * b.dims[2]);
-  return meta;
-}
-function incubate(P, I, Wjaw, w, feats, onStep) {
-  const T = {}; let t0 = performance.now();
-  const lap = k => { const t = performance.now(); T[k] = Math.round(t - t0); t0 = t; };
-  const h = 0.003, nV = P.length / 3;
-  // features in play: each patch translated by how far its anchor moved from that species' own wrap
-  const active = [];
-  feats.species.forEach((sp, s) => { if (w[s] < 0.05) return; for (const b of sp.boxes) {
-    const tx = P[b.anchor*3] - b.anchorPos[0], ty = P[b.anchor*3+1] - b.anchorPos[1], tz = P[b.anchor*3+2] - b.anchorPos[2];
-    active.push({ b, w: w[s], o: [b.origin[0] + tx, b.origin[1] + ty, b.origin[2] + tz] });
-  } });
-  const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
-  for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], P[i+a]); mx[a] = Math.max(mx[a], P[i+a]); }
-  for (const f of active) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], f.o[a]); mx[a] = Math.max(mx[a], f.o[a] + f.b.dims[a] * feats.vox); }
-  const pad = 4 * h, o = mn.map(v => v - pad);
-  const nx = Math.ceil((mx[0] - mn[0] + 2 * pad) / h) + 1, ny = Math.ceil((mx[1] - mn[1] + 2 * pad) / h) + 1, nz = Math.ceil((mx[2] - mn[2] + 2 * pad) / h) + 1;
-  const N = nx * ny * nz, at = (x, y, z) => x + nx * (y + ny * z);
-  // 1. base: exact distance near the surface, side of the closest triangle, then EDT + flood-fill sign
-  const f = new Float64Array(N).fill(BIG), nearSign = new Int8Array(N), cp = new Float64Array(6);
-  for (let t = 0; t < I.length; t += 3) {
-    const a = I[t]*3, b = I[t+1]*3, c = I[t+2]*3;
-    const lo = [0, 1, 2].map(k => Math.max(0, Math.floor((Math.min(P[a+k], P[b+k], P[c+k]) - o[k]) / h) - 1));
-    const hi = [0, 1, 2].map((k, i) => Math.min([nx, ny, nz][i] - 1, Math.ceil((Math.max(P[a+k], P[b+k], P[c+k]) - o[k]) / h) + 1));
-    const e1x = P[b]-P[a], e1y = P[b+1]-P[a+1], e1z = P[b+2]-P[a+2], e2x = P[c]-P[a], e2y = P[c+1]-P[a+1], e2z = P[c+2]-P[a+2];
-    const fnx = e1y*e2z - e1z*e2y, fny = e1z*e2x - e1x*e2z, fnz = e1x*e2y - e1y*e2x;
-    for (let z = lo[2]; z <= hi[2]; z++) for (let y = lo[1]; y <= hi[1]; y++) for (let x = lo[0]; x <= hi[0]; x++) {
-      const px = o[0] + x * h, py = o[1] + y * h, pz = o[2] + z * h;
-      closestOnTri(px, py, pz, P, a, b, c, cp);
-      const d2 = ((cp[0]-px)**2 + (cp[1]-py)**2 + (cp[2]-pz)**2) / (h * h), i = at(x, y, z);
-      if (d2 < f[i]) { f[i] = d2; nearSign[i] = ((px-cp[0])*fnx + (py-cp[1])*fny + (pz-cp[2])*fnz) >= 0 ? 1 : -1; }
-    }
-  }
-  for (let i = 0; i < N; i++) if (f[i] > 4) f[i] = BIG;
-  lap('distance'); onStep && onStep('distance');
-  const d = edt3d(f, nx, ny, nz); lap('edt');
-  const out = new Uint8Array(N), q = new Int32Array(N); let qh = 0, qt = 0;
-  for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
-    if (x && y && z && x < nx - 1 && y < ny - 1 && z < nz - 1) continue;
-    const i = at(x, y, z); if (d[i] > 1.5 && !out[i]) { out[i] = 1; q[qt++] = i; }
-  }
-  const nb = [1, -1, nx, -nx, nx * ny, -nx * ny];
-  while (qh < qt) { const i = q[qh++]; for (const dn of nb) { const j = i + dn; if (j >= 0 && j < N && !out[j] && d[j] > 1.5) { out[j] = 1; q[qt++] = j; } } }
-  const phi = new Float32Array(N);
-  for (let i = 0; i < N; i++) phi[i] = (out[i] || (d[i] <= 1.5 && nearSign[i] > 0) ? d[i] : -d[i]) * h;
-  lap('sign');
-  // 2. smooth-union each feature patch (eroded by how little of that species is in the genome; faded at its box edges)
-  const K = 0.006, ERODE = 0.012, fv = feats.vox, fq = feats.q;
-  for (const F of active) {
-    const [dx, dy, dz] = F.b.dims, D8 = F.b.data, er = (1 - F.w) * ERODE;
-    const x0 = Math.max(0, Math.floor((F.o[0] - o[0]) / h)), x1 = Math.min(nx - 1, Math.ceil((F.o[0] + dx * fv - o[0]) / h));
-    const y0 = Math.max(0, Math.floor((F.o[1] - o[1]) / h)), y1 = Math.min(ny - 1, Math.ceil((F.o[1] + dy * fv - o[1]) / h));
-    const z0 = Math.max(0, Math.floor((F.o[2] - o[2]) / h)), z1 = Math.min(nz - 1, Math.ceil((F.o[2] + dz * fv - o[2]) / h));
-    for (let z = z0; z <= z1; z++) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const u = (o[0] + x * h - F.o[0]) / fv, v = (o[1] + y * h - F.o[1]) / fv, s = (o[2] + z * h - F.o[2]) / fv;
-      if (u < 0 || v < 0 || s < 0 || u > dx - 1.001 || v > dy - 1.001 || s > dz - 1.001) continue;
-      const iu = Math.floor(u), iv = Math.floor(v), is = Math.floor(s), fu = u - iu, fvv = v - iv, fs = s - is;
-      const g = (a, b, c) => D8[(iu + a) + dx * ((iv + b) + dy * (is + c))];
-      const val = ((g(0,0,0)*(1-fu) + g(1,0,0)*fu) * (1-fvv) + (g(0,1,0)*(1-fu) + g(1,1,0)*fu) * fvv) * (1-fs)
-                + ((g(0,0,1)*(1-fu) + g(1,0,1)*fu) * (1-fvv) + (g(0,1,1)*(1-fu) + g(1,1,1)*fu) * fvv) * fs;
-      const edge = Math.min(u, v, s, dx - 1 - u, dy - 1 - v, dz - 1 - s);           // voxels to the patch boundary
-      const pf = val * fq + er + Math.max(0, 2 - edge) * fv * 2;   // the patch is already limited to its feature; just seal the box faces
-      const i = at(x, y, z), b = phi[i];
-      const hh = Math.max(K - Math.abs(pf - b), 0) / K;
-      phi[i] = Math.min(b, pf) - hh * hh * K * 0.25;
-    }
-  }
-  lap('features'); onStep && onStep('features');
-  // 3. surface nets: one vertex per sign-changing cell, a quad per sign-changing edge
-  for (let i = 0; i < N; i++) phi[i] = -phi[i];
-  const cellV = new Int32Array(N).fill(-1), vp = [];
-  const C = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
-  const E = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
-  const cv = new Float32Array(8);
-  for (let z = 0; z < nz - 1; z++) for (let y = 0; y < ny - 1; y++) for (let x = 0; x < nx - 1; x++) {
-    let mask = 0;
-    for (let c = 0; c < 8; c++) { cv[c] = phi[at(x + C[c][0], y + C[c][1], z + C[c][2])]; if (cv[c] > 0) mask |= 1 << c; }
-    if (mask === 0 || mask === 255) continue;
-    let sx = 0, sy = 0, sz = 0, cnt = 0;
-    for (const [a, b] of E) {
-      if ((cv[a] > 0) === (cv[b] > 0)) continue;
-      const tt = cv[a] / (cv[a] - cv[b]);
-      sx += C[a][0] + (C[b][0] - C[a][0]) * tt; sy += C[a][1] + (C[b][1] - C[a][1]) * tt; sz += C[a][2] + (C[b][2] - C[a][2]) * tt; cnt++;
-    }
-    cellV[at(x, y, z)] = vp.length / 3;
-    vp.push(o[0] + (x + sx / cnt) * h, o[1] + (y + sy / cnt) * h, o[2] + (z + sz / cnt) * h);
-  }
-  const idx = [], st = [1, nx, nx * ny];
-  for (let z = 1; z < nz - 1; z++) for (let y = 1; y < ny - 1; y++) for (let x = 1; x < nx - 1; x++) {
-    const i0 = at(x, y, z);
-    for (let ax = 0; ax < 3; ax++) {
-      const in0 = phi[i0] > 0, in1 = phi[i0 + st[ax]] > 0;
-      if (in0 === in1) continue;
-      const sj = st[(ax + 1) % 3], sk = st[(ax + 2) % 3];
-      const a = cellV[i0], b = cellV[i0 - sj], c = cellV[i0 - sj - sk], dd = cellV[i0 - sk];
-      if (a < 0 || b < 0 || c < 0 || dd < 0) continue;
-      if (in0) idx.push(a, b, c, a, c, dd); else idx.push(a, c, b, a, dd, c);
-    }
-  }
-  lap('mesh');
-  // 4. light shrink-free smoothing
-  const nv = vp.length / 3, pos = new Float32Array(vp), nbr = Array.from({ length: nv }, () => new Set());
-  for (let i = 0; i < idx.length; i += 3) { const a = idx[i], b = idx[i+1], c = idx[i+2]; nbr[a].add(b).add(c); nbr[b].add(a).add(c); nbr[c].add(a).add(b); }
-  const nl = nbr.map(s => Int32Array.from(s)), tmp = new Float32Array(pos.length);
-  for (let it = 0; it < 6; it++) {
-    const fac = it % 2 ? -0.53 : 0.5;
-    for (let v = 0; v < nv; v++) { const L = nl[v]; let ax = 0, ay = 0, az = 0; for (const u of L) { ax += pos[u*3]; ay += pos[u*3+1]; az += pos[u*3+2]; }
-      const k = L.length || 1; for (let a = 0; a < 3; a++) tmp[v*3+a] = pos[v*3+a] + fac * ([ax, ay, az][a] / k - pos[v*3+a]); }
-    pos.set(tmp);
-  }
-  // 5. jaw weights: from the nearest vertex of the spliced base (spatial hash)
-  const cs = 0.006, hash = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
-  for (let v = 0; v < nV; v++) { const k = key(Math.floor(P[v*3]/cs), Math.floor(P[v*3+1]/cs), Math.floor(P[v*3+2]/cs)); (hash.get(k) || hash.set(k, []).get(k)).push(v); }
-  const jw = new Float32Array(nv);
-  for (let v = 0; v < nv; v++) {
-    const px = pos[v*3], py = pos[v*3+1], pz = pos[v*3+2], cx = Math.floor(px/cs), cy = Math.floor(py/cs), cz = Math.floor(pz/cs);
-    let best = 1e9, bw = 0;
-    for (let r = 1; r <= 4 && best === 1e9; r++)
-      for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) for (let c = -r; c <= r; c++) {
-        const L = hash.get(key(cx + a, cy + b, cz + c)); if (!L) continue;
-        for (const u of L) { const dd = (P[u*3]-px)**2 + (P[u*3+1]-py)**2 + (P[u*3+2]-pz)**2; if (dd < best) { best = dd; bw = Wjaw[u]; } }
-      }
-    jw[v] = bw;
-  }
-  lap('weights');
-  return { pos, idx: nv > 65535 ? Uint32Array.from(idx) : Uint16Array.from(idx), jw, T, features: active.length };
-}
-
-function runIncubate() {
-  if (!D || !D.feats) return;
-  $('incubate').disabled = true; $('incubateOut').textContent = 'Incubating…';
-  setTimeout(() => {
-    try {
-      const n = D.P.length / 3, jwv = new Float32Array(n); for (let v = 0; v < n; v++) jwv[v] = D.W[v*4+1] / 255;
-      const t = performance.now(), r = incubate(pos, D.I, jwv, normWeights(), D.feats);
-      const m = new pc.Mesh(app.graphicsDevice), nv = r.pos.length / 3;
-      m.setPositions(r.pos); m.setIndices(r.idx);
-      const bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
-      for (let v = 0; v < nv; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - r.jw[v]; bw[v*4+1] = r.jw[v]; }
-      m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, nv, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
-      setSurface(m, r.pos, vertexNormals(r.pos, r.idx), r.jw);
-      m.skin = mesh.skin; incubated = m; showMesh(m);
-      $('incubateOut').textContent = `Hatched: one fused head, ${nv.toLocaleString()} vertices, ${r.features} feature patch${r.features === 1 ? '' : 'es'} grown in ${((performance.now() - t) / 1000).toFixed(1)} s.`;
-    } catch (err) { console.error(err); $('incubateOut').textContent = 'Incubation failed: ' + err.message; $('incubate').disabled = false; }
-  }, 30);
-}
 
 // ---------- jaw + idle animation ----------
 let time = 0, roarT = -1, snapT = -1;
@@ -633,7 +432,6 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
 }
 { const el = $('boost'), out = $('boostOut'); const sync = () => { genes.boost = +el.value; out.textContent = '×' + genes.boost.toFixed(2); }; sync(); el.addEventListener('input', () => { sync(); rebuild(); }); }
 { const el = $('gape'), out = $('gapeOut'); const sync = () => { genes.gape = +el.value; out.textContent = genes.gape + '°'; }; sync(); el.addEventListener('input', sync); }
-$('incubate').onclick = runIncubate;
 $('roar').onclick = () => roarT = 0;
 $('snap').onclick = () => snapT = 0;
 $('showBones').onchange = e => view.bones = e.target.checked;
@@ -647,6 +445,9 @@ $('camoSel').onchange = e => { skinUi.camo = +e.target.value; applySkin(normWeig
 const hex2 = h => [1, 3, 5].map(i => Math.pow(parseInt(h.substr(i, 2), 16) / 255, 1));
 $('backCol').addEventListener('input', e => { skinUi.back = hex2(e.target.value); applySkin(normWeights()); });
 $('bellyCol').addEventListener('input', e => { skinUi.belly = hex2(e.target.value); applySkin(normWeights()); });
+$('gumCol').addEventListener('input', e => { skinUi.gum = hex2(e.target.value); applySkin(normWeights()); });
+$('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.value); applySkin(normWeights()); });
+$('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 $('idle').onchange = e => view.idle = e.target.checked;
 function setUi() {
@@ -663,9 +464,9 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadBin('features.bin')]).then(([data, scales, camo, fb]) => {
-  data.scales = scales; data.camo = camo; data.feats = parseFeatures(fb); genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo]) => {
+  data.scales = scales; data.camo = camo; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { runIncubate, get incubated() { return incubated; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
+window.__dino = { genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
 </script>

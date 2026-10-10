@@ -1,6 +1,6 @@
 """Add a new sheet of heads to the existing shared base: align at the jaw, wrap, keep the best fit, mirror-fix.
 usage: add_heads.py <split.npy> <out prefix>"""
-import sys; sys.path.insert(0,'/tmp/claude-0/-home-user-node-socket-io/16203f93-b1ad-5b15-91e7-2cd92cb90144/scratchpad/dino')
+import sys; sys.path.insert(0,'.')
 import numpy as np, time
 from scipy.spatial import cKDTree
 from wrap import wrap, prefit, sample
