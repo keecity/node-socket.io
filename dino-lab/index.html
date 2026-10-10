@@ -79,13 +79,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
         <small>Below 1 fades toward the generic base; above 1 exaggerates the species traits.</small></div>
     </section>
     <section>
+      <h2>Eyes</h2>
+      <div class="slider"><label for="eyeSize">Socket size</label><output id="eyeSizeOut"></output><input id="eyeSize" type="range" min="0.6" max="1.6" step="0.01" value="1"></div>
+      <div class="slider"><label for="eyeFwd">Forward / back</label><output id="eyeFwdOut"></output><input id="eyeFwd" type="range" min="-0.03" max="0.03" step="0.001" value="0"></div>
+      <div class="slider"><label for="eyeUp">Up / down</label><output id="eyeUpOut"></output><input id="eyeUp" type="range" min="-0.03" max="0.03" step="0.001" value="0"></div>
+      <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="2" step="0.05" value="1"></div>
+      <div class="slider"><label for="wrinkle">Wrinkles</label><output id="wrinkleOut"></output><input id="wrinkle" type="range" min="0" max="2" step="0.05" value="1"></div>
+    </section>
+    <section>
       <h2>Skin</h2>
       <div class="slider"><label for="camoSel">Colour pattern</label><span></span><select id="camoSel"><option value="-1">Species default</option><option value="-2">None (plain tint)</option></select></div>
       <div class="slider"><label for="camoFreq">Pattern size</label><output id="camoFreqOut"></output><input id="camoFreq" type="range" min="0.8" max="6" step="0.1" value="2.2"></div>
       <div class="slider"><label for="patA">Back scales</label><span></span><select id="patA"><option value="-1">Species default</option></select></div>
       <div class="slider"><label for="patB">Belly scales</label><span></span><select id="patB"><option value="-1">Species default</option></select></div>
       <div class="slider"><label for="freq">Scale size</label><output id="freqOut"></output><input id="freq" type="range" min="4" max="24" step="0.5" value="9"></div>
-      <div class="slider"><label for="bump">Relief</label><output id="bumpOut"></output><input id="bump" type="range" min="0" max="3" step="0.05" value="1"></div>
+      <div class="slider"><label for="bump">Relief</label><output id="bumpOut"></output><input id="bump" type="range" min="0" max="0.1" step="0.005" value="0.05"></div>
       <div class="row" style="margin-bottom:8px"><label for="backCol">Back</label><input type="color" id="backCol" value="#6b5c40"><label for="bellyCol">Belly</label><input type="color" id="bellyCol" value="#ccb88c"><button class="btn" id="autoCol">Species colours</button></div>
       <div class="row" style="margin-bottom:8px"><label for="gumCol">Gums</label><input type="color" id="gumCol" value="#6b171c"><label for="kerCol">Beak / dome</label><input type="color" id="kerCol" value="#807869"></div>
       <div class="toggles"><label><input type="checkbox" id="showRegions"> Show ID regions (mouth, keratin, sites)</label></div>
@@ -133,10 +141,24 @@ async function loadGlb(url) {
     P: acc(at.POSITION), I: acc(pr.indices),
     W: acc(at.WEIGHTS_0), D: pr.targets.map(t => acc(t.POSITION)),
     R: Object.keys(at).filter(k => k.startsWith('_REGION_')).sort((a, b) => a.split('_')[2] - b.split('_')[2]).map(k => acc(at[k])),
-    names: g.meshes[0].extras.targetNames, gapes: g.meshes[0].extras.speciesGapes, restGape: g.nodes[2].extras.restGapeDeg, pivot: g.nodes[2].translation || [0, 0, 0]
+    eyes: g.meshes[0].extras.eyeAnchors, names: g.meshes[0].extras.targetNames, gapes: g.meshes[0].extras.speciesGapes, restGape: g.nodes[2].extras.restGapeDeg, pivot: g.nodes[2].translation || [0, 0, 0]
   };
 }
 
+// grey maps: the bitmap (for the shader) and its pixels (for carving geometry on the CPU)
+async function loadMap(url) {
+  const bmp = await createImageBitmap(await (await fetch(url)).blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height;
+  const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(bmp, 0, 0);
+  const rgba = cx.getImageData(0, 0, bmp.width, bmp.height).data, px = new Float32Array(bmp.width * bmp.height);
+  for (let i = 0; i < px.length; i++) px[i] = rgba[i * 4] / 255;
+  return { bmp, px, w: bmp.width, h: bmp.height };
+}
+function sampleMap(m, u, v) {   // bilinear, u right, v down, both 0..1
+  const x = Math.min(Math.max(u * (m.w - 1), 0), m.w - 1.001), y = Math.min(Math.max(v * (m.h - 1), 0), m.h - 1.001);
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, p = m.px, w = m.w;
+  return (p[j*w+i] * (1-fx) + p[j*w+i+1] * fx) * (1-fy) + (p[(j+1)*w+i] * (1-fx) + p[(j+1)*w+i+1] * fx) * fy;
+}
 async function loadBin(url) {
   try { const r = await fetch(url); if (!r.ok) throw 0; return await r.arrayBuffer(); }
   catch { const t = (await (await fetch(url.replace(/\.bin$/, '.b64.txt'))).text()).trim(); return Uint8Array.from(atob(t), c => c.charCodeAt(0)).buffer; }
@@ -181,6 +203,15 @@ uniform sampler2D uScales, uCamo;
 uniform float uTileA, uTileB, uFreq, uCamoTile, uCamoFreq;
 vec3 dinoN() { vec2 xy = vVertexColor.rg * 2.0 - 1.0; return normalize(vec3(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))))); }   // |z| is all the projection needs
 float dinoMask(float v) { return smoothstep(0.44, 0.56, v); }   // DNA-mixed regions cut at one half: edges move, never smear
+uniform vec3 uEyeC, uEyeN, uEyeT, uEyeB;
+uniform float uEyeS;
+uniform sampler2D uEyeDp, uEyeWr;
+vec3 dinoEye() {   // eye-map uv and whether this point is in the eye's square (right eye; the left mirrors through |z|)
+  vec3 d = vec3(vUv0.x, vUv0.y, abs(vUv1.x)) - uEyeC;
+  vec2 q = vec2(dot(d, uEyeT), dot(d, uEyeB)) / uEyeS;
+  float inside = step(abs(dot(d, uEyeN)), uEyeS * 0.8) * step(max(abs(q.x), abs(q.y)), 1.0);
+  return vec3(0.5 + q.x * 0.5, 0.5 - q.y * 0.5, inside);
+}
 vec4 dinoTile(float tile, vec2 q, vec2 dx, vec2 dy) {
   vec2 m = abs(mod(q, 2.0) - 1.0);                              // mirrored repeat: no tile edges
   vec2 cell = vec2(mod(tile, 3.0), floor(tile / 3.0));
@@ -234,6 +265,8 @@ void getAlbedo() {
   float mouth = dinoMask(vUv2.x), ker = dinoMask(vUv2.y), site = dinoMask(vVertexColor.b);
   col = mix(col, uKeratin * (0.82 + 0.3 * s.r), ker);
   col = mix(col, uGum * (0.8 + 0.35 * s.r), mouth);
+  vec3 e = dinoEye();                                            // socket shadow until the eyes go in
+  col *= 1.0 - e.z * 0.55 * smoothstep(0.04, 0.3, 0.5 - texture(uEyeDp, e.xy).r);
   vec3 ids = mix(mix(mix(vec3(0.45, 0.2, 0.55), vec3(0.95, 0.85, 0.15), ker), vec3(0.3, 0.75, 0.25), site), vec3(0.95, 0.35, 0.5), mouth);
   col = mix(col, ids, uRegionView);
   float jw = vUv1.y;
@@ -241,14 +274,15 @@ void getAlbedo() {
 }
 `);
 chunks.set('normalMapPS', DINO_SURF + `
-uniform float uBump;
+uniform float uBump, uWrinkle;
 void getNormal() {
-  float h = dinoSurface().a;
+  vec3 e = dinoEye();
+  float h = dinoSurface().a * uBump + e.z * (texture(uEyeWr, e.xy).r - 0.5) * uWrinkle;
   vec3 sx = dFdx(vPositionW), sy = dFdy(vPositionW), N = dVertexNormalW;
   vec3 r1 = cross(sy, N), r2 = cross(N, sx);
   float det = dot(sx, r1);
   vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
-  dNormalW = normalize(abs(det) * N - uBump * grad);
+  dNormalW = normalize(abs(det) * N - grad);
 }
 `);
 mat.shaderChunksVersion = '2.8';
@@ -266,12 +300,12 @@ const SKINS = [   // per species: back / belly tint, back / belly scale tile, ca
   { back: [0.30, 0.38, 0.24], belly: [0.78, 0.74, 0.52], a: 5, b: 8, camo: 8 }    // Beaked grazer
 ];
 const PATTERN_NAMES = ['Fine beads', 'Overlapping scales', 'Large polygons', 'Hex scales', 'Pebble boss', 'Lizard scales', 'Croc scutes', 'Belly plates', 'Small beads'];
-const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null, camo: -1, camoFreq: 2.2, gum: [0.42, 0.09, 0.11], keratin: [0.5, 0.47, 0.41] };
+const skinUi = { a: -1, b: -1, freq: 9, bump: 0.05, back: null, belly: null, camo: -1, camoFreq: 2.2, gum: [0.42, 0.09, 0.11], keratin: [0.5, 0.47, 0.41] };
 const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert stripes', 'River teal', 'Olive ochre', 'Dusk violet', 'Jungle spots'];
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSize: 1, eyeFwd: 0, eyeUp: 0, eyeDepth: 1, wrinkle: 1 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -288,6 +322,10 @@ function build(data) {
   // uv2 carries the ID regions (mouth, keratin): a plain white AO map makes the shader declare it, and adds no shading
   const white = new pc.Texture(dev, { width: 1, height: 1, format: pc.PIXELFORMAT_RGBA8, mipmaps: false });
   white.lock().fill(255); white.unlock(); mat.aoMap = white; mat.aoMapUv = 2;
+  for (const [key, uni] of [['eyeDepth', 'uEyeDp'], ['eyeWr', 'uEyeWr']]) {
+    const t = new pc.Texture(dev, { width: D[key].w, height: D[key].h, format: pc.PIXELFORMAT_RGBA8, mipmaps: true, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
+    t.setSource(D[key].bmp); mat.setParameter(uni, t);
+  }
   mat.update();
 
   mesh = new pc.Mesh(dev);
@@ -335,6 +373,7 @@ function rebuild() {
     z *= 1 + genes.width;
     pos[v*3] = x; pos[v*3+1] = y; pos[v*3+2] = z;
   }
+  carveEyes(pos, vertexNormals(pos, D.I));
   // normals
   nrm.fill(0);
   const I = D.I;
@@ -362,6 +401,8 @@ function applySkin(w) {
   mat.setParameter('uBack', new Float32Array(back)); mat.setParameter('uBelly', new Float32Array(belly));
   mat.setParameter('uTileA', skinUi.a >= 0 ? skinUi.a : SKINS[dom].a); mat.setParameter('uTileB', skinUi.b >= 0 ? skinUi.b : SKINS[dom].b);
   mat.setParameter('uFreq', skinUi.freq); mat.setParameter('uBump', skinUi.bump * 0.006);
+  mat.setParameter('uWrinkle', genes.wrinkle * 0.004);
+  if (eye) { mat.setParameter('uEyeC', new Float32Array(eye.c)); mat.setParameter('uEyeN', new Float32Array(eye.n)); mat.setParameter('uEyeT', new Float32Array(eye.t)); mat.setParameter('uEyeB', new Float32Array(eye.b)); mat.setParameter('uEyeS', eye.s); }
   mat.setParameter('uWeightView', view.weights ? 1 : 0); mat.setParameter('uRegionView', view.regions ? 1 : 0);
   mat.setParameter('uGum', new Float32Array(skinUi.gum)); mat.setParameter('uKeratin', new Float32Array(skinUi.keratin));
   const camo = skinUi.camo === -1 ? SKINS[dom].camo : skinUi.camo;   // -1 species default, -2 none
@@ -378,6 +419,31 @@ function vertexNormals(pos, I) {
   }
   for (let v = 0; v < n; v++) { const l = Math.hypot(nrm[v*3], nrm[v*3+1], nrm[v*3+2]) || 1; nrm[v*3] /= l; nrm[v*3+1] /= l; nrm[v*3+2] /= l; }
   return nrm;
+}
+// ---------- eyes: socket depth map carved into the skin around each eye anchor ----------
+const EYE_SIZE = 0.035, EYE_DEPTH = 0.04;
+let eye = null;   // frame of the right eye (+z); the left one is its mirror
+function eyeFrame(pos, nrm) {
+  const a = D.eyes[0], n = [nrm[a*3], nrm[a*3+1], nrm[a*3+2]];
+  const t = [1 - n[0]*n[0], -n[0]*n[1], -n[0]*n[2]], tl = Math.hypot(...t); t[0] /= tl; t[1] /= tl; t[2] /= tl;   // forward, along the skin
+  const b = [n[1]*t[2] - n[2]*t[1], n[2]*t[0] - n[0]*t[2], n[0]*t[1] - n[1]*t[0]];                              // up, along the skin
+  const c = [0, 1, 2].map(i => pos[a*3+i] + t[i] * genes.eyeFwd + b[i] * genes.eyeUp);
+  return { c, n, t, b, s: EYE_SIZE * genes.eyeSize };
+}
+function carveEyes(pos, nrm) {
+  eye = eyeFrame(pos, nrm);
+  const { c, n, t, b, s } = eye, k = EYE_DEPTH * genes.eyeDepth * genes.eyeSize, N = pos.length / 3;
+  if (k === 0) return;
+  for (let v = 0; v < N; v++) {
+    const sg = pos[v*3+2] < 0 ? -1 : 1;                                  // mirror the frame for the left eye
+    const dx = pos[v*3] - c[0], dy = pos[v*3+1] - c[1], dz = pos[v*3+2] * sg - c[2];
+    if (dx*dx + dy*dy + dz*dz > 2 * s * s) continue;
+    if (Math.abs(dx*n[0] + dy*n[1] + dz*n[2]) > 0.8 * s) continue;       // only the skin facing the eye
+    const u = (dx*t[0] + dy*t[1] + dz*t[2]) / s, w = (dx*b[0] + dy*b[1] + dz*b[2]) / s;
+    if (Math.abs(u) >= 1 || Math.abs(w) >= 1) continue;
+    const h = (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k;   // grey 0.5 = untouched skin
+    pos[v*3] += n[0] * h; pos[v*3+1] += n[1] * h; pos[v*3+2] += n[2] * h * sg;
+  }
 }
 function setSurface(m, pos, nrm, jw, reg) {
   const n = pos.length / 3, uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), uv2 = new Float32Array(n * 2), cl = new Uint8Array(n * 4);
@@ -449,6 +515,10 @@ $('gumCol').addEventListener('input', e => { skinUi.gum = hex2(e.target.value); 
 $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.value); applySkin(normWeights()); });
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
+for (const [id, fmt, geo] of [['eyeSize', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false]]) {
+  const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
+  sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
+}
 $('idle').onchange = e => view.idle = e.target.checked;
 function setUi() {
   D.names.forEach((_, i) => $(`mix${i}`).value = genes.mix[i]); syncMixOut();
@@ -464,8 +534,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo]) => {
-  data.scales = scales; data.camo = camo; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png'), loadMap('eye_wrinkles.png')]).then(([data, scales, camo, eyeDepth, eyeWr]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
