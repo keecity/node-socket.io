@@ -40,7 +40,7 @@ section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppe
 button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .toggles label { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; cursor: pointer; }
 .toggles input { accent-color: var(--accent); }
-.mix { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 6px; }
+.mix { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; margin-bottom: 2px; }
 .mix span { font-weight: 600; }
 .mix output { font: 12px var(--f-mono); color: var(--muted); }
 .mix input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
@@ -111,7 +111,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 'use strict';
 const $ = id => document.getElementById(id);
 const V3 = pc.Vec3, clamp = pc.math.clamp;
-const SPECIES_COLORS = ['#b4562f', '#2f7d5b', '#3f6fb0'];
+const SPECIES_COLORS = ['#b4562f', '#2f7d5b', '#3f6fb0', '#8a5a2b', '#a33b3b', '#4f7f2e', '#7a4ca0', '#c0772a', '#2e7f86', '#6b6b2a', '#9a4f6e', '#3d6b4f'];
 
 // ---------- GLB loader (positions, morph targets, 3 UV sets, skin, embedded atlas) ----------
 async function loadGlb(url) {
@@ -247,6 +247,13 @@ const PATTERN_NAMES = ['Fine beads', 'Overlapping scales', 'Large polygons', 'He
 const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null, camo: -1, camoFreq: 2.2 };
 const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert stripes', 'River teal', 'Olive ochre', 'Dusk violet', 'Jungle spots'];
 
+const EXTRA_SKINS = [
+  { back: [0.42, 0.34, 0.24], belly: [0.82, 0.72, 0.55], a: 4, b: 7, camo: 6 }, { back: [0.45, 0.30, 0.20], belly: [0.80, 0.66, 0.50], a: 2, b: 0, camo: 1 },
+  { back: [0.32, 0.40, 0.30], belly: [0.76, 0.74, 0.56], a: 5, b: 8, camo: 0 }, { back: [0.48, 0.24, 0.18], belly: [0.82, 0.66, 0.52], a: 3, b: 7, camo: 3 },
+  { back: [0.40, 0.34, 0.22], belly: [0.80, 0.70, 0.52], a: 1, b: 7, camo: 4 }, { back: [0.26, 0.36, 0.38], belly: [0.74, 0.76, 0.62], a: 5, b: 0, camo: 5 },
+  { back: [0.36, 0.33, 0.24], belly: [0.76, 0.70, 0.54], a: 6, b: 7, camo: 6 }, { back: [0.38, 0.32, 0.40], belly: [0.80, 0.74, 0.70], a: 2, b: 8, camo: 7 },
+  { back: [0.30, 0.38, 0.24], belly: [0.78, 0.74, 0.52], a: 5, b: 8, camo: 8 }];
+SKINS.push(...EXTRA_SKINS);
 let D = null, mesh = null, head = null, bones = {};
 const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12 };
 const view = { bones: false, weights: false, idle: true };
@@ -297,7 +304,7 @@ function rebuild() {
   pos = pos || new Float32Array(n * 3); nrm = nrm || new Float32Array(n * 3);
   const k = genes.boost;
   for (let v = 0; v < n; v++) for (let a = 0; a < 3; a++) {
-    let d = 0; for (let s = 0; s < 3; s++) d += w[s] * D.D[s][v*3+a];
+    let d = 0; for (let s = 0; s < D.D.length; s++) if (w[s]) d += w[s] * D.D[s][v*3+a];
     pos[v*3+a] = D.P[v*3+a] + d * k;
   }
   // proportion genes, all about the jaw hinge (origin) so the rig still fits
@@ -408,17 +415,17 @@ function setUi() {
   for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width', 'boost']) { $(id).value = genes[id]; $(id).dispatchEvent(new Event('input')); }
 }
 $('random').onclick = () => {
-  const a = Math.floor(Math.random() * 3), b = (a + 1 + Math.floor(Math.random() * 2)) % 3, t = Math.random() * 0.6;
-  genes.mix = [0, 0, 0]; genes.mix[a] = 1 - t; genes.mix[b] = t;
+  const N = D.names.length, a = Math.floor(Math.random() * N), b = (a + 1 + Math.floor(Math.random() * (N - 1))) % N, t = Math.random() * 0.6;
+  genes.mix = new Array(N).fill(0); genes.mix[a] = 1 - t; genes.mix[b] = t;
   const r = (lo, hi) => Math.round((lo + Math.random() * (hi - lo)) * 100) / 100;
   Object.assign(genes, { snout: r(-0.15, 0.3), cranium: r(-0.15, 0.2), height: r(-0.15, 0.2), jawDepth: r(-0.1, 0.3), width: r(-0.1, 0.25), boost: r(0.9, 1.3) });
   setUi(); rebuild();
 };
-$('reset').onclick = () => { Object.assign(genes, { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
+$('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo]) => {
-  data.scales = scales; data.camo = camo; build(data); renderMix();
+  data.scales = scales; data.camo = camo; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();

@@ -18,7 +18,8 @@ def mouth(P,I):
         col=G[i]; occ=np.where(col)[0]
         if len(occ)<2: continue
         # gaps between occupied runs
-        gaps=[(occ[k],occ[k+1]) for k in range(len(occ)-1) if occ[k+1]-occ[k]>3]
+        midY=(np.median(np.where(G.any(0))[0]))
+        gaps=[(occ[k],occ[k+1]) for k in range(len(occ)-1) if occ[k+1]-occ[k]>3 and occ[k+1]<=midY+5]   # mouth: lower half
         if not gaps: rows.append((i,None)); continue
         g=min(gaps,key=lambda g:g[0]); rows.append((i,g))   # lowest gap = the mouth
     # the mouth: longest run of consecutive columns that have a gap, ending at the front
@@ -28,7 +29,8 @@ def mouth(P,I):
         else:
             if cur: runs.append(cur); cur=[]
     if cur: runs.append(cur)
-    run=max(runs,key=len)
+    runs=[r for r in runs if len(r)>=8] or runs
+    run=max(runs,key=lambda r: sum(g[1]-g[0] for _,g in r))      # the biggest opening, not the longest sliver
     xs=np.array([lo[0]+i*res for i,_ in run]); top=np.array([lo[1]+g[1]*res for _,g in run]); bot=np.array([lo[1]+g[0]*res for _,g in run])
     # trace from the front of the mouth backwards; stop where the gap outline jumps (another opening joins in)
     j=len(xs)-1

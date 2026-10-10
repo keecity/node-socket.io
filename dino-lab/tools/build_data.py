@@ -6,11 +6,12 @@ from PIL import Image
 from rig import jaw_weights, jaw_pivot
 OUT='/home/user/node-socket.io/dino-lab/'
 B=np.load('base.npy',allow_pickle=True).item(); heads=np.load('heads_aligned.npy',allow_pickle=True); uvs=np.load('uvs.npy')
-F=B['f'].astype(np.int64); V0=B['v']; W=[np.load(f'wrap{h}.npy') for h in range(3)]
-gapes=[float(-H['lowerAngle']) for H in heads]; restGape=float(np.mean(gapes))
+heads2=np.load('heads2_aligned.npy',allow_pickle=True)
+F=B['f'].astype(np.int64); V0=B['v']; W=[np.load(f'wrap{h}.npy') for h in range(3)]+[np.load(f'wrap2_{k}.npy') for k in range(len(heads2))]
+gapes=[float(-H['lowerAngle']) for H in heads]+[float(-H['lowerAngle']) for H in heads2]; restGape=float(np.mean(gapes[:3]))   # rig rest = the base's own gape
 pivot=jaw_pivot(-restGape); jw=jaw_weights(V0,-restGape,pivot)
 print('jaw joint at',pivot.round(4))
-NAMES=['Theropod','Ceratopsian','Ornithopod']
+NAMES=['Theropod','Ceratopsian','Ornithopod','Tyrant','Horned grazer','Duckbill','Horned hunter','Spiked hunter','Crested','Spiked brute','Dome-head','Beaked grazer']
 print('rest gape %.1f°'%restGape)
 
 # ---- rigged GLB: unindexed corners (species UVs differ per corner), skin (skull, jaw), 3 morph targets, 3 UV sets
@@ -44,7 +45,7 @@ j=np.zeros((len(C),4),np.uint8); j[:,1]=1
 w=np.zeros((len(C),4),np.uint8); w[:,1]=np.round(jw[C]*255); w[:,0]=255-w[:,1]
 aJ=add(j,34962,comp=5121,typ='VEC4'); aW=add(w,34962,comp=5121,typ='VEC4'); accs[aW]['normalized']=True
 targets=[]
-for h in range(3):
+for h in range(len(W)):
     D=(W[h][C]-V0[C]).astype(np.float32); targets.append({'POSITION':add(D,34962,minmax=True)})
 J=np.eye(4,dtype=np.float32); J[:3,3]=-pivot
 ibm=np.stack([np.eye(4,dtype=np.float32).T.ravel(),J.T.ravel()])
@@ -58,7 +59,7 @@ gl={'asset':{'version':'2.0','generator':'dino-lab build_data.py'},'scene':0,'sc
  'nodes':[{'name':'DinoHead','mesh':0,'skin':0},{'name':'skull','children':[2]},{'name':'jaw','translation':pivot.tolist(),'rotation':[0,0,0,1],'extras':{'restGapeDeg':restGape,'note':'joint inside the cheek; rotate about +z, negative opens'}}],
  'skins':[{'joints':[1,2],'inverseBindMatrices':aIBM,'skeleton':1}],
  'meshes':[{'name':'DinoHeadBase','primitives':[{'attributes':{'POSITION':aP,'NORMAL':aN,'TEXCOORD_0':aUV[0],'TEXCOORD_1':aUV[1],'TEXCOORD_2':aUV[2],'JOINTS_0':aJ,'WEIGHTS_0':aW},'indices':aI,'targets':targets,'material':0}],
-   'weights':[0,0,0],'extras':{'targetNames':NAMES,'speciesGapes':gapes}}],
+   'weights':[0]*len(W),'extras':{'targetNames':NAMES,'speciesGapes':gapes}}],
  'materials':[{'name':'dinoAtlas','pbrMetallicRoughness':{'baseColorTexture':{'index':0,'texCoord':0},'metallicFactor':0,'roughnessFactor':0.7}}],
  'textures':[{'source':0}],'images':[{'bufferView':len(views)-1,'mimeType':'image/jpeg'}],
  'accessors':accs,'bufferViews':views,'buffers':[{'byteLength':sum(len(b) for b in bufs)}]}
