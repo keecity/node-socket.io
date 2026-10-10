@@ -130,7 +130,7 @@ async function loadGlb(url) {
   return {
     P: acc(at.POSITION), I: acc(pr.indices), UV: [acc(at.TEXCOORD_0), acc(at.TEXCOORD_1), acc(at.TEXCOORD_2)],
     W: acc(at.WEIGHTS_0), D: pr.targets.map(t => acc(t.POSITION)),
-    names: g.meshes[0].extras.targetNames, gapes: g.meshes[0].extras.speciesGapes, restGape: g.nodes[2].extras.restGapeDeg, img
+    names: g.meshes[0].extras.targetNames, gapes: g.meshes[0].extras.speciesGapes, restGape: g.nodes[2].extras.restGapeDeg, pivot: g.nodes[2].translation || [0, 0, 0], img
   };
 }
 
@@ -255,9 +255,10 @@ function build(data) {
 
   head = new pc.Entity('head'); app.root.addChild(head);
   bones.skull = new pc.Entity('skull'); head.addChild(bones.skull);
-  bones.jaw = new pc.Entity('jaw'); bones.skull.addChild(bones.jaw);
+  bones.jaw = new pc.Entity('jaw'); bones.skull.addChild(bones.jaw); bones.jaw.setLocalPosition(...D.pivot);   // joint inside the cheek
   head.syncHierarchy();
-  const skin = new pc.Skin(dev, [new pc.Mat4(), new pc.Mat4()], ['skull', 'jaw']);
+  const jawIbm = new pc.Mat4().setTranslate(-D.pivot[0], -D.pivot[1], -D.pivot[2]);
+  const skin = new pc.Skin(dev, [new pc.Mat4(), jawIbm], ['skull', 'jaw']);
   mesh.skin = skin;
   const si = new pc.SkinInstance(skin); si.bones = [bones.skull, bones.jaw]; si.rootBone = head;
   const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false;
@@ -340,7 +341,10 @@ app.on('update', dt => {
     const h = bones.skull.getPosition(), c1 = new pc.Color(0.2, 0.7, 1), c2 = new pc.Color(1, 0.6, 0.2);
     const tip = new V3(); bones.skull.getWorldTransform().transformPoint(new V3(0.17, 0, 0), tip); app.drawLine(h, tip, c1, false);
     const back = new V3(); bones.skull.getWorldTransform().transformPoint(new V3(-0.2, 0.05, 0), back); app.drawLine(h, back, c1, false);
-    const jt = new V3(); bones.jaw.getWorldTransform().transformPoint(new V3(0.16 * Math.cos(-sculpted * pc.math.DEG_TO_RAD), 0.16 * Math.sin(-sculpted * pc.math.DEG_TO_RAD), 0), jt); app.drawLine(h, jt, c2, false);
+    const a = -sculpted * pc.math.DEG_TO_RAD, b = a / 2, jp = bones.jaw.getPosition().clone(), jc = new V3(), jt = new V3();
+    bones.jaw.getWorldTransform().transformPoint(new V3(-D.pivot[0], -D.pivot[1], 0), jc);
+    bones.jaw.getWorldTransform().transformPoint(new V3(-D.pivot[0] + 0.16 * Math.cos(a), -D.pivot[1] + 0.16 * Math.sin(a), 0), jt);
+    app.drawLine(jp, jc, c2, false); app.drawLine(jc, jt, c2, false);
   }
 });
 
