@@ -80,16 +80,20 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     </section>
     <section>
       <h2>Eyes</h2>
-      <div class="slider"><label for="eyeSX">Socket width (x)</label><output id="eyeSXOut"></output><input id="eyeSX" type="range" min="0.5" max="1.8" step="0.01" value="1"></div>
-      <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.5" max="1.8" step="0.01" value="1"></div>
-      <div class="slider"><label for="eyeFwd">Forward / back</label><output id="eyeFwdOut"></output><input id="eyeFwd" type="range" min="-0.03" max="0.03" step="0.001" value="0"></div>
-      <div class="slider"><label for="eyeUp">Up / down</label><output id="eyeUpOut"></output><input id="eyeUp" type="range" min="-0.03" max="0.03" step="0.001" value="0"></div>
-      <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="2" step="0.05" value="1"></div>
+      <div class="slider"><label for="eyeSX">Socket width (x)</label><output id="eyeSXOut"></output><input id="eyeSX" type="range" min="0.5" max="1.8" step="0.01" value="0.79"></div>
+      <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.5" max="1.8" step="0.01" value="0.5"></div>
+      <div class="slider"><label for="eyeFwd">Forward / back</label><output id="eyeFwdOut"></output><input id="eyeFwd" type="range" min="-0.03" max="0.03" step="0.001" value="0.011"></div>
+      <div class="slider"><label for="eyeUp">Up / down</label><output id="eyeUpOut"></output><input id="eyeUp" type="range" min="-0.03" max="0.03" step="0.001" value="-0.005"></div>
+      <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="2" step="0.05" value="0.15"></div>
+      <div class="slider"><label for="recess">Eye area recess</label><output id="recessOut"></output><input id="recess" type="range" min="0" max="0.02" step="0.0005" value="0.007"></div>
+      <div class="slider"><label for="recessWidth">Recess width</label><output id="recessWidthOut"></output><input id="recessWidth" type="range" min="1.2" max="3.5" step="0.05" value="2"></div>
+      <div class="slider"><label for="gazeFwd">Gaze forward</label><output id="gazeFwdOut"></output><input id="gazeFwd" type="range" min="-20" max="50" step="1" value="15"></div>
+      <div class="slider"><label for="gazeDown">Gaze down</label><output id="gazeDownOut"></output><input id="gazeDown" type="range" min="-20" max="30" step="1" value="6"></div>
       <div class="slider"><label for="irisHue">Iris colour</label><output id="irisHueOut"></output><input id="irisHue" type="range" min="-180" max="180" step="1" value="0"></div>
-      <div class="slider"><label for="irisSize">Iris size</label><output id="irisSizeOut"></output><input id="irisSize" type="range" min="0.5" max="1" step="0.01" value="0.8"></div>
-      <div class="slider"><label for="pupilSize">Pupil size</label><output id="pupilSizeOut"></output><input id="pupilSize" type="range" min="0.4" max="1.8" step="0.01" value="1"></div>
-      <div class="slider"><label for="pupilSlit">Pupil shape</label><output id="pupilSlitOut"></output><input id="pupilSlit" type="range" min="0" max="1" step="0.01" value="0.7"></div>
-      <div class="slider"><label for="wrinkle">Wrinkles</label><output id="wrinkleOut"></output><input id="wrinkle" type="range" min="0" max="2" step="0.05" value="1"></div>
+      <div class="slider"><label for="irisSize">Iris size</label><output id="irisSizeOut"></output><input id="irisSize" type="range" min="0.5" max="1" step="0.01" value="0.64"></div>
+      <div class="slider"><label for="pupilSize">Pupil size</label><output id="pupilSizeOut"></output><input id="pupilSize" type="range" min="0.4" max="1.8" step="0.01" value="0.93"></div>
+      <div class="slider"><label for="pupilSlit">Pupil shape</label><output id="pupilSlitOut"></output><input id="pupilSlit" type="range" min="0" max="1" step="0.01" value="0.72"></div>
+      <div class="slider"><label for="wrinkle">Wrinkles</label><output id="wrinkleOut"></output><input id="wrinkle" type="range" min="0" max="2" step="0.05" value="1.5"></div>
     </section>
     <section>
       <h2>Skin</h2>
@@ -316,7 +320,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 1, eyeSY: 1, eyeFwd: 0, eyeUp: 0, eyeDepth: 1, wrinkle: 1, irisHue: 0, irisSize: 0.8, pupilSize: 1, pupilSlit: 0.7 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.15, wrinkle: 1.5, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -483,14 +487,23 @@ function buildEyes(dev) {
 function placeEyes() {
   if (!eye || !eyeballs.length) return;
   const { c, n, t, b, sx, sy } = eye;
-  const rx = 0.5 * sx, ry = 0.58 * sy, rz = 0.55 * Math.min(rx, ry), off = 0.5 * rz;   // fits the depth map's opening
+  const rx = 0.5 * sx, ry = 0.58 * sy, rz = 0.55 * Math.min(rx, ry), off = 0.5 * rz + genes.recess;   // fits the depth map's opening, sunk with the recess
   // iris texture laid over the front: the iris fills irisSize of the visible eye
   const K = 0.39 / genes.irisSize;
+  // gaze in head space (right eye): out to the side, turned forward and down; then in the eyeball's own frame
+  const fa = genes.gazeFwd * Math.PI / 180, da = genes.gazeDown * Math.PI / 180;
+  const gw = [Math.sin(fa) * Math.cos(da), -Math.sin(da), Math.cos(fa) * Math.cos(da)], dot = (p, q) => p[0]*q[0] + p[1]*q[1] + p[2]*q[2];
+  const g = [dot(gw, t), dot(gw, b), dot(gw, n)], gl = Math.hypot(...g); g[0] /= gl; g[1] /= gl; g[2] /= gl;
+  const gu = [g[2], 0, -g[0]], ul = Math.hypot(...gu); gu[0] /= ul; gu[2] /= ul;              // up (local y) x gaze
+  const gv = [g[1]*gu[2] - g[2]*gu[1], g[2]*gu[0] - g[0]*gu[2], g[0]*gu[1] - g[1]*gu[0]];    // gaze x right
   eyeballs.forEach(({ ent, mesh, P }, k) => {
     // left eye: mirror the frame through z, flipping forward so the basis stays right-handed
     const sg = k ? -1 : 1, M = v => [v[0], v[1], v[2] * sg], T = k ? M(t).map(x => -x) : t, B = M(b), Nn = M(n);
     const uv = new Float32Array(P.length / 3 * 2);
-    for (let v = 0; v < P.length / 3; v++) { uv[v*2] = 0.507 + P[v*3] * K * (k ? -1 : 1); uv[v*2+1] = 0.499 - P[v*3+1] * K * (ry / rx); }
+    for (let v = 0; v < P.length / 3; v++) {
+      const w = [P[v*3] * rx * (k ? -1 : 1), P[v*3+1] * ry, P[v*3+2] * rz], front = dot(w, g) > 0;   // left eye: its mirrored frame, read as the right
+      uv[v*2] = front ? 0.507 + dot(w, gu) / rx * K * (k ? -1 : 1) : 2; uv[v*2+1] = front ? 0.499 - dot(w, gv) / rx * K : 2;   // back: white
+    }
     mesh.setUvs(0, uv); mesh.update();
     const m = new pc.Mat4(); m.data.set([T[0], T[1], T[2], 0, B[0], B[1], B[2], 0, Nn[0], Nn[1], Nn[2], 0, 0, 0, 0, 1]);
     ent.setLocalRotation(new pc.Quat().setFromMat4(m)); ent.setLocalScale(rx, ry, rz);
@@ -510,15 +523,20 @@ function eyeFrame(pos, nrm) {
 function carveEyes(pos, nrm) {
   eye = eyeFrame(pos, nrm);
   const { c, n, t, b, sx, sy } = eye, s = Math.max(sx, sy), k = EYE_DEPTH * genes.eyeDepth * Math.sqrt(genes.eyeSX * genes.eyeSY), N = pos.length / 3;
-  if (k === 0) return;
+  // the whole eye area sinks in (a soft dish, wider than the socket), then the socket map is carved into it
+  const W = genes.recessWidth, R = genes.recess, reach = W * s * 1.2;
   for (let v = 0; v < N; v++) {
     const sg = pos[v*3+2] < 0 ? -1 : 1;                                  // mirror the frame for the left eye
     const dx = pos[v*3] - c[0], dy = pos[v*3+1] - c[1], dz = pos[v*3+2] * sg - c[2];
-    if (dx*dx + dy*dy + dz*dz > 2 * s * s) continue;
-    if (Math.abs(dx*n[0] + dy*n[1] + dz*n[2]) > 0.8 * s) continue;       // only the skin facing the eye
-    const u = (dx*t[0] + dy*t[1] + dz*t[2]) / sx, w = (dx*b[0] + dy*b[1] + dz*b[2]) / sy;
-    if (Math.abs(u) >= 1 || Math.abs(w) >= 1) continue;
-    const h = (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k;   // grey 0.5 = untouched skin
+    if (dx*dx + dy*dy + dz*dz > reach * reach) continue;
+    const dn = dx*n[0] + dy*n[1] + dz*n[2], du = dx*t[0] + dy*t[1] + dz*t[2], dw = dx*b[0] + dy*b[1] + dz*b[2];
+    if (nrm[v*3]*n[0] + nrm[v*3+1]*n[1] + nrm[v*3+2]*sg*n[2] < 0.2) continue;   // only the skin facing the eye
+    let h = 0;
+    const r = Math.hypot(du / (W * sx), dw / (W * sy));
+    if (r < 1 && Math.abs(dn) < 0.6 * W * s) h -= R * (0.5 + 0.5 * Math.cos(Math.PI * r));
+    const u = du / sx, w = dw / sy;
+    if (k && Math.abs(u) < 1 && Math.abs(w) < 1 && Math.abs(dn) < 0.8 * s)
+      h += (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k;     // grey 0.5 = untouched skin
     pos[v*3] += n[0] * h; pos[v*3+1] += n[1] * h; pos[v*3+2] += n[2] * h * sg;
   }
 }
@@ -593,7 +611,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
 }
