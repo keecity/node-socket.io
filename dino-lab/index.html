@@ -80,6 +80,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     </section>
     <section>
       <h2>Skin</h2>
+      <div class="slider"><label for="camoSel">Colour pattern</label><span></span><select id="camoSel"><option value="-1">Species default</option><option value="-2">None (plain tint)</option></select></div>
+      <div class="slider"><label for="camoFreq">Pattern size</label><output id="camoFreqOut"></output><input id="camoFreq" type="range" min="0.8" max="6" step="0.1" value="2.2"></div>
       <div class="slider"><label for="patA">Back scales</label><span></span><select id="patA"><option value="-1">Species default</option></select></div>
       <div class="slider"><label for="patB">Belly scales</label><span></span><select id="patB"><option value="-1">Species default</option></select></div>
       <div class="slider"><label for="freq">Scale size</label><output id="freqOut"></output><input id="freq" type="range" min="4" max="24" step="0.5" value="9"></div>
@@ -170,8 +172,8 @@ mat.emissive = new pc.Color(0, 0, 0);
 const DINO_SURF = `
 #ifndef DINO_SURF
 #define DINO_SURF
-uniform sampler2D uScales;
-uniform float uTileA, uTileB, uFreq;
+uniform sampler2D uScales, uCamo;
+uniform float uTileA, uTileB, uFreq, uCamoTile, uCamoFreq;
 vec4 dinoTile(float tile, vec2 q, vec2 dx, vec2 dy) {
   vec2 m = abs(mod(q, 2.0) - 1.0);                              // mirrored repeat: no tile edges
   vec2 cell = vec2(mod(tile, 3.0), floor(tile / 3.0));
@@ -181,6 +183,22 @@ vec4 dinoTile(float tile, vec2 q, vec2 dx, vec2 dy) {
 vec4 dinoTri(float tile, vec3 p, vec3 w) {
   vec3 dx = dFdx(p), dy = dFdy(p);
   return dinoTile(tile, p.zy, dx.zy, dy.zy) * w.x + dinoTile(tile, p.xz, dx.xz, dy.xz) * w.y + dinoTile(tile, p.xy, dx.xy, dy.xy) * w.z;
+}
+vec3 dinoCamo() {   // colour pattern: same three-sided projection, larger scale, from the camo sheet
+  vec3 p = vec3(vUv0.x, vUv0.y, vUv1.x) * uCamoFreq;
+  vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
+  vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
+  vec3 dx = dFdx(p), dy = dFdy(p);
+  vec2 cell = vec2(mod(uCamoTile, 3.0), floor(uCamoTile / 3.0));
+  vec3 c = vec3(0.0);
+  vec2 q[3]; q[0] = p.zy; q[1] = p.xz; q[2] = p.xy;
+  vec2 gx[3]; gx[0] = dx.zy; gx[1] = dx.xz; gx[2] = dx.xy;
+  vec2 gy[3]; gy[0] = dy.zy; gy[1] = dy.xz; gy[2] = dy.xy;
+  for (int i = 0; i < 3; i++) {
+    vec2 m = abs(mod(q[i], 2.0) - 1.0);
+    c += textureGrad(uCamo, (cell + 0.02 + m * 0.96) / 3.0, gx[i] * 0.32, gy[i] * 0.32).rgb * w[i];
+  }
+  return c;
 }
 vec4 dinoSurface() {
   vec3 p = vec3(vUv0.x, vUv0.y, vUv1.x) * uFreq;
@@ -194,11 +212,12 @@ const chunks = mat.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
 chunks.set('diffusePS', DINO_SURF + `
 uniform vec3 material_diffuse;
 uniform vec3 uBack, uBelly;
-uniform float uWeightView;
+uniform float uWeightView, uCamoOn;
 void getAlbedo() {
   vec4 s = dinoSurface();
   vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
-  vec3 base = mix(uBack, uBelly, smoothstep(0.0, 1.0, vVertexColor.a));
+  vec3 back = mix(uBack, dinoCamo() * 0.85, uCamoOn);
+  vec3 base = mix(back, uBelly, smoothstep(0.0, 1.0, vVertexColor.a) * mix(1.0, 0.85, uCamoOn));
   base *= mix(1.0, 0.72, smoothstep(0.35, 0.95, n.y));          // darker along the top of the head
   vec3 col = base * (0.7 + 0.6 * s.r) * (0.78 + 0.4 * s.a);      // pattern albedo and cavities, kept soft
   float jw = vUv1.y;
@@ -220,12 +239,13 @@ mat.shaderChunksVersion = '2.8';
 
 // species skin defaults: back colour, belly colour, back pattern, belly pattern (tiles 0-8 of the scale sheet)
 const SKINS = [
-  { back: [0.42, 0.36, 0.25], belly: [0.80, 0.72, 0.55], a: 4, b: 7 },   // theropod: pebble boss, belly plates
-  { back: [0.47, 0.29, 0.20], belly: [0.80, 0.64, 0.48], a: 2, b: 0 },   // ceratopsian: large polygons, fine beads
-  { back: [0.30, 0.38, 0.28], belly: [0.74, 0.72, 0.55], a: 5, b: 8 }    // ornithopod: elongated scales, small beads
+  { back: [0.42, 0.36, 0.25], belly: [0.80, 0.72, 0.55], a: 4, b: 7, camo: 6 },   // theropod: pebble boss, belly plates, olive-ochre camo
+  { back: [0.47, 0.29, 0.20], belly: [0.80, 0.64, 0.48], a: 2, b: 0, camo: 1 },   // ceratopsian: large polygons, fine beads, ember stripes
+  { back: [0.30, 0.38, 0.28], belly: [0.74, 0.72, 0.55], a: 5, b: 8, camo: 5 }    // ornithopod: lizard scales, small beads, river teal
 ];
 const PATTERN_NAMES = ['Fine beads', 'Overlapping scales', 'Large polygons', 'Hex scales', 'Pebble boss', 'Lizard scales', 'Croc scutes', 'Belly plates', 'Small beads'];
-const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null };
+const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null, camo: -1, camoFreq: 2.2 };
+const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert stripes', 'River teal', 'Olive ochre', 'Dusk violet', 'Jungle spots'];
 
 let D = null, mesh = null, head = null, bones = {};
 const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12 };
@@ -237,6 +257,8 @@ function build(data) {
   const tex = new pc.Texture(dev, { width: D.scales.width, height: D.scales.height, format: pc.PIXELFORMAT_RGBA8, flipY: false, mipmaps: true, anisotropy: 8, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
   tex.setSource(D.scales);
   mat.setParameter('uScales', tex);
+  const ctex = new pc.Texture(dev, { width: D.camo.width, height: D.camo.height, format: pc.PIXELFORMAT_SRGBA8, flipY: false, mipmaps: true, anisotropy: 8, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
+  ctex.setSource(D.camo); mat.setParameter('uCamo', ctex);
   // the standard shader only declares the uv0/uv1 varyings when a map uses them: bind the scales to
   // diffuse (uv0) and to emissive (uv1, black emissive so it adds nothing)
   mat.diffuseMap = tex; mat.diffuseMapUv = 0; mat.emissiveMap = tex; mat.emissiveMapUv = 1;
@@ -321,6 +343,8 @@ function applySkin(w) {
   mat.setParameter('uTileA', skinUi.a >= 0 ? skinUi.a : SKINS[dom].a); mat.setParameter('uTileB', skinUi.b >= 0 ? skinUi.b : SKINS[dom].b);
   mat.setParameter('uFreq', skinUi.freq); mat.setParameter('uBump', skinUi.bump * 0.006);
   mat.setParameter('uWeightView', view.weights ? 1 : 0);
+  const camo = skinUi.camo === -1 ? SKINS[dom].camo : skinUi.camo;   // -1 species default, -2 none
+  mat.setParameter('uCamoOn', camo >= 0 ? 1 : 0); mat.setParameter('uCamoTile', Math.max(camo, 0)); mat.setParameter('uCamoFreq', skinUi.camoFreq);
 }
 function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; return genes.mix.map(x => x / s); }
 
@@ -371,6 +395,9 @@ $('showWeights').onchange = e => { view.weights = e.target.checked; applySkin(no
 for (const id of ['patA', 'patB']) { $(id).insertAdjacentHTML('beforeend', PATTERN_NAMES.map((nm, i) => `<option value="${i}">${nm}</option>`).join('')); $(id).onchange = e => { skinUi[id === 'patA' ? 'a' : 'b'] = +e.target.value; applySkin(normWeights()); }; }
 { const el = $('freq'), out = $('freqOut'); const sync = () => { skinUi.freq = +el.value; out.textContent = (100 / skinUi.freq).toFixed(1) + ' cm tiles'; if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
 { const el = $('bump'), out = $('bumpOut'); const sync = () => { skinUi.bump = +el.value; out.textContent = '×' + skinUi.bump.toFixed(2); if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
+$('camoSel').insertAdjacentHTML('beforeend', CAMO_NAMES.map((nm, i) => `<option value="${i}">${nm}</option>`).join(''));
+$('camoSel').onchange = e => { skinUi.camo = +e.target.value; applySkin(normWeights()); };
+{ const el = $('camoFreq'), out = $('camoFreqOut'); const sync = () => { skinUi.camoFreq = +el.value; out.textContent = (100 / skinUi.camoFreq).toFixed(0) + ' cm repeat'; if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
 const hex2 = h => [1, 3, 5].map(i => Math.pow(parseInt(h.substr(i, 2), 16) / 255, 1));
 $('backCol').addEventListener('input', e => { skinUi.back = hex2(e.target.value); applySkin(normWeights()); });
 $('bellyCol').addEventListener('input', e => { skinUi.belly = hex2(e.target.value); applySkin(normWeights()); });
@@ -390,8 +417,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))]).then(([data, scales]) => {
-  data.scales = scales; build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo]) => {
+  data.scales = scales; data.camo = camo; build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
