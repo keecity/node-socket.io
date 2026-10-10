@@ -84,7 +84,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.5" max="1.8" step="0.01" value="0.5"></div>
       <div class="slider"><label for="eyeFwd">Forward / back</label><output id="eyeFwdOut"></output><input id="eyeFwd" type="range" min="-0.03" max="0.03" step="0.001" value="0.011"></div>
       <div class="slider"><label for="eyeUp">Up / down</label><output id="eyeUpOut"></output><input id="eyeUp" type="range" min="-0.03" max="0.03" step="0.001" value="-0.005"></div>
-      <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="2" step="0.05" value="0.15"></div>
+      <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="0.02" step="0.0005" value="0.008"></div>
       <div class="slider"><label for="recess">Eye area recess</label><output id="recessOut"></output><input id="recess" type="range" min="0" max="0.02" step="0.0005" value="0.007"></div>
       <div class="slider"><label for="recessWidth">Recess width</label><output id="recessWidthOut"></output><input id="recessWidth" type="range" min="1.2" max="3.5" step="0.05" value="2"></div>
       <div class="slider"><label for="gazeFwd">Gaze forward</label><output id="gazeFwdOut"></output><input id="gazeFwd" type="range" min="-20" max="50" step="1" value="15"></div>
@@ -154,12 +154,19 @@ async function loadGlb(url) {
 }
 
 // grey maps: the bitmap (for the shader) and its pixels (for carving geometry on the CPU)
-async function loadMap(url) {
+async function loadMap(url, opts = {}) {
   const bmp = await createImageBitmap(await (await fetch(url)).blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
   const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height;
   const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(bmp, 0, 0);
   const rgba = cx.getImageData(0, 0, bmp.width, bmp.height).data, px = new Float32Array(bmp.width * bmp.height);
   for (let i = 0; i < px.length; i++) px[i] = rgba[i * 4] / 255;
+  if (opts.blur) {   // separable box blur, twice: softer walls than the mesh could otherwise follow
+    const W = bmp.width, H = bmp.height, R = opts.blur, tmp = new Float32Array(px.length);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let a = 0, c = 0; for (let d = -R; d <= R; d++) { const xx = x + d; if (xx >= 0 && xx < W) { a += px[y*W+xx]; c++; } } tmp[y*W+x] = a / c; }
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let a = 0, c = 0; for (let d = -R; d <= R; d++) { const yy = y + d; if (yy >= 0 && yy < H) { a += tmp[yy*W+x]; c++; } } px[y*W+x] = a / c; }
+    }
+  }
   return { bmp, px, w: bmp.width, h: bmp.height };
 }
 function sampleMap(m, u, v) {   // bilinear, u right, v down, both 0..1
@@ -313,7 +320,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.15, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -505,7 +512,7 @@ function placeEyes() {
   });
 }
 // ---------- eyes: socket depth map carved into the skin around each eye anchor ----------
-const EYE_SIZE = 0.035, EYE_DEPTH = 0.04;
+const EYE_SIZE = 0.035;
 let eye = null;   // frame of the right eye (+z); the left one is its mirror
 function eyeFrame(pos, nrm) {
   const a = D.eyes[0], n = [nrm[a*3], nrm[a*3+1], nrm[a*3+2]];
@@ -521,7 +528,9 @@ function ballOf(e) {
 }
 function carveEyes(pos, nrm) {
   eye = eyeFrame(pos, nrm);
-  const { c, n, t, b, sx, sy } = eye, s = Math.max(sx, sy), k = EYE_DEPTH * genes.eyeDepth * Math.sqrt(genes.eyeSX * genes.eyeSY), N = pos.length / 3;
+  const { c, n, t, b, sx, sy } = eye, s = Math.max(sx, sy), N = pos.length / 3;
+  // socket depth: the floor of the hole (the map's darkest grey, 0.39 below neutral) sits this far in
+  const k = genes.eyeDepth / 0.39;
   // the whole eye area sinks in (a soft dish, wider than the socket), then the socket map is carved into it
   const W = genes.recessWidth, R = genes.recess, reach = W * s * 1.2;
   for (let v = 0; v < N; v++) {
@@ -536,24 +545,8 @@ function carveEyes(pos, nrm) {
     if (r < 1) h -= R * (0.5 + 0.5 * Math.cos(Math.PI * r)) * (1 - smooth(0.35, 0.7, Math.abs(dn) / (W * s)));
     const u = du / sx, w = dw / sy;
     if (k && Math.abs(u) < 1 && Math.abs(w) < 1)
-      h += (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k * (1 - smooth(0.5, 0.9, Math.abs(dn) / s));   // grey 0.5 = untouched skin
+      h += (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k * (1 - smooth(1.2, 1.8, Math.abs(dn) / s));   // fade only well past the hole   // grey 0.5 = untouched skin
     pos[v*3] += n[0] * h; pos[v*3+1] += n[1] * h; pos[v*3+2] += n[2] * h * sg;
-  }
-  // fit the socket to the eyeball: skin inside the eye's opening that would sit in or over the ball tucks in
-  // behind it (the lid folds back around the ball), so no skin shows through or across the eye
-  const { rx, ry, rz, o } = ballOf(eye), M = 1.1;
-  for (let v = 0; v < N; v++) {
-    const sg = pos[v*3+2] < 0 ? -1 : 1;
-    const dx = pos[v*3] - o[0], dy = pos[v*3+1] - o[1], dz = pos[v*3+2] * sg - o[2];
-    let qx = (dx*t[0] + dy*t[1] + dz*t[2]) / rx, qy = (dx*b[0] + dy*b[1] + dz*b[2]) / ry, qz = (dx*n[0] + dy*n[1] + dz*n[2]) / rz;
-    const ring = Math.hypot(qx, qy);
-    if (ring >= M || qz < -3) continue;
-    const back = -Math.sqrt(M * M - ring * ring);
-    if (qz <= back) continue;
-    qz = back;
-    const wx = qx * rx, wy = qy * ry, wz = qz * rz;
-    pos[v*3] = o[0] + t[0]*wx + b[0]*wy + n[0]*wz; pos[v*3+1] = o[1] + t[1]*wx + b[1]*wy + n[1]*wz;
-    pos[v*3+2] = (o[2] + t[2]*wx + b[2]*wy + n[2]*wz) * sg;
   }
 }
 function setSurface(m, pos, nrm, jw, reg) {
@@ -626,7 +619,7 @@ $('gumCol').addEventListener('input', e => { skinUi.gum = hex2(e.target.value); 
 $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.value); applySkin(normWeights()); });
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
-for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => '×' + v.toFixed(2), true],
+for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
     ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
@@ -646,7 +639,7 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo, eyeDepth, iris]) => {
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo, eyeDepth, iris]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.iris = iris; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { eyeballs, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
