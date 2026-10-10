@@ -292,10 +292,13 @@ void getNormal() {
   const float o = 1.5 / 512.0;
   vec2 g = vec2(texture(uEyeWr, e.xy + vec2(o, 0.0)).r - texture(uEyeWr, e.xy - vec2(o, 0.0)).r,
                 texture(uEyeWr, e.xy + vec2(0.0, o)).r - texture(uEyeWr, e.xy - vec2(0.0, o)).r) / (2.0 * o) * e.z * uWrinkle;
+  // only on skin facing the eye: on socket walls the map's uv races across the screen and the slope explodes
+  vec3 rn = dinoN();
+  g *= smoothstep(0.45, 0.8, dot(rn, vec3(uEyeN.xy, abs(uEyeN.z))));
   vec3 sx = dFdx(vPositionW), sy = dFdy(vPositionW), N = dVertexNormalW;
   vec3 r1 = cross(sy, N), r2 = cross(N, sx);
   float det = dot(sx, r1);
-  float hx = dFdx(h) + dot(g, dFdx(e.xy)), hy = dFdy(h) + dot(g, dFdy(e.xy));
+  float hx = dFdx(h) + clamp(dot(g, dFdx(e.xy)), -0.02, 0.02), hy = dFdy(h) + clamp(dot(g, dFdy(e.xy)), -0.02, 0.02);
   vec3 grad = sign(det) * (hx * r1 + hy * r2);
   dNormalW = normalize(abs(det) * N - grad);
 }
@@ -487,7 +490,7 @@ function buildEyes(dev) {
 function placeEyes() {
   if (!eye || !eyeballs.length) return;
   const { c, n, t, b, sx, sy } = eye;
-  const rx = 0.5 * sx, ry = 0.58 * sy, rz = 0.55 * Math.min(rx, ry), off = 0.5 * rz + genes.recess;   // fits the depth map's opening, sunk with the recess
+  const { rx, ry, rz, off } = ballOf(eye);
   // iris texture laid over the front: the iris fills irisSize of the visible eye
   const K = 0.39 / genes.irisSize;
   // gaze in head space (right eye): out to the side, turned forward and down; then in the eyeball's own frame
@@ -502,7 +505,9 @@ function placeEyes() {
     const uv = new Float32Array(P.length / 3 * 2);
     for (let v = 0; v < P.length / 3; v++) {
       const w = [P[v*3] * rx * (k ? -1 : 1), P[v*3+1] * ry, P[v*3+2] * rz], front = dot(w, g) > 0;   // left eye: its mirrored frame, read as the right
-      uv[v*2] = front ? 0.507 + dot(w, gu) / rx * K * (k ? -1 : 1) : 2; uv[v*2+1] = front ? 0.499 - dot(w, gv) / rx * K : 2;   // back: white
+      let au = dot(w, gu) / rx * K, av = dot(w, gv) / rx * K;
+      if (!front) { const l = Math.hypot(au, av) || 1e-6, f = Math.max(l, 0.62) / l; au *= f; av *= f; }   // back half: stays in the white, no seam
+      uv[v*2] = 0.507 + au * (k ? -1 : 1); uv[v*2+1] = 0.499 - av;
     }
     mesh.setUvs(0, uv); mesh.update();
     const m = new pc.Mat4(); m.data.set([T[0], T[1], T[2], 0, B[0], B[1], B[2], 0, Nn[0], Nn[1], Nn[2], 0, 0, 0, 0, 1]);
@@ -520,6 +525,11 @@ function eyeFrame(pos, nrm) {
   const c = [0, 1, 2].map(i => pos[a*3+i] + t[i] * genes.eyeFwd + b[i] * genes.eyeUp);
   return { c, n, t, b, sx: EYE_SIZE * genes.eyeSX, sy: EYE_SIZE * genes.eyeSY };
 }
+// eyeball size in the socket frame: fits the depth map's opening, sunk with the recess
+function ballOf(e) {
+  const rx = 0.5 * e.sx, ry = 0.58 * e.sy, rz = 0.55 * Math.min(rx, ry), off = 0.5 * rz + genes.recess;
+  return { rx, ry, rz, off, o: e.c.map((x, i) => x - e.n[i] * off) };
+}
 function carveEyes(pos, nrm) {
   eye = eyeFrame(pos, nrm);
   const { c, n, t, b, sx, sy } = eye, s = Math.max(sx, sy), k = EYE_DEPTH * genes.eyeDepth * Math.sqrt(genes.eyeSX * genes.eyeSY), N = pos.length / 3;
@@ -530,14 +540,32 @@ function carveEyes(pos, nrm) {
     const dx = pos[v*3] - c[0], dy = pos[v*3+1] - c[1], dz = pos[v*3+2] * sg - c[2];
     if (dx*dx + dy*dy + dz*dz > reach * reach) continue;
     const dn = dx*n[0] + dy*n[1] + dz*n[2], du = dx*t[0] + dy*t[1] + dz*t[2], dw = dx*b[0] + dy*b[1] + dz*b[2];
-    if (nrm[v*3]*n[0] + nrm[v*3+1]*n[1] + nrm[v*3+2]*sg*n[2] < 0.2) continue;   // only the skin facing the eye
+    // every weight fades smoothly (facing, depth off the eye plane, distance): a hard cut tears folds into spikes
+    const face = smooth(-0.1, 0.5, nrm[v*3]*n[0] + nrm[v*3+1]*n[1] + nrm[v*3+2]*sg*n[2]);
+    if (face === 0) continue;
     let h = 0;
     const r = Math.hypot(du / (W * sx), dw / (W * sy));
-    if (r < 1 && Math.abs(dn) < 0.6 * W * s) h -= R * (0.5 + 0.5 * Math.cos(Math.PI * r));
+    if (r < 1) h -= R * (0.5 + 0.5 * Math.cos(Math.PI * r)) * face * (1 - smooth(0.35, 0.7, Math.abs(dn) / (W * s)));
     const u = du / sx, w = dw / sy;
     if (k && Math.abs(u) < 1 && Math.abs(w) < 1 && Math.abs(dn) < 0.8 * s)
       h += (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k;     // grey 0.5 = untouched skin
     pos[v*3] += n[0] * h; pos[v*3+1] += n[1] * h; pos[v*3+2] += n[2] * h * sg;
+  }
+  // fit the socket to the eyeball: skin inside the eye's opening that would sit in or over the ball tucks in
+  // behind it (the lid folds back around the ball), so no skin shows through or across the eye
+  const { rx, ry, rz, o } = ballOf(eye), M = 1.1;
+  for (let v = 0; v < N; v++) {
+    const sg = pos[v*3+2] < 0 ? -1 : 1;
+    const dx = pos[v*3] - o[0], dy = pos[v*3+1] - o[1], dz = pos[v*3+2] * sg - o[2];
+    let qx = (dx*t[0] + dy*t[1] + dz*t[2]) / rx, qy = (dx*b[0] + dy*b[1] + dz*b[2]) / ry, qz = (dx*n[0] + dy*n[1] + dz*n[2]) / rz;
+    const ring = Math.hypot(qx, qy);
+    if (ring >= M || qz < -3) continue;
+    const back = -Math.sqrt(M * M - ring * ring);
+    if (qz <= back) continue;
+    qz = back;
+    const wx = qx * rx, wy = qy * ry, wz = qz * rz;
+    pos[v*3] = o[0] + t[0]*wx + b[0]*wy + n[0]*wz; pos[v*3+1] = o[1] + t[1]*wx + b[1]*wy + n[1]*wz;
+    pos[v*3+2] = (o[2] + t[2]*wx + b[2]*wy + n[2]*wz) * sg;
   }
 }
 function setSurface(m, pos, nrm, jw, reg) {
@@ -633,6 +661,6 @@ resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png'), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b))]).then(([data, scales, camo, eyeDepth, eyeWr, iris]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
+window.__dino = { eyeballs, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
 </script>
