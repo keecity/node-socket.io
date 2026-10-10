@@ -6,7 +6,7 @@ import numpy as np, json
 from crest_rest import rest, L0, F
 FRONT=0.025          # only the front end goes into the head (2.5 cm), so it can be fused there
 a,deg,X=rest(0.0,FRONT,touch=0.003,skip=0.12)   # the rest swung down until it just touches the back of the skull
-SINK=FRONT
+SINK=FRONT+0.045      # lowered (straight down, same orientation) so the arch overlaps the skull for fusing
 t=np.radians(deg); L=L0@np.array([[np.cos(t),-np.sin(t),0],[np.sin(t),np.cos(t),0],[0,0,1]]).T
 json.dump(dict(anchor=a,species=2,embed=SINK,pos=np.round(L,5).ravel().tolist(),idx=F.ravel().tolist(),
                note='local frame: x forward, y up, z sideways; origin = front end, placed at the anchor vertex minus embed along y'),

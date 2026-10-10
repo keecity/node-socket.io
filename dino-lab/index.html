@@ -78,7 +78,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="boost">Feature strength</label><output id="boostOut"></output><input id="boost" type="range" min="0" max="1.6" step="0.05" value="1">
         <small>Below 1 fades toward the generic base; above 1 exaggerates the species traits.</small></div>
       <div class="slider"><label for="crest">Crest size</label><output id="crestOut"></output><input id="crest" type="range" min="0" max="1.6" step="0.01" value="1">
-        <small>The Duckbill's tube crest grows with its share of the genome, times this.</small></div>
+        <small>The Duckbill's tube crest grows with its share of the genome, times this. Once the genome settles it is fused into the head as one mesh.</small></div>
+      <p class="note" id="fuseOut" aria-live="polite"></p>
     </section>
     <section>
       <h2>Eyes</h2>
@@ -104,8 +105,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     <section>
       <h2>Skin</h2>
       <div class="slider"><label for="camoSel">Colour pattern</label><span></span><select id="camoSel"><option value="-1">Species default</option><option value="-2">None (plain tint)</option></select></div>
-      <div class="slider"><label for="camoMix">Pattern blend</label><output id="camoMixOut"></output><input id="camoMix" type="range" min="0" max="1" step="0.01" value="0.65"></div>
-      <div class="slider"><label for="camoFreq">Pattern size</label><output id="camoFreqOut"></output><input id="camoFreq" type="range" min="0.8" max="6" step="0.1" value="2.2"></div>
+      <div class="slider"><label for="camoMix">Pattern blend</label><output id="camoMixOut"></output><input id="camoMix" type="range" min="0" max="1" step="0.01" value="1"></div>
+      <div class="slider"><label for="camoFreq">Pattern size</label><output id="camoFreqOut"></output><input id="camoFreq" type="range" min="0.8" max="8" step="0.1" value="2.2"></div>
       <div class="slider"><label for="patA">Back scales</label><span></span><select id="patA"><option value="-1">Species default</option></select></div>
       <div class="slider"><label for="patB">Belly scales</label><span></span><select id="patB"><option value="-1">Species default</option></select></div>
       <div class="slider"><label for="freq">Scale size</label><output id="freqOut"></output><input id="freq" type="range" min="4" max="24" step="0.5" value="9"></div>
@@ -332,7 +333,7 @@ const SKINS = [   // per species: back / belly tint, back / belly scale tile, ca
   { back: [0.30, 0.38, 0.24], belly: [0.78, 0.74, 0.52], a: 5, b: 8, camo: 8 }    // Beaked grazer
 ];
 const PATTERN_NAMES = ['Fine beads', 'Overlapping scales', 'Large polygons', 'Hex scales', 'Pebble boss', 'Lizard scales', 'Croc scutes', 'Belly plates', 'Small beads'];
-const skinUi = { a: -1, b: -1, freq: 9, bump: 0.05, back: null, belly: null, camo: -1, camoFreq: 2.2, camoMix: 0.65, gum: [0.42, 0.09, 0.11], keratin: [0.5, 0.47, 0.41] };
+const skinUi = { a: -1, b: -1, freq: 9, bump: 0.05, back: null, belly: null, camo: -1, camoFreq: 2.2, camoMix: 1, gum: [0.42, 0.09, 0.11], keratin: [0.5, 0.47, 0.41] };
 const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert stripes', 'River teal', 'Olive ochre', 'Dusk violet', 'Jungle spots'];
 
 
@@ -379,7 +380,7 @@ function build(data) {
   const skin = new pc.Skin(dev, [new pc.Mat4(), jawIbm], ['skull', 'jaw']);
   mesh.skin = skin;
   const si = new pc.SkinInstance(skin); si.bones = [bones.skull, bones.jaw]; si.rootBone = head;
-  const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false;
+  const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; headMI = mi; baseMesh = mesh;
   head.addComponent('render', { meshInstances: [mi] });
   buildEyes(dev); buildLids(dev); buildCrest(dev);
   rebuild();
@@ -407,6 +408,7 @@ function rebuild() {
     pos[v*3] = x; pos[v*3+1] = y; pos[v*3+2] = z;
   }
   crestLift(pos, w);
+  const pre = crestP ? pos.slice() : null;
   carveEyes(pos, vertexNormals(pos, D.I));
   // normals
   nrm.fill(0);
@@ -423,7 +425,11 @@ function rebuild() {
   const reg = new Float32Array(n * 3);
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
   setSurface(mesh, pos, nrm, jwv, reg);
+  if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
   placeEyes(); placeCrest();
+  clearTimeout(fuseTimer);
+  if (pre) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
+  else $('fuseOut').textContent = '';
   applySkin(w);
   const gape = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
   $('stat').innerHTML = `<b>${(n).toLocaleString()}</b> shared vertices · <b>2</b> bones (skull, jaw) · splice ${w.map((x, i) => `${D.names[i]} <b>${Math.round(x * 100)}%</b>`).join(' · ')} · sculpted gape ${gape.toFixed(0)}° · drag to orbit`;
@@ -445,7 +451,8 @@ function applySkin(w) {
   mat.setParameter('uWeightView', view.weights ? 1 : 0); mat.setParameter('uRegionView', view.regions ? 1 : 0);
   mat.setParameter('uGum', new Float32Array(skinUi.gum)); mat.setParameter('uKeratin', new Float32Array(skinUi.keratin));
   const camo = skinUi.camo === -1 ? SKINS[dom].camo : skinUi.camo;   // -1 species default, -2 none
-  mat.setParameter('uCamoOn', camo >= 0 ? skinUi.camoMix : 0);   // pattern faded over the skin colour mat.setParameter('uCamoTile', Math.max(camo, 0)); mat.setParameter('uCamoFreq', skinUi.camoFreq);
+  mat.setParameter('uCamoOn', camo >= 0 ? skinUi.camoMix : 0);   // pattern faded over the skin colour
+  mat.setParameter('uCamoTile', Math.max(camo, 0)); mat.setParameter('uCamoFreq', skinUi.camoFreq);
 }
 // rest-pose attributes the skin shader reads: position (uv0.xy, uv1.x), normal + belly mask (colour), jaw weight (uv1.y)
 function vertexNormals(pos, I) {
@@ -501,6 +508,236 @@ function buildEyes(dev) {
     const ent = new pc.Entity('eye' + k); ent.addComponent('render', { meshInstances: [new pc.MeshInstance(m, eyeMat)] });
     bones.skull.addChild(ent); eyeballs.push({ ent, mesh: m, P });
   }
+}
+// ---------- fusing: solids → one mesh ----------
+const BIG = 1e20;
+// exact squared Euclidean distance transform along one line (Felzenszwalb & Huttenlocher)
+function edt1d(f, d, v, z, n) {
+  let k = 0; v[0] = 0; z[0] = -BIG; z[1] = BIG;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = BIG;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+}
+// grid: 0 at sites, BIG elsewhere → returns distance in voxels
+function edt3d(grid, nx, ny, nz) {
+  const m = Math.max(nx, ny, nz);
+  const f = new Float64Array(m), d = new Float64Array(m), v = new Int32Array(m), z = new Float64Array(m + 1);
+  const pass = (n, count, at) => {
+    for (let l = 0; l < count; l++) {
+      for (let i = 0; i < n; i++) f[i] = grid[at(l, i)];
+      edt1d(f, d, v, z, n);
+      for (let i = 0; i < n; i++) grid[at(l, i)] = d[i];
+    }
+  };
+  pass(nx, ny * nz, (l, i) => i + nx * l);
+  pass(ny, nx * nz, (l, i) => (l % nx) + nx * (i + ny * Math.floor(l / nx)));
+  pass(nz, nx * ny, (l, i) => l + nx * ny * i);
+  for (let i = 0; i < grid.length; i++) grid[i] = Math.sqrt(grid[i]);
+  return grid;
+}
+
+// closest point on triangle (Ericson, Real-Time Collision Detection 5.1.5) → [x,y,z,u,v,w] (barycentric of a,b,c)
+function closestOnTri(px, py, pz, P, a, b, c, out) {
+  const ax = P[a], ay = P[a+1], az = P[a+2];
+  const abx = P[b]-ax, aby = P[b+1]-ay, abz = P[b+2]-az, acx = P[c]-ax, acy = P[c+1]-ay, acz = P[c+2]-az;
+  const apx = px-ax, apy = py-ay, apz = pz-az;
+  const d1 = abx*apx + aby*apy + abz*apz, d2 = acx*apx + acy*apy + acz*apz;
+  let u, v, w;
+  if (d1 <= 0 && d2 <= 0) { u = 1; v = 0; w = 0; }
+  else {
+    const bpx = px-P[b], bpy = py-P[b+1], bpz = pz-P[b+2];
+    const d3 = abx*bpx + aby*bpy + abz*bpz, d4 = acx*bpx + acy*bpy + acz*bpz;
+    if (d3 >= 0 && d4 <= d3) { u = 0; v = 1; w = 0; }
+    else {
+      const vc = d1*d4 - d3*d2;
+      if (vc <= 0 && d1 >= 0 && d3 <= 0) { const t = d1 / (d1 - d3); u = 1 - t; v = t; w = 0; }
+      else {
+        const cpx = px-P[c], cpy = py-P[c+1], cpz = pz-P[c+2];
+        const d5 = abx*cpx + aby*cpy + abz*cpz, d6 = acx*cpx + acy*cpy + acz*cpz;
+        if (d6 >= 0 && d5 <= d6) { u = 0; v = 0; w = 1; }
+        else {
+          const vb = d5*d2 - d1*d6;
+          if (vb <= 0 && d2 >= 0 && d6 <= 0) { const t = d2 / (d2 - d6); u = 1 - t; v = 0; w = t; }
+          else {
+            const va = d3*d6 - d5*d4;
+            if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) { const t = (d4 - d3) / ((d4 - d3) + (d5 - d6)); u = 0; v = 1 - t; w = t; }
+            else { const den = 1 / (va + vb + vc); v = vb * den; w = vc * den; u = 1 - v - w; }
+          }
+        }
+      }
+    }
+  }
+  out[0] = ax + abx * v + acx * w; out[1] = ay + aby * v + acy * w; out[2] = az + abz * v + acz * w;
+  out[3] = u; out[4] = v; out[5] = w;
+}
+
+// Fuse solids into ONE mesh, as Hog Foundry fuses its body parts: each closed part gets a signed distance field
+// (exact near its surface, EDT further out, sign by flood-filling the outside); where parts overlap they are
+// smooth-unioned with blend radius k, so the joint grows a fillet; surface nets then mesh the result.
+function fuseSolids(parts, h, k) {
+  const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+  for (const { P } of parts) for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], P[i+a]); mx[a] = Math.max(mx[a], P[i+a]); }
+  const zr = Math.max(-mn[2], mx[2]); mn[2] = -zr; mx[2] = zr;          // symmetric about the midline
+  const pad = k + 4 * h, o = mn.map(v => v - pad);
+  const nx = Math.ceil((mx[0] - mn[0] + 2 * pad) / h) + 1, ny = Math.ceil((mx[1] - mn[1] + 2 * pad) / h) + 1, nz = Math.ceil((mx[2] - mn[2] + 2 * pad) / h) + 1;
+  const N = nx * ny * nz, at = (x, y, z) => x + nx * (y + ny * z), dims = [nx, ny, nz], margin = Math.ceil(k / h) + 3, cp = new Float64Array(6);
+  function partSdf(P, I, bmin, lx, ly, lz) {
+    const L = lx * ly * lz, li = (x, y, z) => x + lx * (y + ly * z);
+    const f = new Float64Array(L).fill(BIG), near = new Int8Array(L);
+    for (let t3 = 0; t3 < I.length; t3 += 3) {
+      const a = I[t3]*3, b = I[t3+1]*3, c = I[t3+2]*3;
+      const r0 = [0, 1, 2].map(ax => Math.max(0, Math.floor((Math.min(P[a+ax], P[b+ax], P[c+ax]) - o[ax]) / h) - 2 - bmin[ax]));
+      const r1 = [0, 1, 2].map((ax, i) => Math.min([lx, ly, lz][i] - 1, Math.ceil((Math.max(P[a+ax], P[b+ax], P[c+ax]) - o[ax]) / h) + 2 - bmin[ax]));
+      const e1x = P[b]-P[a], e1y = P[b+1]-P[a+1], e1z = P[b+2]-P[a+2], e2x = P[c]-P[a], e2y = P[c+1]-P[a+1], e2z = P[c+2]-P[a+2];
+      const fnx = e1y*e2z - e1z*e2y, fny = e1z*e2x - e1x*e2z, fnz = e1x*e2y - e1y*e2x;
+      for (let z = r0[2]; z <= r1[2]; z++) for (let y = r0[1]; y <= r1[1]; y++) for (let x = r0[0]; x <= r1[0]; x++) {
+        const px = o[0] + (x + bmin[0]) * h, py = o[1] + (y + bmin[1]) * h, pz = o[2] + (z + bmin[2]) * h;
+        closestOnTri(px, py, pz, P, a, b, c, cp);
+        const d2 = ((cp[0]-px)**2 + (cp[1]-py)**2 + (cp[2]-pz)**2) / (h * h), i = li(x, y, z);
+        if (d2 < f[i]) { f[i] = d2; near[i] = ((px-cp[0])*fnx + (py-cp[1])*fny + (pz-cp[2])*fnz) >= 0 ? 1 : -1; }
+      }
+    }
+    for (let i = 0; i < L; i++) if (f[i] > 4) f[i] = BIG;
+    const d = edt3d(f, lx, ly, lz);
+    const out = new Uint8Array(L), q = new Int32Array(L); let qh = 0, qt = 0;
+    for (let z = 0; z < lz; z++) for (let y = 0; y < ly; y++) for (let x = 0; x < lx; x++) {
+      if (x && y && z && x < lx - 1 && y < ly - 1 && z < lz - 1) continue;
+      const i = li(x, y, z); if (d[i] > 1.5 && !out[i]) { out[i] = 1; q[qt++] = i; }
+    }
+    const nb = [1, -1, lx, -lx, lx * ly, -lx * ly];
+    while (qh < qt) { const i = q[qh++]; for (const dn of nb) { const j = i + dn; if (j >= 0 && j < L && !out[j] && d[j] > 1.5) { out[j] = 1; q[qt++] = j; } } }
+    const sdf = new Float32Array(L);
+    for (let i = 0; i < L; i++) sdf[i] = (out[i] || (d[i] <= 1.5 && near[i] > 0) ? d[i] : -d[i]) * h;
+    return sdf;
+  }
+  const S = parts.map(({ P, I }) => {
+    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { const g = (P[i+a] - o[a]) / h; lo[a] = Math.min(lo[a], g); hi[a] = Math.max(hi[a], g); }
+    const bmin = [0, 1, 2].map(a => Math.max(0, Math.floor(lo[a]) - margin)), bmax = [0, 1, 2].map(a => Math.min(dims[a] - 1, Math.ceil(hi[a]) + margin));
+    const [lx, ly, lz] = [0, 1, 2].map(a => bmax[a] - bmin[a] + 1);
+    return { sdf: partSdf(P, I, bmin, lx, ly, lz), bmin, lx, ly, lz };
+  });
+  const sample = (p, gx, gy, gz) => {
+    const x = gx - p.bmin[0], y = gy - p.bmin[1], z = gz - p.bmin[2];
+    return (x < 0 || y < 0 || z < 0 || x >= p.lx || y >= p.ly || z >= p.lz) ? BIG : p.sdf[x + p.lx * (y + p.ly * z)];
+  };
+  const phi = new Float32Array(N);
+  for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+    let v = BIG;
+    if (S.length === 2) {
+      const a = sample(S[0], x, y, z), b = sample(S[1], x, y, z);
+      const hh = Math.max(k - Math.abs(a - b), 0) / k;
+      v = Math.min(a, b) - hh * hh * k * 0.25;                            // polynomial smooth-min: the fillet
+    } else for (const p of S) v = Math.min(v, sample(p, x, y, z));
+    phi[at(x, y, z)] = -Math.min(v, 1e6);                                 // > 0 inside
+  }
+  const cellV = new Int32Array(N).fill(-1), vp = [];
+  const C = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
+  const E = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+  const cv = new Float32Array(8);
+  for (let z = 0; z < nz - 1; z++) for (let y = 0; y < ny - 1; y++) for (let x = 0; x < nx - 1; x++) {
+    let mask = 0;
+    for (let c = 0; c < 8; c++) { cv[c] = phi[at(x + C[c][0], y + C[c][1], z + C[c][2])]; if (cv[c] > 0) mask |= 1 << c; }
+    if (mask === 0 || mask === 255) continue;
+    let sx = 0, sy = 0, sz = 0, cnt = 0;
+    for (const [a, b] of E) {
+      if ((cv[a] > 0) === (cv[b] > 0)) continue;
+      const tt = cv[a] / (cv[a] - cv[b]);
+      sx += C[a][0] + (C[b][0] - C[a][0]) * tt; sy += C[a][1] + (C[b][1] - C[a][1]) * tt; sz += C[a][2] + (C[b][2] - C[a][2]) * tt; cnt++;
+    }
+    cellV[at(x, y, z)] = vp.length / 3;
+    vp.push(o[0] + (x + sx / cnt) * h, o[1] + (y + sy / cnt) * h, o[2] + (z + sz / cnt) * h);
+  }
+  const idx = [], stride = [1, nx, nx * ny];
+  for (let z = 1; z < nz - 1; z++) for (let y = 1; y < ny - 1; y++) for (let x = 1; x < nx - 1; x++) {
+    const i0 = at(x, y, z);
+    for (let ax = 0; ax < 3; ax++) {
+      const i1 = i0 + stride[ax], in0 = phi[i0] > 0, in1 = phi[i1] > 0;
+      if (in0 === in1) continue;
+      const sj = stride[(ax + 1) % 3], sk = stride[(ax + 2) % 3];
+      const a = cellV[i0], b = cellV[i0 - sj], c = cellV[i0 - sj - sk], d = cellV[i0 - sk];
+      if (a < 0 || b < 0 || c < 0 || d < 0) continue;
+      if (in0) idx.push(a, b, c, a, c, d); else idx.push(a, c, b, a, d, c);
+    }
+  }
+  // drop tiny disconnected fragments (voxel specks)
+  {
+    const n0 = vp.length / 3, par = new Int32Array(n0).map((_, i) => i);
+    const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < idx.length; i += 3) { par[find(idx[i])] = find(idx[i+1]); par[find(idx[i+2])] = find(idx[i+1]); }
+    const size = new Map(); for (let i = 0; i < n0; i++) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); }
+    const keep = []; for (let i = 0; i < idx.length; i += 3) if (size.get(find(idx[i])) >= 150) keep.push(idx[i], idx[i+1], idx[i+2]);
+    const remap = new Int32Array(n0).fill(-1), nvp = [];
+    for (let i = 0; i < keep.length; i++) { const v = keep[i]; if (remap[v] < 0) { remap[v] = nvp.length / 3; nvp.push(vp[v*3], vp[v*3+1], vp[v*3+2]); } keep[i] = remap[v]; }
+    vp.length = 0; for (const x of nvp) vp.push(x); idx.length = 0; for (const x of keep) idx.push(x);
+  }
+  // Taubin smoothing (shrink-free), light: the head's own detail stays
+  const nv = vp.length / 3, pos = new Float32Array(vp), adj = Array.from({ length: nv }, () => new Set());
+  for (let i = 0; i < idx.length; i += 3) { const a = idx[i], b = idx[i+1], c = idx[i+2]; adj[a].add(b).add(c); adj[b].add(a).add(c); adj[c].add(a).add(b); }
+  const adjA = adj.map(s => Int32Array.from(s)), tmp = new Float32Array(pos.length);
+  for (let it = 0; it < 6; it++) {
+    const fac = it % 2 ? -0.53 : 0.5;
+    for (let v = 0; v < nv; v++) {
+      const nbv = adjA[v]; let ax = 0, ay = 0, az = 0;
+      for (const u of nbv) { ax += pos[u*3]; ay += pos[u*3+1]; az += pos[u*3+2]; }
+      const kk = nbv.length || 1;
+      tmp[v*3] = pos[v*3] + fac * (ax / kk - pos[v*3]); tmp[v*3+1] = pos[v*3+1] + fac * (ay / kk - pos[v*3+1]); tmp[v*3+2] = pos[v*3+2] + fac * (az / kk - pos[v*3+2]);
+    }
+    pos.set(tmp);
+  }
+  return { pos, idx: nv > 65535 ? Uint32Array.from(idx) : Uint16Array.from(idx) };
+}
+// nearest vertex of a point set (uniform hash grid)
+function nearestIndex(P, cell) {
+  const g = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
+  for (let v = 0; v < P.length / 3; v++) { const k = key(Math.floor(P[v*3] / cell), Math.floor(P[v*3+1] / cell), Math.floor(P[v*3+2] / cell)); if (!g.has(k)) g.set(k, []); g.get(k).push(v); }
+  return (x, y, z) => {
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
+    for (let r = 1; r < 8; r++) {
+      let best = -1, bd = Infinity;
+      for (let dz = -r; dz <= r; dz++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const l = g.get(key(cx + dx, cy + dy, cz + dz)); if (!l) continue;
+        for (const v of l) { const d = (P[v*3]-x)**2 + (P[v*3+1]-y)**2 + (P[v*3+2]-z)**2; if (d < bd) { bd = d; best = v; } }
+      }
+      if (best >= 0) return best;
+    }
+    return 0;
+  };
+}
+// after the genome settles: head + crest become ONE mesh (the quick two-piece preview shows while sliders move)
+let fuseTimer = null, fusedMesh = null, headMI = null, baseMesh = null, eyeA = null;
+function fuseNow(pre, reg, jwv) {
+  if (!crestP) return;
+  const t0 = performance.now();
+  // the jaw is opened an extra 25 degrees for meshing (so the lips never bridge across a narrow gap), then closed back
+  const OPEN = -25 * Math.PI / 180, pv = D.pivot, open = pre.slice();
+  const turn = (P, v, ang) => { const x = P[v*3] - pv[0], y = P[v*3+1] - pv[1], c = Math.cos(ang), s = Math.sin(ang); P[v*3] = pv[0] + x*c - y*s; P[v*3+1] = pv[1] + x*s + y*c; };
+  for (let v = 0; v < open.length / 3; v++) turn(open, v, OPEN * jwv[v]);
+  const r = fuseSolids([{ P: open, I: D.I }, { P: crestP, I: D.crest.idx }], 0.003, 0.02);
+  const P2 = r.pos, n2 = P2.length / 3, nearest = nearestIndex(open, 0.01);
+  const jw2 = new Float32Array(n2), reg2 = new Float32Array(n2 * 3);
+  for (let v = 0; v < n2; v++) {
+    const j = nearest(P2[v*3], P2[v*3+1], P2[v*3+2]);
+    jw2[v] = jwv[j]; for (let c = 0; c < 3; c++) reg2[v*3+c] = reg[j*3+c];
+    turn(P2, v, -OPEN * jw2[v]);
+  }
+  const a = D.eyes[0]; eyeA = nearestIndex(P2, 0.01)(pre[a*3], pre[a*3+1], pre[a*3+2]);
+  carveEyes(P2, vertexNormals(P2, r.idx));
+  eyeA = null;
+  const N2 = vertexNormals(P2, r.idx), m = new pc.Mesh(app.graphicsDevice);
+  m.setPositions(P2); m.setIndices(r.idx);
+  const bi = new Uint8Array(n2 * 4), bw = new Float32Array(n2 * 4);
+  for (let v = 0; v < n2; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw2[v]; bw[v*4+1] = jw2[v]; }
+  m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, n2, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
+  m.skin = baseMesh.skin;
+  setSurface(m, P2, N2, jw2, reg2);
+  if (fusedMesh) fusedMesh.destroy();
+  fusedMesh = m; headMI.mesh = m; crestPart.ent.enabled = false; placeEyes();
+  $('fuseOut').textContent = `Fused: head and crest are one mesh, ${n2.toLocaleString()} vertices (${Math.round(performance.now() - t0)} ms).`;
 }
 // ---------- crest: a separate part on the skull bone, rooted at a vertex on top of the spliced head ----------
 // local frame (x forward, y up, z sideways) with the front end at the origin; size = the species' share x the gene
@@ -607,7 +844,7 @@ function placeEyes() {
 const EYE_SIZE = 0.035;
 let eye = null;   // frame of the right eye (+z); the left one is its mirror
 function eyeFrame(pos, nrm) {
-  const a = D.eyes[0], sx = EYE_SIZE * genes.eyeSX, sy = EYE_SIZE * genes.eyeSY;
+  const a = eyeA ?? D.eyes[0], sx = EYE_SIZE * genes.eyeSX, sy = EYE_SIZE * genes.eyeSY;
   const basis = n => {
     const t = [1 - n[0]*n[0], -n[0]*n[1], -n[0]*n[2]], tl = Math.hypot(...t); t[0] /= tl; t[1] /= tl; t[2] /= tl;   // forward, along the skin
     return [t, [n[1]*t[2] - n[2]*t[1], n[2]*t[0] - n[0]*t[2], n[0]*t[1] - n[1]*t[0]]];                             // up, along the skin
@@ -759,6 +996,6 @@ resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
+window.__dino = { get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
 </script>
