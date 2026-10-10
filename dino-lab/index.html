@@ -31,6 +31,7 @@ section h2 { margin: 0 0 8px; font: 600 11px var(--f-body); text-transform: uppe
 .slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 8px; }
 .slider label { font-weight: 600; }
 .slider output { font: 12px var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.slider select { grid-column: 1 / -1; font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); }
 .slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
 .slider small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -76,6 +77,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="width">Head width</label><output id="widthOut"></output><input id="width" type="range" min="-0.3" max="0.5" step="0.01" value="0"></div>
       <div class="slider"><label for="boost">Feature strength</label><output id="boostOut"></output><input id="boost" type="range" min="0" max="1.6" step="0.05" value="1">
         <small>Below 1 fades toward the generic base; above 1 exaggerates the species traits.</small></div>
+    </section>
+    <section>
+      <h2>Skin</h2>
+      <div class="slider"><label for="patA">Back scales</label><span></span><select id="patA"><option value="-1">Species default</option></select></div>
+      <div class="slider"><label for="patB">Belly scales</label><span></span><select id="patB"><option value="-1">Species default</option></select></div>
+      <div class="slider"><label for="freq">Scale size</label><output id="freqOut"></output><input id="freq" type="range" min="4" max="24" step="0.5" value="9"></div>
+      <div class="slider"><label for="bump">Relief</label><output id="bumpOut"></output><input id="bump" type="range" min="0" max="3" step="0.05" value="1"></div>
+      <div class="row" style="margin-bottom:8px"><label for="backCol">Back</label><input type="color" id="backCol" value="#6b5c40"><label for="bellyCol">Belly</label><input type="color" id="bellyCol" value="#ccb88c"><button class="btn" id="autoCol">Species colours</button></div>
     </section>
     <section>
       <h2>Jaw rig</h2>
@@ -151,29 +160,72 @@ function updateCamera() {
   camera.lookAt(orbit.target);
 }
 
-// material: species A texture (uv0) mixed with species B (uv1) by a uniform, using the detail slot for B
+// material: procedural scales, projected from three sides in rest-pose space (uv0 = rest x,y; uv1.x = rest z;
+// vertex colour rgb = rest normal, a = belly mask; uv1.y = jaw weight). Bumps from the pattern height via
+// screen-space derivatives, so no UV unwrap or tangents are needed.
 const mat = new pc.StandardMaterial();
-mat.useMetalness = true; mat.metalness = 0; mat.gloss = 0.35; mat.cull = pc.CULLFACE_NONE;
+mat.useMetalness = true; mat.metalness = 0; mat.gloss = 0.42; mat.cull = pc.CULLFACE_NONE;
+mat.diffuseVertexColor = true; mat.diffuseVertexColorChannel = 'rgba';
+mat.emissive = new pc.Color(0, 0, 0);
+const DINO_SURF = `
+#ifndef DINO_SURF
+#define DINO_SURF
+uniform sampler2D uScales;
+uniform float uTileA, uTileB, uFreq;
+vec4 dinoTile(float tile, vec2 q, vec2 dx, vec2 dy) {
+  vec2 m = abs(mod(q, 2.0) - 1.0);                              // mirrored repeat: no tile edges
+  vec2 cell = vec2(mod(tile, 3.0), floor(tile / 3.0));
+  vec2 uv = (cell + 0.02 + m * 0.96) / 3.0;
+  return textureGrad(uScales, uv, dx * 0.32, dy * 0.32);
+}
+vec4 dinoTri(float tile, vec3 p, vec3 w) {
+  vec3 dx = dFdx(p), dy = dFdy(p);
+  return dinoTile(tile, p.zy, dx.zy, dy.zy) * w.x + dinoTile(tile, p.xz, dx.xz, dy.xz) * w.y + dinoTile(tile, p.xy, dx.xy, dy.xy) * w.z;
+}
+vec4 dinoSurface() {
+  vec3 p = vec3(vUv0.x, vUv0.y, vUv1.x) * uFreq;
+  vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
+  vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
+  return mix(dinoTri(uTileA, p, w), dinoTri(uTileB, p, w), smoothstep(0.0, 1.0, vVertexColor.a));
+}
+#endif
+`;
 const chunks = mat.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
-chunks.set('diffusePS', `
+chunks.set('diffusePS', DINO_SURF + `
 uniform vec3 material_diffuse;
-uniform float uSpeciesMix;
+uniform vec3 uBack, uBelly;
+uniform float uWeightView;
 void getAlbedo() {
-  dAlbedo = material_diffuse.rgb;
-  #ifdef STD_DIFFUSE_TEXTURE
-    vec3 a = {STD_DIFFUSE_TEXTURE_DECODE}(texture2DBias({STD_DIFFUSE_TEXTURE_NAME}, {STD_DIFFUSE_TEXTURE_UV}, {STD_TEXTURE_BIAS})).rgb;
-    #ifdef STD_DIFFUSEDETAIL_TEXTURE
-      vec3 b = {STD_DIFFUSEDETAIL_TEXTURE_DECODE}(texture2DBias({STD_DIFFUSEDETAIL_TEXTURE_NAME}, {STD_DIFFUSEDETAIL_TEXTURE_UV}, {STD_TEXTURE_BIAS})).rgb;
-      a = mix(a, b, uSpeciesMix);
-    #endif
-    dAlbedo *= a;
-  #endif
-  #ifdef STD_DIFFUSE_VERTEX
-    dAlbedo *= saturate(vVertexColor.rgb);
-  #endif
+  vec4 s = dinoSurface();
+  vec3 n = normalize(vVertexColor.rgb * 2.0 - 1.0);
+  vec3 base = mix(uBack, uBelly, smoothstep(0.0, 1.0, vVertexColor.a));
+  base *= mix(1.0, 0.72, smoothstep(0.35, 0.95, n.y));          // darker along the top of the head
+  vec3 col = base * (0.7 + 0.6 * s.r) * (0.78 + 0.4 * s.a);      // pattern albedo and cavities, kept soft
+  float jw = vUv1.y;
+  dAlbedo = mix(col, mix(vec3(0.15, 0.35, 0.95), vec3(1.0, 0.45, 0.1), jw), uWeightView);
+}
+`);
+chunks.set('normalMapPS', DINO_SURF + `
+uniform float uBump;
+void getNormal() {
+  float h = dinoSurface().a;
+  vec3 sx = dFdx(vPositionW), sy = dFdy(vPositionW), N = dVertexNormalW;
+  vec3 r1 = cross(sy, N), r2 = cross(N, sx);
+  float det = dot(sx, r1);
+  vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
+  dNormalW = normalize(abs(det) * N - uBump * grad);
 }
 `);
 mat.shaderChunksVersion = '2.8';
+
+// species skin defaults: back colour, belly colour, back pattern, belly pattern (tiles 0-8 of the scale sheet)
+const SKINS = [
+  { back: [0.42, 0.36, 0.25], belly: [0.80, 0.72, 0.55], a: 4, b: 7 },   // theropod: pebble boss, belly plates
+  { back: [0.47, 0.29, 0.20], belly: [0.80, 0.64, 0.48], a: 2, b: 0 },   // ceratopsian: large polygons, fine beads
+  { back: [0.30, 0.38, 0.28], belly: [0.74, 0.72, 0.55], a: 5, b: 8 }    // ornithopod: elongated scales, small beads
+];
+const PATTERN_NAMES = ['Fine beads', 'Overlapping scales', 'Large polygons', 'Hex scales', 'Pebble boss', 'Lizard scales', 'Croc scutes', 'Belly plates', 'Small beads'];
+const skinUi = { a: -1, b: -1, freq: 9, bump: 1, back: null, belly: null };
 
 let D = null, mesh = null, head = null, bones = {};
 const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12 };
@@ -182,15 +234,17 @@ const view = { bones: false, weights: false, idle: true };
 function build(data) {
   D = data;
   const n = D.P.length / 3, dev = app.graphicsDevice;
-  const tex = new pc.Texture(dev, { width: D.img.width, height: D.img.height, format: pc.PIXELFORMAT_SRGBA8, flipY: false, mipmaps: true, anisotropy: 8, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
-  tex.setSource(D.img);
-  mat.diffuseMap = tex; mat.diffuseDetailMap = tex; mat.diffuseMapUv = 0; mat.diffuseDetailMapUv = 1;
-  // glTF stores v flipped; PlayCanvas samples with the glTF convention when we flip back
+  const tex = new pc.Texture(dev, { width: D.scales.width, height: D.scales.height, format: pc.PIXELFORMAT_RGBA8, flipY: false, mipmaps: true, anisotropy: 8, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
+  tex.setSource(D.scales);
+  mat.setParameter('uScales', tex);
+  // the standard shader only declares the uv0/uv1 varyings when a map uses them: bind the scales to
+  // diffuse (uv0) and to emissive (uv1, black emissive so it adds nothing)
+  mat.diffuseMap = tex; mat.diffuseMapUv = 0; mat.emissiveMap = tex; mat.emissiveMapUv = 1;
   mat.update();
 
   mesh = new pc.Mesh(dev);
   mesh.setPositions(D.P); mesh.setNormals(new Float32Array(D.P.length));
-  mesh.setUvs(0, D.UV[0]); mesh.setUvs(1, D.UV[1]);
+  mesh.setUvs(0, new Float32Array(n * 2)); mesh.setUvs(1, new Float32Array(n * 2));
   mesh.setColors32(new Uint8Array(n * 4).fill(255));
   mesh.setIndices(D.I);
   const bi = new Uint8Array(n * 4), bw = new Float32Array(n * 4);
@@ -243,23 +297,29 @@ function rebuild() {
   }
   for (let v = 0; v < n; v++) { const l = Math.hypot(nrm[v*3], nrm[v*3+1], nrm[v*3+2]) || 1; nrm[v*3] /= l; nrm[v*3+1] /= l; nrm[v*3+2] /= l; }
   mesh.setPositions(pos); mesh.setNormals(nrm);
-  // texture: the two strongest species, mixed by their share
-  const order = [0, 1, 2].sort((p, q) => w[q] - w[p]), A = order[0], B = order[1];
-  mesh.setUvs(0, D.UV[A]); mesh.setUvs(1, D.UV[B]);
-  mat.setParameter('uSpeciesMix', w[A] + w[B] > 0 ? w[B] / (w[A] + w[B]) : 0);
-  // weight view
+  // shader inputs: rest position, rest normal, belly mask, jaw weight
+  const uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2);
   cols = cols || new Uint8Array(n * 4);
   for (let v = 0; v < n; v++) {
-    const j = D.W[v*4+1] / 255;
-    if (view.weights) { cols[v*4] = 255 * j + 60 * (1 - j); cols[v*4+1] = 90; cols[v*4+2] = 255 * (1 - j); } else { cols[v*4] = cols[v*4+1] = cols[v*4+2] = 255; }
-    cols[v*4+3] = 255;
+    uv0[v*2] = pos[v*3]; uv0[v*2+1] = pos[v*3+1]; uv1[v*2] = pos[v*3+2]; uv1[v*2+1] = D.W[v*4+1] / 255;
+    const ny = nrm[v*3+1];
+    const belly = smooth(0.15, 0.7, -ny) * (1 - smooth(0.02, 0.09, pos[v*3+1] + 0.02));   // undersides of jaw, throat and skull
+    cols[v*4] = (nrm[v*3] * 0.5 + 0.5) * 255; cols[v*4+1] = (ny * 0.5 + 0.5) * 255; cols[v*4+2] = (nrm[v*3+2] * 0.5 + 0.5) * 255; cols[v*4+3] = belly * 255;
   }
-  mesh.setColors32(cols);
-  mat.diffuseVertexColor = true; mat.update();
+  mesh.setUvs(0, uv0); mesh.setUvs(1, uv1); mesh.setColors32(cols);
+  applySkin(w);
   mesh.update(pc.PRIMITIVE_TRIANGLES, false);
   const gape = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
   $('stat').innerHTML = `<b>${(n).toLocaleString()}</b> shared vertices · <b>2</b> bones (skull, jaw) · splice ${w.map((x, i) => `${D.names[i]} <b>${Math.round(x * 100)}%</b>`).join(' · ')} · sculpted gape ${gape.toFixed(0)}° · drag to orbit`;
   renderBar(w);
+}
+function applySkin(w) {
+  const dom = w.indexOf(Math.max(...w)), mixc = k => [0, 1, 2].map(a => SKINS.reduce((s2, sk, i) => s2 + w[i] * sk[k][a], 0));
+  const back = skinUi.back || mixc('back'), belly = skinUi.belly || mixc('belly');
+  mat.setParameter('uBack', new Float32Array(back)); mat.setParameter('uBelly', new Float32Array(belly));
+  mat.setParameter('uTileA', skinUi.a >= 0 ? skinUi.a : SKINS[dom].a); mat.setParameter('uTileB', skinUi.b >= 0 ? skinUi.b : SKINS[dom].b);
+  mat.setParameter('uFreq', skinUi.freq); mat.setParameter('uBump', skinUi.bump * 0.006);
+  mat.setParameter('uWeightView', view.weights ? 1 : 0);
 }
 function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; return genes.mix.map(x => x / s); }
 
@@ -303,7 +363,14 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
 $('roar').onclick = () => roarT = 0;
 $('snap').onclick = () => snapT = 0;
 $('showBones').onchange = e => view.bones = e.target.checked;
-$('showWeights').onchange = e => { view.weights = e.target.checked; rebuild(); };
+$('showWeights').onchange = e => { view.weights = e.target.checked; applySkin(normWeights()); };
+for (const id of ['patA', 'patB']) { $(id).insertAdjacentHTML('beforeend', PATTERN_NAMES.map((nm, i) => `<option value="${i}">${nm}</option>`).join('')); $(id).onchange = e => { skinUi[id === 'patA' ? 'a' : 'b'] = +e.target.value; applySkin(normWeights()); }; }
+{ const el = $('freq'), out = $('freqOut'); const sync = () => { skinUi.freq = +el.value; out.textContent = (100 / skinUi.freq).toFixed(1) + ' cm tiles'; if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
+{ const el = $('bump'), out = $('bumpOut'); const sync = () => { skinUi.bump = +el.value; out.textContent = '×' + skinUi.bump.toFixed(2); if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
+const hex2 = h => [1, 3, 5].map(i => Math.pow(parseInt(h.substr(i, 2), 16) / 255, 1));
+$('backCol').addEventListener('input', e => { skinUi.back = hex2(e.target.value); applySkin(normWeights()); });
+$('bellyCol').addEventListener('input', e => { skinUi.belly = hex2(e.target.value); applySkin(normWeights()); });
+$('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 $('idle').onchange = e => view.idle = e.target.checked;
 function setUi() {
   D.names.forEach((_, i) => $(`mix${i}`).value = genes.mix[i]); syncMixOut();
@@ -319,9 +386,9 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-loadGlb('dino_head_base_rigged.glb').then(data => {
-  build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))]).then(([data, scales]) => {
+  data.scales = scales; build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { genes, orbit, view, rebuild, get D() { return D; } };
+window.__dino = { genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
 </script>
