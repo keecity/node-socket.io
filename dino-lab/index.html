@@ -115,6 +115,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="legAnkle">Ankle</label><output id="legAnkleOut"></output><input id="legAnkle" type="range" min="-60" max="60" step="1" value="0"></div>
       <div class="slider"><label for="legSplay">Splay</label><output id="legSplayOut"></output><input id="legSplay" type="range" min="0" max="30" step="1" value="4"></div>
       <h2>Leg placement</h2>
+      <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px">Stance <select id="stance"><option value="biped">Biped (2 legs, arms)</option><option value="quad">Quadruped (4 legs)</option></select></label>
+      <div id="legPair" hidden style="display:flex;gap:6px;margin-bottom:6px"><button type="button" data-pair="hind">Hind legs</button><button type="button" data-pair="front">Front legs</button></div>
       <div id="legPart" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><button type="button" data-p="leg">Whole leg</button><button type="button" data-p="thigh">Thigh</button><button type="button" data-p="shin">Shin</button><button type="button" data-p="foot">Foot</button><button type="button" data-p="toe1">Toe 1</button><button type="button" data-p="toe2">Toe 2</button><button type="button" data-p="toe3">Toe 3</button></div>
       <div id="legGizmo" style="display:flex;gap:6px;margin-bottom:8px"><button type="button" data-g="off">Off</button><button type="button" data-g="move">Move</button><button type="button" data-g="rotate">Rotate</button><button type="button" data-g="scale">Scale</button></div>
       <div class="slider"><label for="legX">Move back → front</label><output id="legXOut"></output><input id="legX" type="range" min="-0.6" max="0.6" step="0.005" value="-0.11"></div>
@@ -462,7 +464,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1.54, legThick: 1, toeSize: 0.55, toeSpread: 20, legHip: 0, legKnee: 0, legAnkle: 0, legSplay: 4, legX: -0.11, legY: 0.14, legZ: -0.07, legRX: -4, legRY: -17, legRZ: 0, legPose: '{"shin":{"p":[0.009,0.056,0],"r":[4,0,-33],"s":1},"foot":{"p":[-0.068,0.045,0.008],"r":[-8,12,3],"s":0.656},"toe1":{"p":[-0.027,-0.017,-0.027],"r":[0,0,33],"s":1.11},"toe2":{"p":[0,0,0],"r":[0,0,35],"s":1.265},"toe3":{"p":[-0.04,-0.029,-0.006],"r":[0,0,36],"s":1.332}}' };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1.54, legThick: 1, toeSize: 0.55, toeSpread: 20, legHip: 0, legKnee: 0, legAnkle: 0, legSplay: 4, legX: -0.11, legY: 0.14, legZ: -0.07, legRX: -4, legRY: -17, legRZ: 0, stance: 'biped', hindLeg: '{}', frontLeg: '{}', legPose: '{"shin":{"p":[0.009,0.056,0],"r":[4,0,-33],"s":1},"foot":{"p":[-0.068,0.045,0.008],"r":[-8,12,3],"s":0.656},"toe1":{"p":[-0.027,-0.017,-0.027],"r":[0,0,33],"s":1.11},"toe2":{"p":[0,0,0],"r":[0,0,35],"s":1.265},"toe3":{"p":[-0.04,-0.029,-0.006],"r":[0,0,36],"s":1.332}}' };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -788,8 +790,8 @@ function initGeometryWorker() {
     let D=null,genes={},neckData=null,neckEnd=null,armMemo=null,reuseJoins=false;
     const joinCache=new Map();let bodyStash=null;
   `;
-  const functions=[vertexNormals,meshRayInside,meshInside,boundaryLoops,zipLoops,capCutLoop,nearestIndex,fuseHeadData,smoothCollar,joinParts,computeNeck,jointCentre,placePiece,mirrorZ,buildArm,buildLeg,sweepTail,computeBody];
-  const source=math+'const BODY_KEYS='+JSON.stringify([...NECK_GENES,...BODY_GENES])+';const smooth='+smooth.toString()+';const LEG_PARTS='+JSON.stringify(LEG_PARTS)+';const m4={trs:'+m4.trs.toString()+',mul:'+m4.mul.toString()+',xf:'+m4.xf.toString()+'};const HAND_POSE='+JSON.stringify(HAND_POSE)+';const withInside='+withInside.toString()+';'+functions.map(f=>f.toString()).join('\n')+`
+  const functions=[vertexNormals,meshRayInside,meshInside,boundaryLoops,zipLoops,capCutLoop,nearestIndex,fuseHeadData,smoothCollar,joinParts,computeNeck,jointCentre,placePiece,mirrorZ,buildArm,buildLeg,legSettings,sweepTail,computeBody];
+  const source=math+'const BODY_KEYS='+JSON.stringify([...NECK_GENES,...BODY_GENES])+';const smooth='+smooth.toString()+';const LEG_PARTS='+JSON.stringify(LEG_PARTS)+';const LEG_DEFAULT='+JSON.stringify(LEG_DEFAULT)+';const m4={trs:'+m4.trs.toString()+',mul:'+m4.mul.toString()+',xf:'+m4.xf.toString()+'};const HAND_POSE='+JSON.stringify(HAND_POSE)+';const withInside='+withInside.toString()+';'+functions.map(f=>f.toString()).join('\n')+`
     function transfers(value,out=new Set()) {if(ArrayBuffer.isView(value))out.add(value.buffer);else if(value && typeof value==='object')for(const v of Object.values(value))transfers(v,out);return out;}
     onmessage=e=>{
       const q=e.data;if(q.type==='init'){D=q.D;return;}
@@ -823,7 +825,7 @@ function initGeometryWorker() {
     pumpGeometryWorker();
   };
   geometryWorker.onerror=e=>{workerStats.error=e.message;workerBusy=false;queuedGeometry=null;geometryWorker.terminate();geometryWorker=null;$('fuseOut').textContent='Live welded seams active; background refinement unavailable.';};
-  geometryWorker.postMessage({type:'init',D:{P:D.P,I:D.I,body:D.body,neckSeg:D.neckSeg,arm:D.arm,leg:D.leg,crest:D.crest,eyes:D.eyes}});
+  geometryWorker.postMessage({type:'init',D:{P:D.P,I:D.I,body:D.body,neckSeg:D.neckSeg,arm:D.arm,leg:D.leg,quad:D.quad,crest:D.crest,eyes:D.eyes}});
   URL.revokeObjectURL(url);
 }
 function scheduleGeometryRefinement() {
@@ -1029,7 +1031,7 @@ function computeNeck(pos) {
   return { data, end };
 }
 const NECK_GENES = ['cranium','height','jawDepth','width','boost','neckLen','neckAngle','neckCurve','neckThick','neckFlare','neckRings'];
-const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay','legX','legY','legZ','legRX','legRY','legRZ','legPose'];
+const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay','legX','legY','legZ','legRX','legRY','legRZ','legPose','stance','hindLeg','frontLeg'];
 const geometryKey = ids => ids.map(id => genes[id]).join(',');
 let neckKey = '', bodyKey = '';
 function placeNeck() {
@@ -1264,9 +1266,10 @@ function buildSkeleton(skel) {
 // weights: head vertices keep skull/jaw; every other vertex goes to its two nearest bones of its own part, blended so joints
 // bend smoothly. On the body the distance is in units of each bone's radius, so chest skin stays on the spine next to the arm
 // each part only sees its own bones plus the ones it meets at its seam (so a fingertip never reaches for the spine)
-const RIG_ALLOW = { body: n => /^(pelvis|chest|neck1|tail1|upperArm_.|thigh_.)$/.test(n), neck: n => /^(chest|neck\d+)$/.test(n), tail: n => /^(pelvis|tail\d+)$/.test(n),
+const RIG_ALLOW = { body: n => /^(pelvis|chest|neck1|tail1|upperArm_.|thigh_.|fthigh_.)$/.test(n), neck: n => /^(chest|neck\d+)$/.test(n), tail: n => /^(pelvis|tail\d+)$/.test(n),
   arm_L: n => /^(upperArm|foreArm|hand|finger\d)_L$/.test(n), arm_R: n => /^(upperArm|foreArm|hand|finger\d)_R$/.test(n),
-  leg_L: n => /^(thigh|shin|foot|toe\d)_L$/.test(n), leg_R: n => /^(thigh|shin|foot|toe\d)_R$/.test(n) };
+  leg_L: n => /^(thigh|shin|foot|toe\d)_L$/.test(n), leg_R: n => /^(thigh|shin|foot|toe\d)_R$/.test(n),
+  fleg_L: n => /^f(thigh|shin|foot)_L$/.test(n), fleg_R: n => /^f(thigh|shin|foot)_R$/.test(n) };
 function rigWeights(P, nh, jw, skel, groups) {
   const nv = P.length / 3, bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
   for (let v = 0; v < nh; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw[v]; bw[v*4+1] = jw[v]; }
@@ -1392,12 +1395,12 @@ const m4 = {
 // leg pieces form a hierarchy: thigh -> shin -> foot -> toes. Each piece's pose (genes.legPose: move/turn/scale about its
 // own joint) carries everything below it, and every piece can still be posed on its own
 const LEG_PARTS = [['thigh', null], ['shin', 'thigh'], ['foot', 'shin'], ['toe1', 'foot'], ['toe2', 'foot'], ['toe3', 'foot']];
-function buildLeg(hip, f, u, depth) {
-  const K = D.leg; if (!K) return null;
-  const s = genes.legSize * depth * 1.1 / 0.75, th = genes.legThick, rad = Math.PI / 180, OV = 0.86;   // the sheet leg stands 0.75 tall: hip height ~1.1 body depths
+function buildLeg(hip, f, u, depth, K, g) {   // K: leg kit (biped: thigh/shin/foot/toe, quadruped: thigh/shin/foot); g: that leg pair's settings
+  if (!K) return null;
+  const s = g.size * depth * 1.1 / (K.toe ? 0.75 : 1.0), th = g.thick, rad = Math.PI / 180, OV = 0.86;   // the sheet leg stands 0.75 tall: hip height ~1.1 body depths
   const cross = (a, b) => [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
   const frame = (a, spl) => { const c = Math.cos(spl), dx = [(Math.cos(a) * f[0] + Math.sin(a) * u[0]) * c, (Math.cos(a) * f[1] + Math.sin(a) * u[1]) * c, Math.sin(spl)], dy = [-Math.sin(a) * f[0] + Math.cos(a) * u[0], -Math.sin(a) * f[1] + Math.cos(a) * u[1], 0]; return [dx, dy, cross(dx, dy)]; };
-  const sp = genes.legSplay * rad, a1 = (K.thigh.ang + genes.legHip) * rad, a2 = a1 + (K.shin.ang - K.thigh.ang + genes.legKnee) * rad, a3 = a2 + (K.foot.ang - K.shin.ang + genes.legAnkle) * rad;
+  const sp = g.splay * rad, a1 = (K.thigh.ang + g.hip) * rad, a2 = a1 + (K.shin.ang - K.thigh.ang + g.knee) * rad, a3 = a2 + (K.foot.ang - K.shin.ang + g.ankle) * rad;
   const end = (o, d, L) => [0, 1, 2].map(i => o[i] + d[i] * L);
   // each joint: the far piece's end centre (its real cross-section centre, not its axis) meets the next piece's end centre
   const joint = (o, Fa, Pa, Fb, Pb) => { const ca = jointCentre(Pa, OV), cb = jointCentre(Pb, 0.04);
@@ -1407,13 +1410,13 @@ function buildLeg(hip, f, u, depth) {
     shin: { c: knee, m: placePiece(K.shin, knee, ...F2, s, th), b: ankle, ra: K.shin.rad * s * th, rb: K.shin.rad * s * th },
     foot: { c: ankle, m: placePiece(K.foot, ankle, ...F3, s, th), b: ball, ra: K.foot.rad * s * th, rb: K.foot.rad * s * th } };
   // toes: three, fanned about the ball of the foot, rooted a little inside the foot
-  const a4 = a3 + (K.toe.ang - K.foot.ang) * rad, ts = s * genes.toeSize, side = F3[2];
-  [-1, 0, 1].forEach((k, i) => { const o = [0, 1, 2].map(j => ball[j] + side[j] * k * K.foot.rad * s * th * 0.55), Ft = frame(a4, sp * 0.5 + k * genes.toeSpread * rad);
+  const a4 = K.toe ? a3 + (K.toe.ang - K.foot.ang) * rad : 0, ts = s * g.toeSize, side = F3[2];
+  if (K.toe) [-1, 0, 1].forEach((k, i) => { const o = [0, 1, 2].map(j => ball[j] + side[j] * k * K.foot.rad * s * th * 0.55), Ft = frame(a4, sp * 0.5 + k * g.toeSpread * rad);
     parts['toe' + (i + 1)] = { c: o, m: placePiece(K.toe, o, ...Ft, ts, 1), b: end(o, Ft[0], K.toe.len * ts), ra: K.toe.rad * ts, rb: K.toe.rad * ts * 0.5 }; });
   // whole-leg placement (turned about the hip, then moved), then each piece's own pose about its joint, parent first
-  const pose = JSON.parse(genes.legPose || '{}'), root = m4.mul(m4.trs([hip[0] + genes.legX, hip[1] + genes.legY, hip[2] + genes.legZ], [genes.legRX, genes.legRY, genes.legRZ], 1), m4.trs([-hip[0], -hip[1], -hip[2]], [0, 0, 0], 1));
+  const pose = (g.pose || {}), root = m4.mul(m4.trs([hip[0] + g.x, hip[1] + g.y, hip[2] + g.z], [g.rx, g.ry, g.rz], 1), m4.trs([-hip[0], -hip[1], -hip[2]], [0, 0, 0], 1));
   const W = {}, rig = [], bones = [];
-  for (const [name, par] of LEG_PARTS) {
+  for (const [name, par] of LEG_PARTS) { if (!parts[name]) continue;
     const q = parts[name], P = pose[name] || {}, pc0 = par ? parts[par].c : hip, t = P.p || [0, 0, 0];
     const L = m4.trs([q.c[0] - pc0[0] + t[0], q.c[1] - pc0[1] + t[1], q.c[2] - pc0[2] + t[2]], P.r || [0, 0, 0], P.s || 1);
     W[name] = m4.mul(par ? W[par] : m4.mul(root, m4.trs(hip, [0, 0, 0], 1)), L);
@@ -1423,9 +1426,16 @@ function buildLeg(hip, f, u, depth) {
     rig.push({ name, parent: par, c: q.c, W: W[name] });
   }
   let A = withInside(parts.thigh.m);
-  ['shin', 'foot', 'toe1', 'toe2', 'toe3'].forEach((name, i) => { const J = joinParts(A.PP, A.I, withInside(parts[name].m), i < 2 ? K.shin.rad * s * th : K.toe.rad * ts, 'leg-' + name); A = withInside({ PP: J.P, I: J.I }); });
+  ['shin', 'foot', 'toe1', 'toe2', 'toe3'].forEach((name, i) => { if (!parts[name]) return; const J = joinParts(A.PP, A.I, withInside(parts[name].m), i < 2 ? K.shin.rad * s * th : K.toe.rad * ts, 'leg-' + name); A = withInside({ PP: J.P, I: J.I }); });
   A.r = K.thigh.rad * s * th; A.bones = bones; A.rig = { hip, root, parts: rig };
   return A;
+}
+// settings for one leg pair: the biped pair lives in the leg genes; the quadruped hind and front pairs in JSON genes
+const LEG_DEFAULT = { size: 1.3, thick: 1, hip: 0, knee: 0, ankle: 0, splay: 4, x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, toeSize: 0.55, toeSpread: 20, pose: {} };
+function legSettings(which) {
+  if (which === 'biped') return { size: genes.legSize, thick: genes.legThick, hip: genes.legHip, knee: genes.legKnee, ankle: genes.legAnkle, splay: genes.legSplay, x: genes.legX, y: genes.legY, z: genes.legZ,
+    rx: genes.legRX, ry: genes.legRY, rz: genes.legRZ, toeSize: genes.toeSize, toeSpread: genes.toeSpread, pose: JSON.parse(genes.legPose || '{}') };
+  return { ...LEG_DEFAULT, ...JSON.parse(genes[which === 'front' ? 'frontLeg' : 'hindLeg'] || '{}') };
 }
 function computeBody() {
   if (!D.body || !neckEnd) return;
@@ -1467,17 +1477,24 @@ function computeBody() {
     const ball = D.arm ? D.arm.upper.rad * genes.armSize * sc * genes.armThick : 0;
     const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zs * sc * genes.bodyWidth - 0.5 * ball];
     const A = buildArm(sh, [c, s2], [-s2, c], sc);
-    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? 'arm_L' : 'arm_R' }); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side);
+    if (A && genes.stance !== 'quad') for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? 'arm_L' : 'arm_R' }); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side);
       for (const b of part.bones) skel.push({ ...b, name: b.name + (side > 0 ? '_L' : '_R'), parent: b.parent === 'chest' ? 'chest' : b.parent + (side > 0 ? '_L' : '_R') }); } }
   { // hips: low on the side of the body just ahead of the tail, the thigh sunk well into the flank
     const xh = xmin0 + 0.4 * bl, yh = ylo + 0.4 * (yhi - ylo); let zh = 0;
     for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xh) < 0.02 && Math.abs(P0b[v*3+1] - yh) < 0.03) zh = Math.max(zh, Math.abs(P0b[v*3+2]));
     const rx = (xh - ax) * sc, ry = (yh - ay) * sc * genes.bodyHeight, depth = (yhi - ylo) * sc * genes.bodyHeight;
     const hip = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zh * sc * genes.bodyWidth * 0.7];
-    const L = buildLeg(hip, [c, s2], [-s2, c], depth); groups.legHip = hip; groups.legRig = L && L.rig;
-    if (L) for (const side of [1, -1]) { const part = side > 0 ? L : mirrorZ(L), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? 'leg_L' : 'leg_R' }); J = joinParts(J.P, J.I, part, L.r, 'body-leg-' + side);
-      for (const b of part.bones) skel.push({ ...b, name: b.name + (side > 0 ? '_L' : '_R'), parent: b.parent === 'pelvis' ? 'pelvis' : b.parent + (side > 0 ? '_L' : '_R') }); } }
-  J.skel = skel; J.groups = groups; J.legHip = groups.legHip; J.legRig = groups.legRig;
+    // front legs (quadrupeds): at the shoulder, on the chest's side wall low down, in place of the arms
+    const xf = xmin0 + 0.74 * bl, yf = ylo + 0.4 * (yhi - ylo); let zf = 0;
+    for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xf) < 0.02 && Math.abs(P0b[v*3+1] - yf) < 0.03) zf = Math.max(zf, Math.abs(P0b[v*3+2]));
+    const fx = (xf - ax) * sc, fy = (yf - ay) * sc * genes.bodyHeight, shoulder = [tx + fx * c - fy * s2, ty + fx * s2 + fy * c, zf * sc * genes.bodyWidth * 0.7];
+    const pairs = genes.stance === 'quad' ? [['hind', hip, D.quad, 'pelvis', ''], ['front', shoulder, D.quad, 'chest', 'f']] : [['biped', hip, D.leg, 'pelvis', '']];
+    groups.legRig = {};
+    for (const [which, at, kit, root, pre] of pairs) {
+      const L = buildLeg(at, [c, s2], [-s2, c], depth, kit, legSettings(which)); if (!L) continue; L.rig.which = which; groups.legRig[which] = L.rig;
+      for (const side of [1, -1]) { const part = side > 0 ? L : mirrorZ(L), s0 = J.P.length / 3, sd = side > 0 ? '_L' : '_R'; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: pre + 'leg' + sd }); J = joinParts(J.P, J.I, part, L.r, 'body-' + which + '-leg-' + side);
+        for (const b of part.bones) skel.push({ ...b, name: pre + b.name + sd, parent: b.parent === 'pelvis' ? root : pre + b.parent + sd }); } } }
+  J.skel = skel; J.groups = groups; J.legRig = groups.legRig;
   J.breathFrame = { tx, ty, c, s: s2, ax, ay, sc, h: genes.bodyHeight, xmin0, bl, ylo, yhi };   // body frame -> animal, for the breathing sphere
   return J;
 }
@@ -1865,26 +1882,31 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   sync(); el.addEventListener('input', () => { sync(); requestRebuild(); });
 }
 { const keys = ['legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay','legX','legY','legZ','legRX','legRY','legRZ'];
-  $('legCopy').onclick = () => { const t = JSON.stringify({ ...Object.fromEntries(keys.map(k => [k, genes[k]])), legPose: JSON.parse(genes.legPose || '{}') }); $('legOut').value = t; $('legOut').select(); try { navigator.clipboard.writeText(t); } catch (e) {} }; }
+  $('legCopy').onclick = () => { const t = JSON.stringify({ ...Object.fromEntries(keys.map(k => [k, genes[k]])), legPose: JSON.parse(genes.legPose || '{}'), stance: genes.stance, hindLeg: JSON.parse(genes.hindLeg || '{}'), frontLeg: JSON.parse(genes.frontLeg || '{}') }); $('legOut').value = t; $('legOut').select(); try { navigator.clipboard.writeText(t); } catch (e) {} }; }
 // leg gizmo: pick a part (whole leg, thigh, shin, foot, a toe) and move / turn / scale it about its joint. Posing a part
 // carries everything below it; the right leg mirrors the left
 { let gz = null, layer = null, mode = 'off', part = 'leg'; const handle = new pc.Entity('legHandle'), M = new pc.Mat4();
-  const rigOf = () => bodyJ && bodyJ.legRig, info = name => rigOf().parts.find(q => q.name === name);
+  let pair = 'hind'; const key = () => genes.stance === 'quad' ? pair : 'biped';
+  const rigOf = () => bodyJ && bodyJ.legRig && bodyJ.legRig[key()], info = name => rigOf().parts.find(q => q.name === name);
   const parentW = q => q.parent ? info(q.parent).W : m4.mul(rigOf().root, m4.trs(rigOf().hip, [0, 0, 0], 1));
   const syncHandle = () => { const R = rigOf(); if (!R || !head) return false; if (handle.parent !== head) head.addChild(handle);
-    if (part === 'leg') { const h = R.hip; handle.setLocalPosition(h[0] + genes.legX, h[1] + genes.legY, h[2] + genes.legZ); handle.setLocalEulerAngles(genes.legRX, genes.legRY, genes.legRZ); handle.setLocalScale(genes.legSize, genes.legSize, genes.legSize); }
+    if (!info(part === 'leg' ? 'thigh' : part)) return false;
+    if (part === 'leg') { const h = R.hip, g = legSettings(key()); handle.setLocalPosition(h[0] + g.x, h[1] + g.y, h[2] + g.z); handle.setLocalEulerAngles(g.rx, g.ry, g.rz); handle.setLocalScale(g.size, g.size, g.size); }
     else { M.data.set(info(part).W); const t = M.getTranslation(), r = M.getEulerAngles(), k = M.getScale(); handle.setLocalPosition(t); handle.setLocalEulerAngles(r); handle.setLocalScale(k); }
     return true; };
   const setGene = (id, v) => { genes[id] = v; const el = $(id); el.value = v; el.dispatchEvent(new Event('input')); };
   const q3 = x => Math.round(x * 1000) / 1000;
   const apply = () => {
+    const quadKey = genes.stance === 'quad' ? (pair === 'front' ? 'frontLeg' : 'hindLeg') : null, cfg = quadKey ? JSON.parse(genes[quadKey] || '{}') : null;
     if (part === 'leg') { const h = rigOf().hip, p = handle.getLocalPosition(), r = handle.getLocalEulerAngles(), k = handle.getLocalScale().x;
-      for (const [id, v] of [['legX', q3(p.x - h[0])], ['legY', q3(p.y - h[1])], ['legZ', q3(p.z - h[2])], ['legRX', Math.round(r.x)], ['legRY', Math.round(r.y)], ['legRZ', Math.round(r.z)], ['legSize', q3(k)]]) setGene(id, v); }
+      const vals = { x: q3(p.x - h[0]), y: q3(p.y - h[1]), z: q3(p.z - h[2]), rx: Math.round(r.x), ry: Math.round(r.y), rz: Math.round(r.z), size: q3(k) };
+      if (cfg) genes[quadKey] = JSON.stringify({ ...cfg, ...vals });
+      else for (const [id, v] of [['legX', vals.x], ['legY', vals.y], ['legZ', vals.z], ['legRX', vals.rx], ['legRY', vals.ry], ['legRZ', vals.rz], ['legSize', vals.size]]) setGene(id, v); }
     else {   // local pose = inverse(parent) x handle, less the rest offset of this joint from its parent's
       const q = info(part), P = new pc.Mat4(); P.data.set(parentW(q)); P.invert(); const L = new pc.Mat4().mul2(P, handle.getLocalTransform());
-      const c0 = q.parent ? info(q.parent).c : rigOf().hip, t = L.getTranslation(), r = L.getEulerAngles(), pose = JSON.parse(genes.legPose || '{}');
+      const c0 = q.parent ? info(q.parent).c : rigOf().hip, t = L.getTranslation(), r = L.getEulerAngles(), pose = cfg ? (cfg.pose || {}) : JSON.parse(genes.legPose || '{}');
       pose[part] = { p: [q3(t.x - (q.c[0] - c0[0])), q3(t.y - (q.c[1] - c0[1])), q3(t.z - (q.c[2] - c0[2]))], r: [Math.round(r.x), Math.round(r.y), Math.round(r.z)], s: q3(L.getScale().x) };
-      genes.legPose = JSON.stringify(pose); }
+      if (cfg) genes[quadKey] = JSON.stringify({ ...cfg, pose }); else genes.legPose = JSON.stringify(pose); }
     rebuild(); };
   const show = () => {
     if (gz) { gz.detach(); gz.destroy(); gz = null; }
@@ -1897,7 +1919,9 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
     gz.on('transform:end', () => { gizmoBusy = false; apply(); syncHandle(); });
   };
   const mark = () => { document.querySelectorAll('#legPart button').forEach(b => b.style.outline = b.dataset.p === part ? '2px solid currentColor' : ''); document.querySelectorAll('#legGizmo button').forEach(b => b.style.outline = b.dataset.g === mode ? '2px solid currentColor' : ''); };
-  window.__legGizmo = (m, p) => { if (m) mode = m; if (p) part = p; mark(); show(); };
+  window.__legGizmo = (m, p, pr) => { if (m) mode = m; if (p) part = p; if (pr) pair = pr; mark(); show(); };
+  document.querySelectorAll('#legPair button').forEach(b => b.onclick = () => { window.__legGizmo(null, null, b.dataset.pair); document.querySelectorAll('#legPair button').forEach(x => x.style.outline = x === b ? '2px solid currentColor' : ''); });
+  $('stance').onchange = e => { genes.stance = e.target.value; $('legPair').hidden = genes.stance !== 'quad'; rebuild(); window.__legGizmo(); };
   window.__legHandle = handle; window.__legApply = apply;
   document.querySelectorAll('#legGizmo button').forEach(b => b.onclick = () => window.__legGizmo(b.dataset.g));
   document.querySelectorAll('#legPart button').forEach(b => b.onclick = () => window.__legGizmo(null, b.dataset.p)); mark(); }
@@ -1976,8 +2000,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); requestRebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json()), fetch('leg.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm, leg]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.leg = leg.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json()), fetch('leg.json').then(r => r.json()), fetch('quad.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm, leg, quad]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.leg = leg.parts; data.quad = quad.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { bones, setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; }, get performanceStats() { return { worker:workerStats, uploads:window.__uploads, normals:window.__localNormals, seams:Array.from(joinCache,([key,C])=>({key,vertices:C.sel?C.sel.length:0})) }; }, get creature() { return creatureData; } };
 })();
