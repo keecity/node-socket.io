@@ -82,6 +82,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <p class="note" id="fuseOut" aria-live="polite"></p>
     </section>
     <section>
+      <h2>Body DNA</h2>
+      <div class="slider"><label for="bodyA">Body A</label><output id="bodyAOut"></output><input id="bodyA" type="range" min="0" max="1" step="0.01" value="0"></div>
+      <div class="slider"><label for="bodyB">Body B</label><output id="bodyBOut"></output><input id="bodyB" type="range" min="0" max="1" step="0.01" value="1"></div>
+      <div class="slider"><label for="bodyC">Body C</label><output id="bodyCOut"></output><input id="bodyC" type="range" min="0" max="1" step="0.01" value="0"></div>
+      <div class="slider"><label for="bodySize">Body size</label><output id="bodySizeOut"></output><input id="bodySize" type="range" min="1" max="4" step="0.05" value="2.2"></div>
+      <div class="slider"><label for="bodyBoost">Body feature strength</label><output id="bodyBoostOut"></output><input id="bodyBoost" type="range" min="0" max="1.6" step="0.05" value="1"></div>
+    </section>
+    <section>
       <h2>Neck</h2>
       <div class="slider"><label for="neckLen">Length</label><output id="neckLenOut"></output><input id="neckLen" type="range" min="0.15" max="1.2" step="0.01" value="0.45"></div>
       <div class="slider"><label for="neckAngle">Angle</label><output id="neckAngleOut"></output><input id="neckAngle" type="range" min="-60" max="60" step="1" value="-15"></div>
@@ -161,6 +169,16 @@ const V3 = pc.Vec3, clamp = pc.math.clamp;
 const SPECIES_COLORS = ['#b4562f', '#2f7d5b', '#3f6fb0', '#8a5a2b', '#a33b3b', '#4f7f2e', '#7a4ca0', '#c0772a', '#2e7f86', '#6b6b2a', '#9a4f6e', '#3d6b4f'];
 
 // ---------- GLB loader (positions, morph targets, 3 UV sets, skin, embedded atlas) ----------
+// body GLB: base positions, indices, one morph target per body sculpt
+async function loadBodyGlb(url) {
+  let buf;
+  try { const r = await fetch(url); if (!r.ok) throw 0; buf = await r.arrayBuffer(); }
+  catch { const t = (await (await fetch(url.replace(/\.glb$/, '.b64.txt'))).text()).trim(); buf = Uint8Array.from(atob(t), c => c.charCodeAt(0)).buffer; }
+  const dv = new DataView(buf), jl = dv.getUint32(12, true), g = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl))), bin = 20 + jl + 8;
+  const acc = i => { const a = g.accessors[i], v = g.bufferViews[a.bufferView], n = { SCALAR: 1, VEC3: 3 }[a.type] * a.count, T = { 5126: Float32Array, 5125: Uint32Array }[a.componentType]; return new T(buf.slice(bin + (v.byteOffset || 0), bin + (v.byteOffset || 0) + n * T.BYTES_PER_ELEMENT)); };
+  const pr = g.meshes[0].primitives[0];
+  return { P: acc(pr.attributes.POSITION), I: acc(pr.indices), D: pr.targets.map(t => acc(t.POSITION)) };
+}
 async function loadGlb(url) {
   let buf;
   try { const r = await fetch(url); if (!r.ok) throw 0; buf = await r.arrayBuffer(); }
@@ -392,7 +410,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.45, neckAngle: -15, neckCurve: 18, neckThick: 1, neckFlare: 1.5, neckRings: 1.5 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.45, neckAngle: -15, neckCurve: 18, neckThick: 1, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 2.2, bodyBoost: 1 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -436,7 +454,7 @@ function build(data) {
   const si = new pc.SkinInstance(skin); si.bones = [bones.skull, bones.jaw]; si.rootBone = head;
   const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; headMI = mi; baseMesh = mesh;
   head.addComponent('render', { meshInstances: [mi] });
-  buildEyes(dev); buildLids(dev); buildCrest(dev); buildTeeth(dev); buildTongue(); buildNeck();
+  buildEyes(dev); buildLids(dev); buildCrest(dev); buildTeeth(dev); buildTongue(); buildNeck(); buildBody();
   rebuild();
 }
 
@@ -480,7 +498,7 @@ function rebuild() {
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
   setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
   if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
-  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck();
+  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck(); placeBody();
   clearTimeout(fuseTimer);
   if (pre && !blinking) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
   else $('fuseOut').textContent = '';
@@ -990,7 +1008,7 @@ function placeTeeth(w, jw, reg) {
 // spline: cubic Bezier from inside the back of the head, backward at the Angle gene, bent by the S-curve gene.
 // section: an ellipse sized from the back of the head, flaring toward the base; its radius is modulated by the neck
 // segment's ring profile (repeated, mirrored, along the length). Same skin material as the head; capped ends.
-let neck = null;
+let neck = null, neckEnd = null;
 function buildNeck() { const ent = new pc.Entity('neck'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); neck = { ent, mesh: null }; }
 function placeNeck() {
   if (!neck || !D.neckSeg) return;
@@ -1044,7 +1062,35 @@ function placeNeck() {
   setSurface(m, PP, N2, new Float32Array(nv), new Float32Array(nv * 3));
   neck.ent.render.meshInstances = [new pc.MeshInstance(m, mat)];
   if (neck.mesh) neck.mesh.destroy(); neck.mesh = m;
+  neckEnd = { p: at(len), d: (() => { const a = at(len), b = at(len - 0.01); const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [(a[0] - b[0]) / l, (a[1] - b[1]) / l]; })(), r: Math.max(ry0, rz0) * genes.neckFlare };
   window.__neck = { len, ry0, rz0, nv, P: PP, N: N2, I, mesh: neck.mesh, ent: neck.ent };
+}
+// ---------- body: shared base body, blended per vertex by the body DNA (like the head), at the end of the neck ----------
+// body frame: x forward (the neck end), y up, z the mirror plane. The neck's end sits inside the front of the body.
+let body = null;
+function buildBody() { const ent = new pc.Entity('body'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); body = { ent, mesh: null }; }
+function placeBody() {
+  if (!body || !D.body || !neckEnd) return;
+  const B = D.body, n = B.P.length / 3, wsum = (genes.bodyA + genes.bodyB + genes.bodyC) || 1, w = [genes.bodyA / wsum, genes.bodyB / wsum, genes.bodyC / wsum];
+  const P = new Float32Array(n * 3), sc = genes.bodySize, k = genes.bodyBoost;
+  for (let v = 0; v < n * 3; v++) { let d = 0; for (let t = 0; t < 3; t++) if (w[t]) d += w[t] * B.D[t][v]; P[v] = B.P[v] + d * k; }
+  // anchor on the body: near its front, in the upper part of the chest
+  let xmax = -Infinity, ylo = Infinity, yhi = -Infinity;
+  for (let v = 0; v < n; v++) { xmax = Math.max(xmax, P[v*3]); ylo = Math.min(ylo, P[v*3+1]); yhi = Math.max(yhi, P[v*3+1]); }
+  const ax = xmax - 0.08, ay = ylo + 0.62 * (yhi - ylo);
+  // place: scale, then turn the body so its forward axis lines up with the neck's end direction (reversed), then
+  // move the anchor onto the neck's end, pushed a little into the body
+  const dx = -neckEnd.d[0], dy = -neckEnd.d[1], ang = Math.atan2(dy, dx) * 0.35;   // follows the neck partly, stays mostly level
+  const c = Math.cos(ang), s2 = Math.sin(ang);
+  const tx = neckEnd.p[0] + neckEnd.d[0] * 0.25 * neckEnd.r, ty = neckEnd.p[1] + neckEnd.d[1] * 0.25 * neckEnd.r;
+  for (let v = 0; v < n; v++) {
+    const x = (P[v*3] - ax) * sc, y = (P[v*3+1] - ay) * sc;
+    P[v*3] = tx + x * c - y * s2; P[v*3+1] = ty + x * s2 + y * c; P[v*3+2] *= sc;
+  }
+  const N = vertexNormals(P, B.I), m = new pc.Mesh(app.graphicsDevice); m.setIndices(n > 65535 ? B.I : Uint16Array.from(B.I));
+  setSurface(m, P, N, new Float32Array(n), new Float32Array(n * 3));
+  body.ent.render.meshInstances = [new pc.MeshInstance(m, mat)];
+  if (body.mesh) body.mesh.destroy(); body.mesh = m;
 }
 // ---------- tongue: a tapered, rounded rectangle swept along a spline on the floor of the lower jaw ----------
 const tongueMat = new pc.StandardMaterial();
@@ -1365,7 +1411,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
 }
@@ -1384,8 +1430,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb')]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
