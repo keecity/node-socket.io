@@ -894,6 +894,16 @@ function gumLine(pos, jw, reg, lower) {
   L = L.map((p, i) => [0, 1, 2, 3].map(a => { let s = 0, c = 0; for (let d = -1; d <= 1; d++) { const q = L[i + d]; if (q) { s += q[a]; c++; } } return s / c; }));
   return L;
 }
+// is a rest-pose point inside the head? (nearest vertex + its normal, on a spatial hash; built per rebuild)
+function insideTest() {
+  const n = pos.length / 3, cell = 0.006, g = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
+  for (let v = 0; v < n; v++) { const k = key(Math.floor(pos[v*3] / cell), Math.floor(pos[v*3+1] / cell), Math.floor(pos[v*3+2] / cell)); if (!g.has(k)) g.set(k, []); g.get(k).push(v); }
+  return (x, y, z) => {
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell); let best = -1, bd = 1e9;
+    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const l = g.get(key(cx + dx, cy + dy, cz + dz)); if (!l) continue; for (const u of l) { const dd = (pos[u*3]-x)**2 + (pos[u*3+1]-y)**2 + (pos[u*3+2]-z)**2; if (dd < bd) { bd = dd; best = u; } } }
+    return best >= 0 && (x - pos[best*3]) * nrm[best*3] + (y - pos[best*3+1]) * nrm[best*3+1] + (z - pos[best*3+2]) * nrm[best*3+2] < 0;
+  };
+}
 function placeTeeth(w, jw, reg) {
   if (!D.teeth) return;
   const carn = w.reduce((s, x, i) => s + x * CARNIVORE[i], 0);
@@ -901,6 +911,7 @@ function placeTeeth(w, jw, reg) {
   w.forEach((x, i) => { if (x <= 0) return; const T = D.teeth.targets[SPECIES_TOOTH[i]].pos; for (let k = 0; k < TP.length; k++) TP[k] += x * T[k]; });
   const g = w.reduce((s, x, i) => s + x * D.gapes[i], 0) * Math.PI / 180, N = genes.toothCount;
   const SINK = 0.08 + 0.27 * carn;   // sunk into the gum (gum widths): fangs deep, short molar crowns barely
+  const inside = insideTest();
   let zExt = 0; for (let v = 0; v < tn; v++) if (TP[v*3+1] > 0) zExt = Math.max(zExt, Math.abs(TP[v*3+2]), Math.abs(TP[v*3]) * 0.15);   // crown half-width
   let total = 0;
   for (const jaw of ['upper', 'lower']) {
@@ -932,6 +943,8 @@ function placeTeeth(w, jw, reg) {
       for (let a = 0; a < 3; a++) bk[a] -= du * up[a];
       const bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;
       const sd = [bk[1]*up[2] - bk[2]*up[1], bk[2]*up[0] - bk[0]*up[2], bk[0]*up[1] - bk[1]*up[0]];
+      // seat the tooth in tissue: step from the gum point into the jaw until it is inside the head, move it there
+      { let t = 0; while (t < 0.03 && !inside(p[0] - up[0] * t, p[1] - up[1] * t, p[2] - up[2] * t)) t += 0.001; if (t < 0.03) for (let a = 0; a < 3; a++) p[a] -= up[a] * t; }
       for (const sg of [1, -1]) {
         for (let v = 0; v < tn; v++) {
           const lx = TP[v*3] * sc, ly = (TP[v*3+1] - SINK) * sc, lz = TP[v*3+2] * sc;   // gum line sunk SINK into the gum
