@@ -92,7 +92,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     <section>
       <h2>Eyes</h2>
       <div class="slider"><label for="eyeSX">Socket width (x)</label><output id="eyeSXOut"></output><input id="eyeSX" type="range" min="0.5" max="1.8" step="0.01" value="0.79"></div>
-      <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.5" max="1.8" step="0.01" value="0.5"></div>
+      <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.572" max="1.8" step="0.01" value="0.572"></div>
       <div class="slider"><label for="eyeFwd">Forward / back</label><output id="eyeFwdOut"></output><input id="eyeFwd" type="range" min="-0.03" max="0.03" step="0.001" value="0.011"></div>
       <div class="slider"><label for="eyeUp">Up / down</label><output id="eyeUpOut"></output><input id="eyeUp" type="range" min="-0.03" max="0.03" step="0.001" value="-0.005"></div>
       <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="0.02" step="0.0005" value="0.008"></div>
@@ -371,7 +371,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 11, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.572, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 11, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -914,7 +914,9 @@ function placeTeeth(w, jw, reg) {
     const P = new Float32Array(tn * 3 * N * 2), I = [];
     let o = 0;
     for (let k = 0; k < N; k++) {
-      const p = at((k + 0.5) * sp), taper = 1 + carn * (0.25 - 0.55 * k / Math.max(1, N - 1));   // fangs shrink toward the back
+      // size along the row: small at the very front, largest about a fifth of the way back, tapering toward the hinge
+      const u = k / Math.max(1, N - 1), peak = u < 0.2 ? 0.6 + 0.4 * u / 0.2 : 1 - 0.5 * (u - 0.2) / 0.8;
+      const p = at((k + 0.5) * sp), taper = (1 - carn) + carn * 1.3 * peak;
       let sc = 0.8 * sp * genes.toothSize * taper;                         // gum width = 0.8 of the spacing
       // fit inside the lip: the tooth's widest point stays MARGIN inside the lip edge (half-width p[3]); centre moves
       // inward as needed (not past 40% of the half-width); if the mouth is still too narrow, the tooth shrinks
@@ -925,7 +927,8 @@ function placeTeeth(w, jw, reg) {
       const p2 = at(Math.min(len, (k + 0.5) * sp + 0.004)), p1 = at(Math.max(0, (k + 0.5) * sp - 0.004));
       // tooth frame: up (out of the gum), back (along the row, made square to up) and side = back x up. Side must
       // follow the row: a fixed left-right side collapsed the front teeth (whose row runs left-right) into flat cards
-      const bk = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]], du = bk[0]*up[0] + bk[1]*up[1] + bk[2]*up[2];
+      // the tooth curves toward the throat (the jaw's backward direction), wherever it sits on the row
+      const bk = [back[0], back[1], back[2]], du = bk[0]*up[0] + bk[1]*up[1] + bk[2]*up[2];
       for (let a = 0; a < 3; a++) bk[a] -= du * up[a];
       const bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;
       const sd = [bk[1]*up[2] - bk[2]*up[1], bk[2]*up[0] - bk[0]*up[2], bk[0]*up[1] - bk[1]*up[0]];
@@ -1255,7 +1258,7 @@ $('gumCol').addEventListener('input', e => { skinUi.gum = hex2(e.target.value); 
 $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.value); applySkin(normWeights()); });
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
-for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
+for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => (v * EYE_SIZE * 100).toFixed(1) + ' cm', true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
     ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
