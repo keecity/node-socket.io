@@ -508,6 +508,7 @@ function rebuild() {
   const reg = new Float32Array(n * 3);
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
   setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
+  if (blinking && creatureData) { placeEyes(); blinkUpdate(); applySkin(w); return; }   // blink: only the socket changes; patch it into the merged animal
   if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
   placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck(); placeBody(); mergeCreature(pos, D.I, jwv, reg);
   clearTimeout(fuseTimer);
@@ -1081,7 +1082,7 @@ function placeNeck() {
 }
 // ---------- body: shared base body, blended per vertex by the body DNA (like the head), at the end of the neck ----------
 // body frame: x forward (the neck end), y up, z the mirror plane. The neck's end sits inside the front of the body.
-let body = null, bodyJ = null, creatureMesh = null;
+let body = null, bodyJ = null, creatureMesh = null, creatureData = null;
 function buildBody() { const ent = new pc.Entity('body'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); body = { ent, mesh: null }; }
 // inside test for a closed mesh: nearest vertex (hash grid) and its normal
 function meshInside(P, N, cell) {
@@ -1172,6 +1173,19 @@ function sweepTail(P0, d0, ry0, rz0) {
 }
 // the whole animal as one skinned mesh: head (with its jaw weights and regions) + the body/neck/tail mesh, joined
 // where the neck enters the head; everything outside the head rides the skull bone
+// blink fast path: copy the head vertices the socket moved into the merged mesh, refresh its normals and surface
+function blinkUpdate() {
+  const C = creatureData, P = C.P, h0 = C.head0;
+  for (let v = 0; v < C.nh; v++) {
+    const a = v * 3;
+    if (Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) > 1e-7) { P[a] = pos[a]; P[a+1] = pos[a+1]; P[a+2] = pos[a+2]; }
+    else if (P[a] !== h0[a]) { /* collar-smoothed vertex: keep its merged position */ }
+  }
+  for (let v = 0; v < C.nh; v++) { const a = v * 3; if (Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) <= 1e-7 && C.moved && C.moved[v]) { P[a] = h0[a]; P[a+1] = h0[a+1]; P[a+2] = h0[a+2]; } }
+  C.moved = C.moved || new Uint8Array(C.nh);
+  for (let v = 0; v < C.nh; v++) { const a = v * 3; C.moved[v] = Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) > 1e-7 ? 1 : 0; }
+  setSurface(creatureMesh, P, vertexNormals(P, C.I), C.jw, C.reg);
+}
 function mergeCreature(hP, hI, jw, reg) {
   if (!bodyJ || !headMI) return;
   const part = { PP: bodyJ.P, I: bodyJ.I, inside: meshInside(bodyJ.P, vertexNormals(bodyJ.P, bodyJ.I), 0.03) };
@@ -1188,6 +1202,7 @@ function mergeCreature(hP, hI, jw, reg) {
   headMI.mesh = m; if (creatureMesh) creatureMesh.destroy(); creatureMesh = m;
   body.ent.enabled = false; neck.ent.enabled = false;
   window.__creature = { verts: nv };
+  creatureData = { P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP) };
 }
 function placeBody() {
   if (!body || !D.body || !neckEnd) return;
@@ -1519,7 +1534,7 @@ $('blink').onclick = () => blinkT = 0;
 let blinkBaseSY = null;
 function blinkSlider(c) {
   if (blinkBaseSY === null) blinkBaseSY = genes.eyeSY;
-  const el = $('eyeSY'); el.value = blinkBaseSY * (1 - BLINK_SQUASH * c); blinking = c > 0; el.dispatchEvent(new Event('input'));
+  const el = $('eyeSY'); el.value = blinkBaseSY * (1 - BLINK_SQUASH * c); blinking = true; el.dispatchEvent(new Event('input')); blinking = false;
   if (c === 0) blinkBaseSY = null;
 }
 $('snap').onclick = () => snapT = 0;
