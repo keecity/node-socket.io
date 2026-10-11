@@ -1198,6 +1198,28 @@ function carveEyes(pos, nrm) {
     pos[v*3] += n[0] * h; pos[v*3+1] += n[1] * h; pos[v*3+2] += n[2] * h * sg;
   }
 }
+// squint: during a blink the skin around each eye contracts vertically toward the eye's centre (10% at full blink)
+let shown = null, squintCache = null, squintLast = 0;
+function applySquint(c) {
+  if (!shown || !eye) return;
+  if (!squintCache) {
+    const { c: ec, b, sx, sy } = eye, R = genes.recessWidth * Math.max(sx, sy) * 1.3, P = shown.pos, idx = [], wt = [], db = [];
+    for (let v = 0; v < P.length / 3; v++) {
+      const sg = P[v*3+2] < 0 ? -1 : 1, dx = P[v*3] - ec[0], dy = P[v*3+1] - ec[1], dz = P[v*3+2] * sg - ec[2], d = Math.hypot(dx, dy, dz);
+      if (d >= R) continue;
+      idx.push(v); wt.push(0.5 + 0.5 * Math.cos(Math.PI * d / R)); db.push(dx * b[0] + dy * b[1] + dz * b[2]);
+    }
+    squintCache = { idx, wt, db, P: new Float32Array(P) };
+  }
+  if (Math.abs(c - squintLast) < 0.01 && c !== 0) return;
+  squintLast = c;
+  const { idx, wt, db, P } = squintCache, b = eye.b;
+  for (let i = 0; i < idx.length; i++) {
+    const v = idx[i], k = 0.1 * c * wt[i] * db[i], sg = shown.pos[v*3+2] < 0 ? -1 : 1;
+    P[v*3] = shown.pos[v*3] - b[0] * k; P[v*3+1] = shown.pos[v*3+1] - b[1] * k; P[v*3+2] = shown.pos[v*3+2] - b[2] * k * sg;
+  }
+  shown.m.setPositions(P); shown.m.update(pc.PRIMITIVE_TRIANGLES, false);
+}
 function setSurface(m, pos, nrm, jw, reg) {
   const n = pos.length / 3, uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), uv2 = new Float32Array(n * 2), cl = new Uint8Array(n * 4);
   for (let v = 0; v < n; v++) {
@@ -1207,6 +1229,7 @@ function setSurface(m, pos, nrm, jw, reg) {
     uv2[v*2] = reg[v*3]; uv2[v*2+1] = reg[v*3+1];
   }
   m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv0); m.setUvs(1, uv1); m.setUvs(2, uv2); m.setColors32(cl);
+  shown = { m, pos: pos.slice() }; squintCache = null;
   m.update(pc.PRIMITIVE_TRIANGLES, false);
 }
 function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; return genes.mix.map(x => x / s); }
@@ -1216,7 +1239,7 @@ let time = 0, roarT = -1, snapT = -1, blinkT = -1, blinkClock = 3;
 app.on('update', dt => {
   time += dt; updateCamera();
   if (D && view.idle && (blinkClock -= dt) < 0) { blinkT = 0; blinkClock = 2.5 + Math.random() * 4; }
-  if (blinkT >= 0) { blinkT += dt; const u = blinkT / 0.3; const c = u >= 1 ? 0 : Math.sin(Math.PI * u); if (u >= 1) blinkT = -1; if (c !== lidClose) { lidClose = c; updateLids(); for (const e of eyeballs) if (e.base) e.ent.setLocalScale(e.base[0], e.base[1] * (1 - 0.1 * c), e.base[2]); } }   // eye 10% shorter at full blink
+  if (blinkT >= 0) { blinkT += dt; const u = blinkT / 0.3; const c = u >= 1 ? 0 : Math.sin(Math.PI * u); if (u >= 1) blinkT = -1; if (c !== lidClose) { lidClose = c; updateLids(); for (const e of eyeballs) if (e.base) e.ent.setLocalScale(e.base[0], e.base[1] * (1 - 0.1 * c), e.base[2]); applySquint(c); } }   // eye and the skin around it 10% shorter at full blink
   if (!D) return;
   const w = normWeights(), sculpted = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
   let open = genes.gape, shake = 0, lift = 0;
@@ -1296,6 +1319,6 @@ resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' }))]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
+window.__dino = { setBlink: c => { lidClose = c; updateLids(); for (const e of eyeballs) if (e.base) e.ent.setLocalScale(e.base[0], e.base[1] * (1 - 0.1 * c), e.base[2]); applySquint(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
 </script>
