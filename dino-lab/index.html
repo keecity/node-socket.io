@@ -300,7 +300,7 @@ canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.client
 let gizmoBusy = false;
 canvas.addEventListener('pointermove', e => { if (!drag || gizmoBusy) return; orbit.yaw -= (e.clientX - drag.x) * 0.4; orbit.pitch = clamp(orbit.pitch - (e.clientY - drag.y) * 0.3, -80, 80); drag = { x: e.clientX, y: e.clientY }; });
 canvas.addEventListener('pointerup', () => drag = null);
-canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = clamp(orbit.dist * (1 + e.deltaY * 0.001), 0.4, 30);   // out to a theme-park overview }, { passive: false });
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = clamp(orbit.dist * (1 + e.deltaY * 0.001), 0.4, 30); }, { passive: false });
 function updateCamera() {
   const y = orbit.yaw * pc.math.DEG_TO_RAD, p = orbit.pitch * pc.math.DEG_TO_RAD;
   camera.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist);
@@ -1304,6 +1304,7 @@ function mergeCreature(hP, hI, jw, reg) {
   body.ent.enabled = false; neck.ent.enabled = false;
   window.__creature = { verts: nv };
   if (!same) headMI.skinInstance = skelInstance;
+  setTimeout(placeGround, 0);
   creatureData = { skel: bodyJ.skel, P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP), frame: bodyJ.breathFrame };
 }
 // ---------- arms: upper arm, forearm, hand and 2-4 fingers chained from the shoulder, each sunk into the one before ----------
@@ -2052,6 +2053,30 @@ for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) requestRebuild(); else applySkin(normWeights()); });
 }
 $('idle').onchange = e => view.idle = e.target.checked;
+// ---------- ground: a large plane with a generated grass-and-dirt texture, kept under the feet ----------
+const ground = (() => {
+  const N = 512, cv = document.createElement('canvas'); cv.width = cv.height = N; const g = cv.getContext('2d'), img = g.createImageData(N, N);
+  const hash = (x, y) => { const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); };
+  const vnoise = (x, y, p) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, w = (a) => ((a % p) + p) % p, sm = t => t * t * (3 - 2 * t);
+    const a = hash(w(xi), w(yi)), b = hash(w(xi + 1), w(yi)), c = hash(w(xi), w(yi + 1)), d = hash(w(xi + 1), w(yi + 1)), u = sm(xf), v = sm(yf);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const u = x / N, v = y / N, f = (s, o) => vnoise(u * s, v * s, s);
+    const patch = 0.55 * f(4) + 0.3 * f(8) + 0.15 * f(16), dirt = Math.min(1, Math.max(0, (patch - 0.58) * 6));   // tileable dirt patches
+    const blade = hash(x * 1.7, y * 3.1), fine = f(64) * 0.5 + f(128) * 0.5;
+    const gr = [0.20 + 0.10 * fine + 0.08 * blade, 0.36 + 0.14 * fine + 0.10 * blade, 0.12 + 0.05 * fine];
+    const di = [0.40 + 0.10 * fine + 0.06 * blade, 0.30 + 0.08 * fine + 0.05 * blade, 0.18 + 0.06 * fine];
+    const k = (y * N + x) * 4; for (let i = 0; i < 3; i++) img.data[k + i] = 255 * (gr[i] * (1 - dirt) + di[i] * dirt); img.data[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new pc.Texture(app.graphicsDevice, { width: N, height: N, mipmaps: true, addressU: pc.ADDRESS_REPEAT, addressV: pc.ADDRESS_REPEAT, minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR, anisotropy: 8 });
+  tex.setSource(cv);
+  const m = new pc.StandardMaterial(); m.diffuseMap = tex; m.diffuseMapTiling = new pc.Vec2(40, 40); m.gloss = 0.1; m.metalness = 0; m.useMetalness = true; m.update();
+  const e = new pc.Entity('ground'); e.addComponent('render', { type: 'plane', material: m }); e.setLocalScale(160, 1, 160); app.root.addChild(e);
+  return e;
+})();
+// keep the ground under the lowest point of the animal
+function placeGround() { const C = creatureData; if (!C) return; let lo = Infinity; for (let v = 1; v < C.P.length; v += 3) lo = Math.min(lo, C.P[v]); const h = head ? head.getPosition().y : 0; ground.setPosition(0, h + lo, 0); }
 function setUi() {
   D.names.forEach((_, i) => $(`mix${i}`).value = genes.mix[i]); syncMixOut();
   for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width', 'boost', 'neckLen', 'neckAngle', 'neckCurve', 'neckThick', 'bodyA', 'bodyB', 'bodyC', 'bodySize', 'bodyWidth', 'bodyHeight',
