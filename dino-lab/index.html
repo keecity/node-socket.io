@@ -923,22 +923,27 @@ function placeTeeth(w, jw, reg) {
       if (p[2] > 0.5 * lip) p[2] = Math.min(p[2], lip - MARGIN - zExt * sc);
       // along the row (toward the hinge), level in the jaw's plane
       const p2 = at(Math.min(len, (k + 0.5) * sp + 0.004)), p1 = at(Math.max(0, (k + 0.5) * sp - 0.004));
-      const bk = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]], bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;   // toward the hinge
+      // tooth frame: up (out of the gum), back (along the row, made square to up) and side = back x up. Side must
+      // follow the row: a fixed left-right side collapsed the front teeth (whose row runs left-right) into flat cards
+      const bk = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]], du = bk[0]*up[0] + bk[1]*up[1] + bk[2]*up[2];
+      for (let a = 0; a < 3; a++) bk[a] -= du * up[a];
+      const bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;
+      const sd = [bk[1]*up[2] - bk[2]*up[1], bk[2]*up[0] - bk[0]*up[2], bk[0]*up[1] - bk[1]*up[0]];
       for (const sg of [1, -1]) {
         for (let v = 0; v < tn; v++) {
           const lx = TP[v*3] * sc, ly = (TP[v*3+1] - SINK) * sc, lz = TP[v*3+2] * sc;   // gum line sunk SINK into the gum
-          const x = p[0] + bk[0] * lx + up[0] * ly, y = p[1] + bk[1] * lx + up[1] * ly, z = (p[2] + bk[2] * lx + lz) * sg;
+          const x = p[0] + bk[0] * lx + up[0] * ly + sd[0] * lz, y = p[1] + bk[1] * lx + up[1] * ly + sd[1] * lz, z = (p[2] + bk[2] * lx + up[2] * ly + sd[2] * lz) * sg;
           const q = (o + v) * 3;
           if (lower) { P[q] = x - D.pivot[0]; P[q+1] = y - D.pivot[1]; P[q+2] = z - D.pivot[2]; } else { P[q] = x; P[q+1] = y; P[q+2] = z; }
         }
-        // the lower frame (back, up, z) is left-handed and so is the mirrored side: flip winding so normals face out
-        for (let t = 0; t < TI.length; t += 3) ((sg > 0) !== lower) ? I.push(o + TI[t], o + TI[t+1], o + TI[t+2]) : I.push(o + TI[t], o + TI[t+2], o + TI[t+1]);
+        // the frame is right-handed; only the mirrored side flips winding
+        for (let t = 0; t < TI.length; t += 3) sg > 0 ? I.push(o + TI[t], o + TI[t+1], o + TI[t+2]) : I.push(o + TI[t], o + TI[t+2], o + TI[t+1]);
         o += tn;
       }
     }
     const m = new pc.Mesh(app.graphicsDevice); m.setPositions(P.subarray(0, o * 3)); m.setNormals(vertexNormals(P.subarray(0, o * 3), I)); m.setIndices(o > 65535 ? Uint32Array.from(I) : Uint16Array.from(I)); m.update();
     T.mesh = m; T.ent.render.meshInstances = [new pc.MeshInstance(m, toothMat)]; total += N * 2;
-    window.__toothP = window.__toothP || {}; window.__toothP[jaw] = { P: P.subarray(0, o * 3), lower };
+    window.__toothP = window.__toothP || {}; window.__toothP[jaw] = { P: P.subarray(0, o * 3), lower, line, sp };
   }
   $('toothOut').textContent = `Tooth shape ${Math.round(carn * 100)}% fang / ${Math.round((1 - carn) * 100)}% molar, ${total} teeth along the gum lines.`;
 }
