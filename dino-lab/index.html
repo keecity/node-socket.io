@@ -109,6 +109,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="legType">Leg type</label><output id="legTypeOut"></output><input id="legType" type="range" min="0" max="2" step="1" value="2"></div>
       <div class="slider"><label for="legSize">Leg size</label><output id="legSizeOut"></output><input id="legSize" type="range" min="0.6" max="1.6" step="0.01" value="0.88"></div>
       <div class="slider"><label for="toeSize">Toe size</label><output id="toeSizeOut"></output><input id="toeSize" type="range" min="0.2" max="1.2" step="0.01" value="0.56"></div>
+      <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="walk"> Walk</label>
+      <div class="slider"><label for="walkSpeed">Walk speed</label><output id="walkSpeedOut"></output><input id="walkSpeed" type="range" min="0.3" max="2.5" step="0.05" value="1"></div>
       <h2>Leg placement</h2>
       <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px">Stance <select id="stance"><option value="biped">Biped (2 legs, arms)</option><option value="quad">Quadruped (4 legs)</option></select></label>
       <div id="legPair" hidden style="display:flex;gap:6px;margin-bottom:6px"><button type="button" data-pair="hind">Hind legs</button><button type="button" data-pair="front">Front legs</button></div>
@@ -1864,7 +1866,7 @@ function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; re
 // ---------- jaw + idle animation ----------
 let time = 0, roarT = -1, snapT = -1, blinkT = -1, blinkClock = 3;
 app.on('update', dt => {
-  time += dt; updateCamera(); breathe();
+  time += dt; updateCamera(); breathe(); walkCycle(dt);
   if (D && view.idle && (blinkClock -= dt) < 0) { blinkT = 0; blinkClock = 2.5 + Math.random() * 4; }
   if (blinkT >= 0) { blinkT += dt; const u = blinkT / 0.3; const c = u >= 1 ? 0 : Math.sin(Math.PI * u); if (u >= 1) blinkT = -1; if (c !== lidClose) { lidClose = c; blinkSlider(c); } }
   if (!D) return;
@@ -1944,6 +1946,7 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   window.__legHandle = handle; window.__legApply = apply;
   document.querySelectorAll('#legGizmo button').forEach(b => b.onclick = () => window.__legGizmo(b.dataset.g));
   document.querySelectorAll('#legPart button').forEach(b => b.onclick = () => window.__legGizmo(null, b.dataset.p)); mark(); }
+{ const o = $('walkSpeedOut'), sync = () => o.textContent = '×' + (+$('walkSpeed').value).toFixed(2); sync(); $('walkSpeed').addEventListener('input', sync); $('walk').onchange = e => walking = e.target.checked; }
 { const el = $('boost'), out = $('boostOut'); const sync = () => { genes.boost = +el.value; out.textContent = '×' + genes.boost.toFixed(2); }; sync(); el.addEventListener('input', () => { sync(); requestRebuild(); }); }
 { const el = $('gape'), out = $('gapeOut'); const sync = () => { genes.gape = +el.value; out.textContent = genes.gape + '°'; }; sync(); el.addEventListener('input', sync); }
 $('roar').onclick = () => roarT = 0;
@@ -1967,6 +1970,23 @@ function breathe() {
   if (amp === C.amp) return; C.amp = amp;
   for (let i = 0; i < C.bv.length; i++) { const a = C.bv[i] * 3, o = amp * C.bw[i]; for (let k = 0; k < 3; k++) C.P[a+k] = C.b0[i*3+k] + C.bn[i*3+k] * o; }
   setSurface(creatureMesh, C.P, surfaceNormals(creatureMesh, C.P, C.I), C.jw, C.reg);
+}
+// walk cycle: drives the leg bones in place. Biped: legs in opposite phase; quadruped: diagonal pairs together.
+// Each leg: thigh swings, the knee folds while the leg comes forward, the foot rolls at push-off; pelvis bobs, tail sways
+let walkPhase = 0, walking = false;
+function walkCycle(dt) {
+  const rig = bones.rig; if (!rig) return;
+  const legs = genes.stance === 'quad' ? [['', '_L', 0], ['', '_R', Math.PI], ['f', '_R', 0], ['f', '_L', Math.PI]] : [['', '_L', 0], ['', '_R', Math.PI]];
+  if (!walking) { if (walkPhase) { walkPhase = 0; for (const e of Object.values(rig)) e.setLocalEulerAngles(0, 0, 0); } return; }
+  walkPhase += dt * 2 * Math.PI * 0.8 * (+$('walkSpeed').value);
+  for (const [pre, sd, off] of legs) {
+    const t = walkPhase + off, sw = Math.sin(t), lift = Math.max(0, Math.cos(t));        // sw > 0: leg forward; lift: swing phase
+    const set = (n, z) => { const e = rig[pre + n + sd]; if (e) e.setLocalEulerAngles(0, 0, z); };
+    set('thigh', 24 * sw); set('shin', -35 * lift); set('foot', 20 * lift - 12 * Math.max(0, -sw));
+    for (const k of [1, 2, 3]) set('toe' + k, 25 * Math.max(0, -Math.cos(t)) * (sw < 0 ? 1 : 0));
+  }
+  if (rig.pelvis) { rig.pelvis.setLocalEulerAngles(0, 0, 2 * Math.sin(2 * walkPhase)); }
+  for (let k = 1; rig['tail' + k]; k++) rig['tail' + k].setLocalEulerAngles(0, 4 * Math.sin(walkPhase - k * 0.4), 0);
 }
 function blinkSlider(c) {
   if (blinkBaseSY === null) blinkBaseSY = genes.eyeSY;
