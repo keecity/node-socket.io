@@ -92,6 +92,17 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="bodyBoost">Body feature strength</label><output id="bodyBoostOut"></output><input id="bodyBoost" type="range" min="0" max="1.6" step="0.05" value="1"></div>
     </section>
     <section>
+      <h2>Arms</h2>
+      <div class="slider"><label for="fingers">Fingers</label><output id="fingersOut"></output><input id="fingers" type="range" min="2" max="4" step="1" value="2"></div>
+      <div class="slider"><label for="armSize">Arm size</label><output id="armSizeOut"></output><input id="armSize" type="range" min="0.1" max="1" step="0.01" value="0.16"></div>
+      <div class="slider"><label for="armThick">Arm thickness</label><output id="armThickOut"></output><input id="armThick" type="range" min="0.5" max="1.8" step="0.01" value="1"></div>
+      <div class="slider"><label for="fingerSize">Finger size</label><output id="fingerSizeOut"></output><input id="fingerSize" type="range" min="0.3" max="1.2" step="0.01" value="0.6"></div>
+      <div class="slider"><label for="armShoulder">Shoulder</label><output id="armShoulderOut"></output><input id="armShoulder" type="range" min="-100" max="20" step="1" value="-75"></div>
+      <div class="slider"><label for="armElbow">Elbow</label><output id="armElbowOut"></output><input id="armElbow" type="range" min="0" max="140" step="1" value="95"></div>
+      <div class="slider"><label for="armWrist">Wrist</label><output id="armWristOut"></output><input id="armWrist" type="range" min="-60" max="60" step="1" value="-25"></div>
+      <div class="slider"><label for="armSplay">Splay</label><output id="armSplayOut"></output><input id="armSplay" type="range" min="0" max="45" step="1" value="12"></div>
+    </section>
+    <section>
       <h2>Tail</h2>
       <div class="slider"><label for="tailLen">Length</label><output id="tailLenOut"></output><input id="tailLen" type="range" min="0.3" max="3" step="0.01" value="1.39"></div>
       <div class="slider"><label for="tailAngle">Angle</label><output id="tailAngleOut"></output><input id="tailAngle" type="range" min="-40" max="40" step="1" value="-6"></div>
@@ -421,7 +432,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 0.6, armShoulder: -75, armElbow: 95, armWrist: -25, armSplay: 12 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -1204,6 +1215,47 @@ function mergeCreature(hP, hI, jw, reg) {
   window.__creature = { verts: nv };
   creatureData = { P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP) };
 }
+// ---------- arms: upper arm, forearm, hand and 2-4 fingers chained from the shoulder, each sunk into the one before ----------
+function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x along the limb) -> world
+  const Q = pc0.pos, n = Q.length / 3, P = new Float32Array(n * 3);
+  for (let v = 0; v < n; v++) { const x = Q[v*3] * s, y = Q[v*3+1] * s * thick, z = Q[v*3+2] * s * thick;
+    for (let a = 0; a < 3; a++) P[v*3+a] = o[a] + dx[a] * x + dy[a] * y + dz[a] * z; }
+  return { PP: P, I: pc0.idx.slice() };
+}
+const withInside = m => { m.inside = meshInside(m.PP, vertexNormals(m.PP, m.I), 0.02); return m; };
+function mirrorZ(m) { const P = m.PP.slice(); for (let v = 0; v < P.length; v += 3) P[v+2] *= -1; const I = m.I.slice(); for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } return withInside({ PP: P, I, r: m.r }); }
+function buildArm(sh, f, u, bodySc) {
+  const K = D.arm; if (!K) return null;
+  const s = genes.armSize * bodySc, th = genes.armThick, rad = Math.PI / 180, spl = genes.armSplay * rad;
+  const dirAt = a => { const d = [Math.cos(a) * f[0] + Math.sin(a) * u[0], Math.cos(a) * f[1] + Math.sin(a) * u[1], 0], c = Math.cos(spl); return [d[0] * c, d[1] * c, Math.sin(spl)]; };
+  const nrmAt = a => [-Math.sin(a) * f[0] + Math.cos(a) * u[0], -Math.sin(a) * f[1] + Math.cos(a) * u[1], 0];
+  const cross = (a, b) => [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
+  const frame = a => { const dx = dirAt(a), dy = nrmAt(a), dz = cross(dx, dy); return [dx, dy, dz]; };
+  const a1 = genes.armShoulder * rad, a2 = a1 + genes.armElbow * rad, a3 = a2 + genes.armWrist * rad, OV = 0.86;
+  let [dx, dy, dz] = frame(a1);
+  const up = placePiece(K.upper, sh, dx, dy, dz, s, th);
+  const el = [0, 1, 2].map(i => sh[i] + dx[i] * K.upper.len * s * OV);
+  [dx, dy, dz] = frame(a2);
+  const fo = placePiece(K.fore, el, dx, dy, dz, s, th);
+  const wr = [0, 1, 2].map(i => el[i] + dx[i] * K.fore.len * s * OV);
+  [dx, dy, dz] = frame(a3);
+  const ha = placePiece(K.hand, wr, dx, dy, dz, s, th); window.__wrist = wr;
+  let A = withInside(up);
+  for (const p of [fo, ha]) { const J = joinParts(A.PP, A.I, withInside(p), K.fore.rad * s * th); A = withInside({ PP: J.P, I: J.I }); }
+  // fingers from inside the palm, spread across its far edge; 4 = three fingers and a thumb
+  const nf = Math.min(3, genes.fingers), fs = s * genes.fingerSize, H = K.hand;
+  const fingerAt = (yLocal, xLocal, ang, scale) => {
+    const o = [0, 1, 2].map(i => wr[i] + dx[i] * xLocal * s + dy[i] * yLocal * s * th), b = a3 + ang;
+    const [fx, fy, fz] = frame(b); return withInside(placePiece(K.finger, o, fx, fy, fz, scale, 1));
+  };
+  for (let k = 0; k < nf; k++) {
+    const t = nf === 1 ? 0.5 : k / (nf - 1), y = (H.ymin + (H.ymax - H.ymin) * (0.2 + 0.6 * t)), ang = (t - 0.5) * 0.35 * (nf - 1);
+    const Fm = fingerAt(y, H.len * 0.78, ang, fs); const J = joinParts(A.PP, A.I, Fm, K.finger.rad * fs); A = withInside({ PP: J.P, I: J.I });
+  }
+  if (genes.fingers >= 4) { const Fm = fingerAt(H.ymin * 0.45, H.len * 0.6, -0.8, fs * 0.65); const J = joinParts(A.PP, A.I, Fm, K.finger.rad * fs * 0.65); A = withInside({ PP: J.P, I: J.I }); }
+  A.r = K.upper.rad * s * th;
+  return A;
+}
 function placeBody() {
   if (!body || !D.body || !neckEnd) return;
   const B = D.body, n = B.P.length / 3, wsum = (genes.bodyA + genes.bodyB + genes.bodyC) || 1, w = [genes.bodyA / wsum, genes.bodyB / wsum, genes.bodyC / wsum];
@@ -1231,7 +1283,14 @@ function placeBody() {
   const rx0 = ((tx0 - ax) * sc), ry0b = ((ty0 - ay) * sc * genes.bodyHeight);
   const tStart = [tx + rx0 * c - ry0b * s2, ty + rx0 * s2 + ry0b * c];
   const tail = sweepTail(tStart, [bx, by], 0.8 * 0.5 * (syhi - sylo) * sc * genes.bodyHeight * genes.tailThick, 0.8 * szw * sc * genes.bodyWidth * genes.tailThick);
-  const J = joinParts(J1.P, J1.I, tail, tail.r), nv = J.P.length / 3; window.__tailStart = tStart;
+  let J = joinParts(J1.P, J1.I, tail, tail.r);
+  // arms: shoulder on the side of the chest, the arm built and merged on its own, mirrored for the other side
+  { const xs = xmin0 + 0.72 * bl, ys = ylo + 0.38 * (yhi - ylo); let zs = 0;
+    for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xs) < 0.02 && Math.abs(P0b[v*3+1] - ys) < 0.03) zs = Math.max(zs, Math.abs(P0b[v*3+2]));
+    const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, 0.55 * zs * sc * genes.bodyWidth];
+    const A = buildArm(sh, [c, s2], [-s2, c], sc);
+    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A); J = joinParts(J.P, J.I, part, A.r); } }
+  const nv = J.P.length / 3; window.__tailStart = tStart;
   const N = vertexNormals(J.P, J.I), m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
   setSurface(m, J.P, N, new Float32Array(nv), new Float32Array(nv * 3));
   { const mi = new pc.MeshInstance(m, mat); mi.cull = false; body.ent.render.meshInstances = [mi]; } body.ent.enabled = true;
@@ -1557,7 +1616,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : v === 3 ? '3 (theropod)' : '3 + thumb', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
 }
@@ -1576,8 +1635,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb')]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
