@@ -1254,10 +1254,10 @@ function buildArm(sh, f, u, bodySc) {
     return [0, 1, 2].map(i => el[i] + (fo0[0][i] * v.x + fo0[1][i] * v.y + fo0[2][i] * v.z) * s);
   };
   const posed = (key, piece, k) => {
-    const T = HAND_POSE[key], M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3);
-    // two fingers: the pair moves over by half the spacing so it sits centred where the three-finger set was
-    const H3 = HAND_POSE.finger3.p, H2 = HAND_POSE.finger2.p, off = key.startsWith('finger') && genes.fingers < 3 ? [0, 1, 2].map(a => (H3[a] - H2[a]) / 2) : [0, 0, 0];
-    const tp = [0, 1, 2].map(a => T.p[a] + off[a]);
+    // two fingers: each sits in a gap of the three-finger layout (position and angle averaged), centring the pair
+    const HP = HAND_POSE, mix = (A, B) => ({ p: A.p.map((v, i) => (v + B.p[i]) / 2), r: A.r.map((v, i) => (v + B.r[i]) / 2), s: (A.s + B.s) / 2 });
+    const T = genes.fingers < 3 && key === 'finger1' ? mix(HP.finger1, HP.finger2) : genes.fingers < 3 && key === 'finger2' ? mix(HP.finger2, HP.finger3) : HP[key];
+    const M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3), tp = T.p;
     for (let v = 0; v < n; v++) { const w = toWorld([Q[v*3], Q[v*3+1], Q[v*3+2]], M, tp, T.s * k); P[v*3] = w[0]; P[v*3+1] = w[1]; P[v*3+2] = w[2]; }
     return withInside({ PP: P, I: piece.idx.slice() });
   };
