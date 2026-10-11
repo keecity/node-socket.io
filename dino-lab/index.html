@@ -509,7 +509,7 @@ function rebuild() {
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
   setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
   if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
-  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck(); placeBody();
+  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck(); placeBody(); mergeCreature(pos, D.I, jwv, reg);
   clearTimeout(fuseTimer);
   if (pre && !blinking) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
   else $('fuseOut').textContent = '';
@@ -886,6 +886,7 @@ function fuseNow(pre, reg, jwv) {
   setSurface(m, P2, N2, jw2, reg2);
   if (fusedMesh) fusedMesh.destroy();
   fusedMesh = m; headMI.mesh = m; crestPart.ent.enabled = false; placeEyes();
+  mergeCreature(P2, Array.from(I2), jw2, reg2);
   $('fuseOut').textContent = `Fused: crest grown into the head as one mesh (${(patchP.length / 3).toLocaleString()} new vertices, ${LA.length} seam${LA.length > 1 ? 's' : ''}, ${Math.round(performance.now() - t0)} ms).`;
 }
 // ---------- teeth: the tooth library placed along each jaw's gum line ----------
@@ -1080,7 +1081,7 @@ function placeNeck() {
 }
 // ---------- body: shared base body, blended per vertex by the body DNA (like the head), at the end of the neck ----------
 // body frame: x forward (the neck end), y up, z the mirror plane. The neck's end sits inside the front of the body.
-let body = null;
+let body = null, bodyJ = null, creatureMesh = null;
 function buildBody() { const ent = new pc.Entity('body'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); body = { ent, mesh: null }; }
 // inside test for a closed mesh: nearest vertex (hash grid) and its normal
 function meshInside(P, N, cell) {
@@ -1169,6 +1170,25 @@ function sweepTail(P0, d0, ry0, rz0) {
   const N2 = vertexNormals(PP, I);
   return { PP, I, inside: meshInside(PP, N2, 0.03), r: Math.max(ry0, rz0) };
 }
+// the whole animal as one skinned mesh: head (with its jaw weights and regions) + the body/neck/tail mesh, joined
+// where the neck enters the head; everything outside the head rides the skull bone
+function mergeCreature(hP, hI, jw, reg) {
+  if (!bodyJ || !headMI) return;
+  const part = { PP: bodyJ.P, I: bodyJ.I, inside: meshInside(bodyJ.P, vertexNormals(bodyJ.P, bodyJ.I), 0.03) };
+  const J = joinParts(hP, hI, part, neckEnd ? neckEnd.r * 0.8 : 0.05);
+  if (!J.joined) return;
+  const nh = hP.length / 3, nv = J.P.length / 3, jw2 = new Float32Array(nv), reg2 = new Float32Array(nv * 3);
+  jw2.set(jw.subarray ? jw.subarray(0, nh) : jw.slice(0, nh)); reg2.set(reg.subarray ? reg.subarray(0, nh * 3) : reg.slice(0, nh * 3));
+  const m = new pc.Mesh(app.graphicsDevice); m.setPositions(J.P); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
+  const bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
+  for (let v = 0; v < nv; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw2[v]; bw[v*4+1] = jw2[v]; }
+  m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, nv, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
+  m.skin = baseMesh.skin;
+  setSurface(m, J.P, vertexNormals(J.P, J.I), jw2, reg2);
+  headMI.mesh = m; if (creatureMesh) creatureMesh.destroy(); creatureMesh = m;
+  body.ent.enabled = false; neck.ent.enabled = false;
+  window.__creature = { verts: nv };
+}
 function placeBody() {
   if (!body || !D.body || !neckEnd) return;
   const B = D.body, n = B.P.length / 3, wsum = (genes.bodyA + genes.bodyB + genes.bodyC) || 1, w = [genes.bodyA / wsum, genes.bodyB / wsum, genes.bodyC / wsum];
@@ -1199,9 +1219,9 @@ function placeBody() {
   const J = joinParts(J1.P, J1.I, tail, tail.r), nv = J.P.length / 3; window.__tailStart = tStart;
   const N = vertexNormals(J.P, J.I), m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
   setSurface(m, J.P, N, new Float32Array(nv), new Float32Array(nv * 3));
-  { const mi = new pc.MeshInstance(m, mat); mi.cull = false; body.ent.render.meshInstances = [mi]; }
+  { const mi = new pc.MeshInstance(m, mat); mi.cull = false; body.ent.render.meshInstances = [mi]; } body.ent.enabled = true;
   if (body.mesh) body.mesh.destroy(); body.mesh = m;
-  neck.ent.enabled = !J.joined; window.__join = { joined: J.joined, verts: nv };
+  neck.ent.enabled = !J.joined; window.__join = { joined: J.joined, verts: nv }; bodyJ = J.joined ? J : null;
 }
 // ---------- tongue: a tapered, rounded rectangle swept along a spline on the floor of the lower jaw ----------
 const tongueMat = new pc.StandardMaterial();
