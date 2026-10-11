@@ -4,6 +4,7 @@ Each piece in its own frame: origin at the joint end (proximal end's centre), +x
 import numpy as np, json, struct, sys
 from collections import Counter
 FOOT_CUT=0.16
+SHIN_SLIM=0.55
 b=open(sys.argv[1] if len(sys.argv)>1 else '../biped_legs.glb','rb').read(); l=struct.unpack('<I',b[12:16])[0]; j=json.loads(b[20:20+l]); B=b[20+l+8:]
 def acc(i):
     a=j['accessors'][i]; bv=j['bufferViews'][a['bufferView']]; n={'SCALAR':1,'VEC3':3}[a['type']]; dt={5126:np.float32,5125:np.uint32,5123:np.uint16}[a['componentType']]
@@ -34,6 +35,17 @@ for name,test in parts.items():
     ax=de-pe; L=np.linalg.norm(ax); ux=ax/L; up=np.array([0,1.,0]); uy=up-ux*(up@ux); uy/=np.linalg.norm(uy); uz=np.cross(ux,uy)
     Q=(X-pe)@np.stack([ux,uy,uz]).T; rad=float(np.median(np.hypot(Q[:,1],Q[:,2])))
     extra={}
+    if name=='shin':
+        # the lower shin carries a knob and an ankle flare that bulge out past the foot: past SHIN_SLIM of its length,
+        # anything further than R0 from the shaft's centre line is pulled in (soft clamp, fading in over 10% of the length)
+        m=np.abs(Q[:,0]-0.5*L)<0.02*L; cy,cz=(Q[m,1].min()+Q[m,1].max())/2,(Q[m,2].min()+Q[m,2].max())/2
+        def jc(f):
+            m=np.abs(Q[:,0]-f*L)<0.04*L; return [float((Q[m,1].min()+Q[m,1].max())/2),float((Q[m,2].min()+Q[m,2].max())/2)]
+        extra={'jc0.04':jc(0.04),'jc0.86':jc(0.86)}
+        R0=0.05; dy,dz=Q[:,1]-cy,Q[:,2]-cz; r=np.hypot(dy,dz)+1e-9
+        fade=np.clip((Q[:,0]/L-SHIN_SLIM)/0.1,0,1); r2=np.where(r>R0,R0+(r-R0)*0.2,r); k=1+fade*(r2/r-1)
+        Q=Q.copy(); Q[:,1]=cy+dy*k; Q[:,2]=cz+dz*k
+        print('shin slimmed past %.0f%%: max radius below that now %.3f'%(SHIN_SLIM*100,np.hypot(Q[Q[:,0]>SHIN_SLIM*L,1]-cy,Q[Q[:,0]>SHIN_SLIM*L,2]-cz).max()))
     if name=='foot':
         # the foot block carries too much ankle column: cut it off above FOOT_CUT (sheet height) and cap the cut. The frame,
         # length and joint centres stay those of the full piece, so poses made before the trim still line up
