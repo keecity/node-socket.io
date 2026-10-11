@@ -874,6 +874,23 @@ function gumLine(pos, jw, reg, lower) {
     for (const v of vs) { const d = Math.abs(pos[v*3+2] - tz); if (d > 0.15 * wz + 1e-4) continue; sx += pos[v*3]; sw++; gy = lower ? Math.max(gy, pos[v*3+1]) : Math.min(gy, pos[v*3+1]); }
     if (sw > 0) L.push([sx / sw, gy, tz, wz]);
   }
+  // carry the row around the front of the mouth to the midline: for each width z, the front-most pink point at that
+  // width, set back by the same inset as the sides; height = the gum surface there
+  if (L.length) {
+    const f0 = L[0], inset = (1 - GUM) * f0[3], front = [], ZB = 0.15 * f0[3];
+    const all = []; for (const [, vs] of B) for (const v of vs) all.push(v);
+    for (let q = 1; q <= 6; q++) {
+      const z = f0[2] * (1 - q / 6);
+      let fx = -Infinity; for (const v of all) if (Math.abs(pos[v*3+2] - z) < ZB) fx = Math.max(fx, pos[v*3]);
+      if (fx === -Infinity) break;
+      const x = Math.min(fx - inset, f0[0] + (f0[2] - z) * 0.9);
+      let gy = lower ? -Infinity : Infinity;
+      for (const v of all) if (Math.abs(pos[v*3+2] - z) < ZB && Math.abs(pos[v*3] - x) < 0.008) gy = lower ? Math.max(gy, pos[v*3+1]) : Math.min(gy, pos[v*3+1]);
+      if (!isFinite(gy)) gy = f0[1];
+      front.push([x, gy, z, f0[3]]);
+    }
+    L = front.reverse().concat(L);                                     // midline first, then around the front and back
+  }
   L = L.map((p, i) => [0, 1, 2, 3].map(a => { let s = 0, c = 0; for (let d = -1; d <= 1; d++) { const q = L[i + d]; if (q) { s += q[a]; c++; } } return s / c; }));
   return L;
 }
@@ -903,7 +920,7 @@ function placeTeeth(w, jw, reg) {
       // inward as needed (not past 40% of the half-width); if the mouth is still too narrow, the tooth shrinks
       const MARGIN = 0.002, lip = p[3];
       sc = Math.min(sc, (lip * 0.6 - MARGIN) / zExt);
-      p[2] = Math.min(p[2], lip - MARGIN - zExt * sc);
+      if (p[2] > 0.5 * lip) p[2] = Math.min(p[2], lip - MARGIN - zExt * sc);
       // along the row (toward the hinge), level in the jaw's plane
       const p2 = at(Math.min(len, (k + 0.5) * sp + 0.004)), p1 = at(Math.max(0, (k + 0.5) * sp - 0.004));
       const bk = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]], bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;   // toward the hinge
