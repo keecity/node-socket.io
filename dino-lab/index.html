@@ -280,7 +280,7 @@ app.scene.ambientLight = new pc.Color(0.45, 0.45, 0.42);
 const camera = new pc.Entity(); camera.addComponent('camera', { clearColor: cssColor('--stage'), fov: 35, nearClip: 0.01, farClip: 300 }); app.root.addChild(camera);
 const syncTheme = () => camera.camera.clearColor = cssColor('--stage');
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncTheme); new MutationObserver(syncTheme).observe(document.documentElement, { attributes: true });
-const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.25, castShadows: false }); key.setEulerAngles(40, 35, 0); app.root.addChild(key);
+const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.25, castShadows: true, shadowDistance: 40, shadowResolution: 2048, shadowBias: 0.2, normalOffsetBias: 0.05, shadowType: pc.SHADOW_PCF5_16F }); key.setEulerAngles(40, 35, 0); app.root.addChild(key);
 const rim = new pc.Entity(); rim.addComponent('light', { type: 'directional', intensity: 0.45, color: new pc.Color(0.75, 0.85, 1) }); rim.setEulerAngles(-25, -150, 0); app.root.addChild(rim);
 // more lights: soft fill from the camera's other side, warm bounce from below, cool top light
 const addLight = (int, col, ex, ey) => { const e = new pc.Entity(); e.addComponent('light', { type: 'directional', intensity: int, color: col, castShadows: false }); e.setEulerAngles(ex, ey, 0); app.root.addChild(e); return e; };
@@ -497,7 +497,7 @@ function build(data) {
   const skin = new pc.Skin(dev, [new pc.Mat4(), jawIbm], ['skull', 'jaw']);
   mesh.skin = skin;
   const si = new pc.SkinInstance(skin); si.bones = [bones.skull, bones.jaw]; si.rootBone = head;
-  const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; headMI = mi; baseMesh = mesh;
+  const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; mi.castShadow = true; headMI = mi; baseMesh = mesh;
   head.addComponent('render', { meshInstances: [mi] });
   buildEyes(dev); buildLids(dev); buildCrest(dev); buildTeeth(dev); buildTongue(); buildNeck(); buildBody();
   initGeometryWorker(); rebuild();
@@ -2001,6 +2001,21 @@ function walkCycle(dt) {
   }
   if (rig.pelvis) { const z = 2 * Math.sin(2 * walkPhase); rig.pelvis.setLocalEulerAngles(0, 0, z); walkDriven.set('pelvis', [0, 0, z]); }
   resolveSecondary(dt);
+  wander(dt);
+}
+// wander: while walking, the animal heads for a random spot on the field, turning toward it smoothly; when it gets there
+// it picks another. Pace follows the walk speed and the animal's size. The camera follows it
+let wanderGoal = null, heading = 0;
+function wander(dt) {
+  if (!head) return;
+  const p = head.getPosition(), R = 18;
+  if (!wanderGoal || Math.hypot(wanderGoal[0] - p.x, wanderGoal[1] - p.z) < 1) { const a = Math.random() * 2 * Math.PI, r = Math.sqrt(Math.random()) * R; wanderGoal = [r * Math.cos(a), r * Math.sin(a)]; }
+  const want = Math.atan2(-(wanderGoal[1] - p.z), wanderGoal[0] - p.x);              // yaw that points the snout (+x) at the goal
+  let d = want - heading; d = Math.atan2(Math.sin(d), Math.cos(d)); heading += Math.max(-1, Math.min(1, d)) * 0.8 * dt;
+  const sp = (+$('walkSpeed').value) * 0.9 * (bodyJ && bodyJ.legRig ? 1 : 0.5) * (Math.abs(d) > 1.2 ? 0.3 : 1);   // slow down while turning hard
+  const nx = p.x + Math.cos(heading) * sp * dt, nz = p.z - Math.sin(heading) * sp * dt;
+  head.setPosition(nx, p.y, nz); head.setEulerAngles(0, heading * 180 / Math.PI, 0);
+  orbit.target.x += nx - p.x; orbit.target.z += nz - p.z;
 }
 // secondary motion: every bone not driven this frame picks up the driven bones' rotation, weighted by its distance from
 // each driven joint (gaussian falloff) and passed through a damped spring, so the body follows through instead of
