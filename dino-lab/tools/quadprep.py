@@ -1,5 +1,5 @@
-"""Quadruped leg kit from quadruped_legs.glb: thigh, shin, foot (three separate pieces on the sheet, +x forward, y up; the
-foot carries its toes). Same frames as legprep.py: origin at the joint end, +x toward the far end, 'ang' the sculpted axis
+"""Quadruped leg kit from quadruped_legs.glb: three pieces on the sheet (+x forward, y up): the hind leg and the front leg,
+each one mesh from hip/shoulder to ankle, and the foot (with its toes), which is fused onto the bottom of each leg. Same frames as legprep.py: origin at the joint end, +x toward the far end, 'ang' the sculpted axis
 angle (deg); joint centres measured on the full pieces. quad.json."""
 import numpy as np, json, struct, sys
 b=open(sys.argv[1] if len(sys.argv)>1 else '../quadruped_legs.glb','rb').read(); l=struct.unpack('<I',b[12:16])[0]; j=json.loads(b[20:20+l]); B=b[20+l+8:]
@@ -15,10 +15,10 @@ def f(x):
     return x
 for t in F: a=f(t[0]); par[f(t[1])]=a; par[f(t[2])]=a
 root=np.array([f(x) for x in range(len(V))])
-comps=sorted(np.unique(root),key=lambda r:V[root==r][:,0].mean())          # left to right on the sheet: thigh, shin, foot
-dirs={'thigh':(0.3,-1),'shin':(0,-1),'foot':(1,0)}
+comps=sorted(np.unique(root),key=lambda r:V[root==r][:,0].mean())          # left to right on the sheet: hind leg, front leg, foot
+dirs={'hind':(0.3,-1),'front':(0,-1),'foot':(1,0)}
 out={}
-for name,r in zip(['thigh','shin','foot'],comps):
+for name,r in zip(['hind','front','foot'],comps):
     m=root==r; vs=np.where(m)[0]; rm=-np.ones(len(V),int); rm[vs]=np.arange(len(vs)); T=rm[F[m[F[:,0]]]]; X=V[vs]
     d=np.array([*dirs[name],0.]); d/=np.linalg.norm(d); s=X@d; lo,hi=s.min(),s.max(); L0=hi-lo
     pe=X[s<lo+0.06*L0].mean(0); de=X[s>hi-0.06*L0].mean(0)
@@ -27,4 +27,4 @@ for name,r in zip(['thigh','shin','foot'],comps):
     Q=(X-pe)@np.stack([ux,uy,uz]).T; rad=float(np.median(np.hypot(Q[:,1],Q[:,2])))
     out[name]=dict(pos=np.round(Q,5).ravel().tolist(),idx=T.ravel().tolist(),len=float(L),rad=rad,ang=float(np.degrees(np.arctan2(ux[1],ux[0]))))
     print(name,'verts',len(Q),'len %.3f rad %.3f ang %.1f'%(L,rad,out[name]['ang']))
-json.dump(dict(parts=out,note='quadruped leg kit; frames as leg.json'),open('../quad.json','w'))
+json.dump(dict(hind=dict(thigh=out['hind'],foot=out['foot']),front=dict(thigh=out['front'],foot=out['foot']),note='quadruped legs: one-piece leg (as thigh) + shared foot; frames as leg.json'),open('../quad.json','w'))
