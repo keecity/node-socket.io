@@ -123,6 +123,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="row" style="margin-bottom:8px"><label for="gumCol">Gums</label><input type="color" id="gumCol" value="#6b171c"><label for="kerCol">Beak / dome</label><input type="color" id="kerCol" value="#807869"></div>
       <div class="slider"><label for="shine">Shine</label><output id="shineOut"></output><input id="shine" type="range" min="0" max="1" step="0.01" value="0.5">
         <small>Highlight strength for skin, beak, gums, teeth, tongue and eyes together.</small></div>
+      <div class="slider"><label for="ao">Ambient occlusion</label><output id="aoOut"></output><input id="ao" type="range" min="0" max="1" step="0.01" value="0.6"></div>
       <div class="toggles"><label><input type="checkbox" id="showRegions"> Show ID regions (mouth, keratin, sites)</label></div>
     </section>
     <section>
@@ -210,6 +211,17 @@ const syncTheme = () => camera.camera.clearColor = cssColor('--stage');
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncTheme); new MutationObserver(syncTheme).observe(document.documentElement, { attributes: true });
 const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.25, castShadows: false }); key.setEulerAngles(40, 35, 0); app.root.addChild(key);
 const rim = new pc.Entity(); rim.addComponent('light', { type: 'directional', intensity: 0.45, color: new pc.Color(0.75, 0.85, 1) }); rim.setEulerAngles(-25, -150, 0); app.root.addChild(rim);
+// more lights: soft fill from the camera's other side, warm bounce from below, cool top light
+const addLight = (int, col, ex, ey) => { const e = new pc.Entity(); e.addComponent('light', { type: 'directional', intensity: int, color: col, castShadows: false }); e.setEulerAngles(ex, ey, 0); app.root.addChild(e); return e; };
+const fill = addLight(0.4, new pc.Color(0.85, 0.9, 1), 20, -70);
+const bounce = addLight(0.22, new pc.Color(1, 0.85, 0.65), -60, 20);
+const top = addLight(0.3, new pc.Color(0.95, 0.97, 1), 85, 0);
+app.scene.ambientLight = new pc.Color(0.34, 0.34, 0.32);
+// ambient occlusion: the engine's screen-space AO (contact darkening in creases, mouth, sockets, around teeth)
+const frame = new pc.CameraFrame(app, camera.camera);
+frame.rendering.samples = 4;
+frame.ssao.type = pc.SSAOTYPE_COMBINE; frame.ssao.intensity = 1; frame.ssao.radius = 0.1;   // radius in metres frame.ssao.samples = 16; frame.ssao.power = 3; frame.ssao.minAngle = 8;
+frame.update(); window.__frame = frame;
 
 const orbit = { yaw: 62, pitch: -8, dist: 0.78, target: new V3(-0.06, 0.01, 0) };
 let drag = null;
@@ -1272,6 +1284,7 @@ for (const id of ['patA', 'patB']) { $(id).insertAdjacentHTML('beforeend', PATTE
 { const el = $('bump'), out = $('bumpOut'); const sync = () => { skinUi.bump = +el.value; out.textContent = '×' + skinUi.bump.toFixed(2); if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
 $('camoSel').insertAdjacentHTML('beforeend', CAMO_NAMES.map((nm, i) => `<option value="${i}">${nm}</option>`).join(''));
 $('camoSel').onchange = e => { skinUi.camo = +e.target.value; applySkin(normWeights()); };
+{ const el = $('ao'), out = $('aoOut'); const sync = () => { const v = +el.value; out.textContent = Math.round(v * 100) + '%'; frame.ssao.type = v > 0 ? pc.SSAOTYPE_COMBINE : pc.SSAOTYPE_NONE; frame.ssao.intensity = v * 1.6; frame.update(); }; sync(); el.addEventListener('input', sync); }
 { const el = $('shine'), out = $('shineOut'); const sync = () => { skinUi.shine = +el.value; out.textContent = Math.round(skinUi.shine * 100) + '%'; if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
 { const el = $('camoMix'), out = $('camoMixOut'); const sync = () => { skinUi.camoMix = +el.value; out.textContent = Math.round(skinUi.camoMix * 100) + '%'; if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
 { const el = $('camoFreq'), out = $('camoFreqOut'); const sync = () => { skinUi.camoFreq = +el.value; out.textContent = (100 / skinUi.camoFreq).toFixed(0) + ' cm repeat'; if (D) applySkin(normWeights()); }; sync(); el.addEventListener('input', sync); }
