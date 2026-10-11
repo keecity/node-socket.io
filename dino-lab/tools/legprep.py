@@ -2,6 +2,8 @@
 Each piece in its own frame: origin at the joint end (proximal end's centre), +x toward the far end, y up, z sideways;
 'ang' is the sculpted angle of that axis in the sheet's x-y plane (degrees), so the sculpted pose is the rest pose. leg.json."""
 import numpy as np, json, struct, sys
+from collections import Counter
+FOOT_CUT=0.16
 b=open(sys.argv[1] if len(sys.argv)>1 else '../biped_legs.glb','rb').read(); l=struct.unpack('<I',b[12:16])[0]; j=json.loads(b[20:20+l]); B=b[20+l+8:]
 def acc(i):
     a=j['accessors'][i]; bv=j['bufferViews'][a['bufferView']]; n={'SCALAR':1,'VEC3':3}[a['type']]; dt={5126:np.float32,5125:np.uint32,5123:np.uint16}[a['componentType']]
@@ -31,6 +33,29 @@ for name,test in parts.items():
     if name=='foot': pe=X[X[:,1]>X[:,1].max()-0.03].mean(0)            # ankle: the top of the block
     ax=de-pe; L=np.linalg.norm(ax); ux=ax/L; up=np.array([0,1.,0]); uy=up-ux*(up@ux); uy/=np.linalg.norm(uy); uz=np.cross(ux,uy)
     Q=(X-pe)@np.stack([ux,uy,uz]).T; rad=float(np.median(np.hypot(Q[:,1],Q[:,2])))
-    out[name]=dict(pos=np.round(Q,5).ravel().tolist(),idx=T.ravel().tolist(),len=float(L),rad=rad,ang=float(np.degrees(np.arctan2(ux[1],ux[0]))))
+    extra={}
+    if name=='foot':
+        # the foot block carries too much ankle column: cut it off above FOOT_CUT (sheet height) and cap the cut. The frame,
+        # length and joint centres stay those of the full piece, so poses made before the trim still line up
+        def jc(f):
+            m=np.abs(Q[:,0]-f*L)<0.04*L; return [float((Q[m,1].min()+Q[m,1].max())/2),float((Q[m,2].min()+Q[m,2].max())/2)]
+        extra={'jc0.04':jc(0.04),'jc0.86':jc(0.86)}
+        keep=X[:,1]<=FOOT_CUT; T=T[keep[T].all(1)]
+        e=Counter(tuple(sorted(x)) for t in T for x in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0])))
+        nxt={}
+        for t in T:
+            for a_,b_ in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0])):
+                if e[tuple(sorted((a_,b_)))]==1: nxt[b_]=a_          # boundary edge, walked against the face winding
+        Q=list(map(list,Q))
+        while nxt:
+            v0=next(iter(nxt)); loop=[v0]
+            while nxt.get(loop[-1]) is not None and nxt[loop[-1]]!=v0: loop.append(nxt.pop(loop[-1]))
+            nxt.pop(loop[-1],None)
+            if len(loop)<3: continue
+            c=len(Q); Q.append(list(np.mean([Q[v] for v in loop],0)))
+            T=np.vstack([T,[[loop[k],loop[(k+1)%len(loop)],c] for k in range(len(loop))]])
+        Q=np.array(Q); used=np.unique(T); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); Q=Q[used]; T=rm[T]
+        print('foot trimmed above y=%.2f: verts %d, cap loops closed'%(FOOT_CUT,len(Q)))
+    out[name]=dict(pos=np.round(Q,5).ravel().tolist(),idx=T.ravel().tolist(),len=float(L),rad=rad,ang=float(np.degrees(np.arctan2(ux[1],ux[0]))),**extra)
     print(name,'verts',len(Q),'tris',len(T),'len %.3f rad %.3f ang %.1f'%(L,rad,out[name]['ang']))
 json.dump(dict(parts=out,note='frame: origin at the joint end, +x toward the far end, y up, z sideways; ang = sculpted axis angle on the sheet (deg)'),open('../leg.json','w'))
