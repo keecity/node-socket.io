@@ -1,3 +1,4 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Dino Lab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Instrument+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
@@ -78,7 +79,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="boost">Feature strength</label><output id="boostOut"></output><input id="boost" type="range" min="0" max="1.6" step="0.05" value="1">
         <small>Below 1 fades toward the generic base; above 1 exaggerates the species traits.</small></div>
       <div class="slider"><label for="crest">Crest size</label><output id="crestOut"></output><input id="crest" type="range" min="0" max="1.6" step="0.01" value="1">
-        <small>The Duckbill's tube crest grows with its share of the genome, times this. Once the genome settles it is fused into the head as one mesh.</small></div>
+        <small>The Duckbill's tube crest grows with its share of the genome, times this. The welded crest updates live; its connection is refined in the background.</small></div>
       <p class="note" id="fuseOut" aria-live="polite"></p>
     </section>
     <section>
@@ -478,15 +479,27 @@ function build(data) {
   const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; headMI = mi; baseMesh = mesh;
   head.addComponent('render', { meshInstances: [mi] });
   buildEyes(dev); buildLids(dev); buildCrest(dev); buildTeeth(dev); buildTongue(); buildNeck(); buildBody();
-  rebuild();
+  initGeometryWorker(); rebuild();
 }
 
 // ---------- splice: species blend + proportion genes, all per-vertex on the shared topology ----------
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 let pos = null, nrm = null, cols = null;
+const HEAD_GENES = ['snout','cranium','height','jawDepth','width','boost','crest','eyeSX','eyeSY','eyeFwd','eyeUp','eyeDepth','recess','recessWidth','eyeSink','irisSize','gazeFwd','gazeDown','lidUp','lidLow'];
+let headPre = null;
+let headKey = '', cachedHeadJw = null, cachedHeadReg = null, teethKey = '', tongueKey = '';
+let pendingRebuild = 0;
+function requestRebuild() {
+  if (blinking) { rebuild(); return; }
+  if (!pendingRebuild) pendingRebuild = requestAnimationFrame(() => { pendingRebuild = 0; rebuild(); });
+}
 function rebuild() {
+  if (pendingRebuild) { cancelAnimationFrame(pendingRebuild); pendingRebuild = 0; }
   if (!D) return;
   const n = D.P.length / 3, w = normWeights();
+  const key = genes.mix.join(',') + '/' + geometryKey(HEAD_GENES), headDirty = key !== headKey;
+  let jwv = cachedHeadJw, reg = cachedHeadReg;
+  if (headDirty) {
   pos = pos || new Float32Array(n * 3); nrm = nrm || new Float32Array(n * 3);
   const k = genes.boost;
   for (let v = 0; v < n; v++) for (let a = 0; a < 3; a++) {
@@ -503,7 +516,7 @@ function rebuild() {
     pos[v*3] = x; pos[v*3+1] = y; pos[v*3+2] = z;
   }
   crestLift(pos, w);
-  const pre = crestP ? pos.slice() : null;
+  headPre = pos.slice();
   carveEyes(pos, vertexNormals(pos, D.I));
   // normals
   nrm.fill(0);
@@ -515,17 +528,27 @@ function rebuild() {
     for (const o of [a, b, c]) { nrm[o] += fx; nrm[o+1] += fy; nrm[o+2] += fz; }
   }
   for (let v = 0; v < n; v++) { const l = Math.hypot(nrm[v*3], nrm[v*3+1], nrm[v*3+2]) || 1; nrm[v*3] /= l; nrm[v*3+1] /= l; nrm[v*3+2] /= l; }
-  const jwv = new Float32Array(n); for (let v = 0; v < n; v++) jwv[v] = D.W[v*4+1] / 255;
+  jwv = new Float32Array(n); for (let v = 0; v < n; v++) jwv[v] = D.W[v*4+1] / 255;
   // ID regions (mouth, keratin, sites), mixed by the same DNA weights
-  const reg = new Float32Array(n * 3);
+  reg = new Float32Array(n * 3);
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
-  setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
+  if (!creatureMesh) setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
+  cachedHeadJw = jwv; cachedHeadReg = reg; headKey = key;
+  }
   if (blinking && creatureData) { placeEyes(); blinkUpdate(); applySkin(w); return; }   // blink: only the socket changes; patch it into the merged animal
-  if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
-  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck(); placeBody(); mergeCreature(pos, D.I, jwv, reg);
-  clearTimeout(fuseTimer);
-  if (pre && !blinking) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
-  else $('fuseOut').textContent = '';
+  if (!creatureMesh && headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
+  placeEyes(); placeCrest();
+  const mouthKey = genes.mix.join(',') + '/' + geometryKey(['snout','cranium','height','jawDepth','width','boost']);
+  const tk = mouthKey + '/' + genes.toothCount + '/' + genes.toothSize;
+  if (tk !== teethKey) { placeTeeth(w, jwv, reg); teethKey = tk; }
+  const lk = mouthKey + '/' + genes.tongueLen + '/' + genes.tongueWidth;
+  if (lk !== tongueKey) { placeTongue(jwv, reg); tongueKey = lk; }
+  placeNeck();
+  if(activeFingerCount!==null && activeFingerCount!==genes.fingers && creatureMesh && geometryWorker) {scheduleGeometryRefinement();applySkin(w);return;}
+  placeBody();activeFingerCount=genes.fingers;
+  const live=liveHead(jwv,reg); mergeCreature(live.P,live.I,live.jw,live.reg);
+  if (live.fused) crestPart.ent.enabled=false;
+  if (!blinking) scheduleGeometryRefinement();
   applySkin(w);
   const gape = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
   $('stat').innerHTML = `<b>${(n).toLocaleString()}</b> shared vertices · <b>2</b> bones (skull, jaw) · splice ${w.map((x, i) => `${D.names[i]} <b>${Math.round(x * 100)}%</b>`).join(' · ')} · sculpted gape ${gape.toFixed(0)}° · drag to orbit`;
@@ -607,190 +630,7 @@ function buildEyes(dev) {
     bones.skull.addChild(ent); eyeballs.push({ ent, mesh: m, P });
   }
 }
-// ---------- fusing: solids → one mesh ----------
-const BIG = 1e20;
-// exact squared Euclidean distance transform along one line (Felzenszwalb & Huttenlocher)
-function edt1d(f, d, v, z, n) {
-  let k = 0; v[0] = 0; z[0] = -BIG; z[1] = BIG;
-  for (let q = 1; q < n; q++) {
-    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
-    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
-    k++; v[k] = q; z[k] = s; z[k + 1] = BIG;
-  }
-  k = 0;
-  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
-}
-// grid: 0 at sites, BIG elsewhere → returns distance in voxels
-function edt3d(grid, nx, ny, nz) {
-  const m = Math.max(nx, ny, nz);
-  const f = new Float64Array(m), d = new Float64Array(m), v = new Int32Array(m), z = new Float64Array(m + 1);
-  const pass = (n, count, at) => {
-    for (let l = 0; l < count; l++) {
-      for (let i = 0; i < n; i++) f[i] = grid[at(l, i)];
-      edt1d(f, d, v, z, n);
-      for (let i = 0; i < n; i++) grid[at(l, i)] = d[i];
-    }
-  };
-  pass(nx, ny * nz, (l, i) => i + nx * l);
-  pass(ny, nx * nz, (l, i) => (l % nx) + nx * (i + ny * Math.floor(l / nx)));
-  pass(nz, nx * ny, (l, i) => l + nx * ny * i);
-  for (let i = 0; i < grid.length; i++) grid[i] = Math.sqrt(grid[i]);
-  return grid;
-}
-
-// closest point on triangle (Ericson, Real-Time Collision Detection 5.1.5) → [x,y,z,u,v,w] (barycentric of a,b,c)
-function closestOnTri(px, py, pz, P, a, b, c, out) {
-  const ax = P[a], ay = P[a+1], az = P[a+2];
-  const abx = P[b]-ax, aby = P[b+1]-ay, abz = P[b+2]-az, acx = P[c]-ax, acy = P[c+1]-ay, acz = P[c+2]-az;
-  const apx = px-ax, apy = py-ay, apz = pz-az;
-  const d1 = abx*apx + aby*apy + abz*apz, d2 = acx*apx + acy*apy + acz*apz;
-  let u, v, w;
-  if (d1 <= 0 && d2 <= 0) { u = 1; v = 0; w = 0; }
-  else {
-    const bpx = px-P[b], bpy = py-P[b+1], bpz = pz-P[b+2];
-    const d3 = abx*bpx + aby*bpy + abz*bpz, d4 = acx*bpx + acy*bpy + acz*bpz;
-    if (d3 >= 0 && d4 <= d3) { u = 0; v = 1; w = 0; }
-    else {
-      const vc = d1*d4 - d3*d2;
-      if (vc <= 0 && d1 >= 0 && d3 <= 0) { const t = d1 / (d1 - d3); u = 1 - t; v = t; w = 0; }
-      else {
-        const cpx = px-P[c], cpy = py-P[c+1], cpz = pz-P[c+2];
-        const d5 = abx*cpx + aby*cpy + abz*cpz, d6 = acx*cpx + acy*cpy + acz*cpz;
-        if (d6 >= 0 && d5 <= d6) { u = 0; v = 0; w = 1; }
-        else {
-          const vb = d5*d2 - d1*d6;
-          if (vb <= 0 && d2 >= 0 && d6 <= 0) { const t = d2 / (d2 - d6); u = 1 - t; v = 0; w = t; }
-          else {
-            const va = d3*d6 - d5*d4;
-            if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) { const t = (d4 - d3) / ((d4 - d3) + (d5 - d6)); u = 0; v = 1 - t; w = t; }
-            else { const den = 1 / (va + vb + vc); v = vb * den; w = vc * den; u = 1 - v - w; }
-          }
-        }
-      }
-    }
-  }
-  out[0] = ax + abx * v + acx * w; out[1] = ay + aby * v + acy * w; out[2] = az + abz * v + acz * w;
-  out[3] = u; out[4] = v; out[5] = w;
-}
-
-// Fuse solids into ONE mesh, as Hog Foundry fuses its body parts: each closed part gets a signed distance field
-// (exact near its surface, EDT further out, sign by flood-filling the outside); where parts overlap they are
-// smooth-unioned with blend radius k, so the joint grows a fillet; surface nets then mesh the result.
-function fuseSolids(parts, h, k) {
-  const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
-  for (const { P } of parts) for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], P[i+a]); mx[a] = Math.max(mx[a], P[i+a]); }
-  const zr = Math.max(-mn[2], mx[2]); mn[2] = -zr; mx[2] = zr;          // symmetric about the midline
-  const pad = k + 4 * h, o = mn.map(v => v - pad);
-  const nx = Math.ceil((mx[0] - mn[0] + 2 * pad) / h) + 1, ny = Math.ceil((mx[1] - mn[1] + 2 * pad) / h) + 1, nz = Math.ceil((mx[2] - mn[2] + 2 * pad) / h) + 1;
-  const N = nx * ny * nz, at = (x, y, z) => x + nx * (y + ny * z), dims = [nx, ny, nz], margin = Math.ceil(k / h) + 3, cp = new Float64Array(6);
-  function partSdf(P, I, bmin, lx, ly, lz) {
-    const L = lx * ly * lz, li = (x, y, z) => x + lx * (y + ly * z);
-    const f = new Float64Array(L).fill(BIG), near = new Int8Array(L);
-    for (let t3 = 0; t3 < I.length; t3 += 3) {
-      const a = I[t3]*3, b = I[t3+1]*3, c = I[t3+2]*3;
-      const r0 = [0, 1, 2].map(ax => Math.max(0, Math.floor((Math.min(P[a+ax], P[b+ax], P[c+ax]) - o[ax]) / h) - 2 - bmin[ax]));
-      const r1 = [0, 1, 2].map((ax, i) => Math.min([lx, ly, lz][i] - 1, Math.ceil((Math.max(P[a+ax], P[b+ax], P[c+ax]) - o[ax]) / h) + 2 - bmin[ax]));
-      const e1x = P[b]-P[a], e1y = P[b+1]-P[a+1], e1z = P[b+2]-P[a+2], e2x = P[c]-P[a], e2y = P[c+1]-P[a+1], e2z = P[c+2]-P[a+2];
-      const fnx = e1y*e2z - e1z*e2y, fny = e1z*e2x - e1x*e2z, fnz = e1x*e2y - e1y*e2x;
-      for (let z = r0[2]; z <= r1[2]; z++) for (let y = r0[1]; y <= r1[1]; y++) for (let x = r0[0]; x <= r1[0]; x++) {
-        const px = o[0] + (x + bmin[0]) * h, py = o[1] + (y + bmin[1]) * h, pz = o[2] + (z + bmin[2]) * h;
-        closestOnTri(px, py, pz, P, a, b, c, cp);
-        const d2 = ((cp[0]-px)**2 + (cp[1]-py)**2 + (cp[2]-pz)**2) / (h * h), i = li(x, y, z);
-        if (d2 < f[i]) { f[i] = d2; near[i] = ((px-cp[0])*fnx + (py-cp[1])*fny + (pz-cp[2])*fnz) >= 0 ? 1 : -1; }
-      }
-    }
-    for (let i = 0; i < L; i++) if (f[i] > 4) f[i] = BIG;
-    const d = edt3d(f, lx, ly, lz);
-    const out = new Uint8Array(L), q = new Int32Array(L); let qh = 0, qt = 0;
-    for (let z = 0; z < lz; z++) for (let y = 0; y < ly; y++) for (let x = 0; x < lx; x++) {
-      if (x && y && z && x < lx - 1 && y < ly - 1 && z < lz - 1) continue;
-      const i = li(x, y, z); if (d[i] > 1.5 && !out[i]) { out[i] = 1; q[qt++] = i; }
-    }
-    const nb = [1, -1, lx, -lx, lx * ly, -lx * ly];
-    while (qh < qt) { const i = q[qh++]; for (const dn of nb) { const j = i + dn; if (j >= 0 && j < L && !out[j] && d[j] > 1.5) { out[j] = 1; q[qt++] = j; } } }
-    const sdf = new Float32Array(L);
-    for (let i = 0; i < L; i++) sdf[i] = (out[i] || (d[i] <= 1.5 && near[i] > 0) ? d[i] : -d[i]) * h;
-    return sdf;
-  }
-  const S = parts.map(({ P, I }) => {
-    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
-    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { const g = (P[i+a] - o[a]) / h; lo[a] = Math.min(lo[a], g); hi[a] = Math.max(hi[a], g); }
-    const bmin = [0, 1, 2].map(a => Math.max(0, Math.floor(lo[a]) - margin)), bmax = [0, 1, 2].map(a => Math.min(dims[a] - 1, Math.ceil(hi[a]) + margin));
-    const [lx, ly, lz] = [0, 1, 2].map(a => bmax[a] - bmin[a] + 1);
-    return { sdf: partSdf(P, I, bmin, lx, ly, lz), bmin, lx, ly, lz };
-  });
-  const sample = (p, gx, gy, gz) => {
-    const x = gx - p.bmin[0], y = gy - p.bmin[1], z = gz - p.bmin[2];
-    return (x < 0 || y < 0 || z < 0 || x >= p.lx || y >= p.ly || z >= p.lz) ? BIG : p.sdf[x + p.lx * (y + p.ly * z)];
-  };
-  const phi = new Float32Array(N);
-  for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
-    let v = BIG;
-    if (S.length === 2) {
-      const a = sample(S[0], x, y, z), b = sample(S[1], x, y, z);
-      const hh = Math.max(k - Math.abs(a - b), 0) / k;
-      v = Math.min(a, b) - hh * hh * k * 0.25;                            // polynomial smooth-min: the fillet
-    } else for (const p of S) v = Math.min(v, sample(p, x, y, z));
-    phi[at(x, y, z)] = -Math.min(v, 1e6);                                 // > 0 inside
-  }
-  const cellV = new Int32Array(N).fill(-1), vp = [];
-  const C = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
-  const E = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
-  const cv = new Float32Array(8);
-  for (let z = 0; z < nz - 1; z++) for (let y = 0; y < ny - 1; y++) for (let x = 0; x < nx - 1; x++) {
-    let mask = 0;
-    for (let c = 0; c < 8; c++) { cv[c] = phi[at(x + C[c][0], y + C[c][1], z + C[c][2])]; if (cv[c] > 0) mask |= 1 << c; }
-    if (mask === 0 || mask === 255) continue;
-    let sx = 0, sy = 0, sz = 0, cnt = 0;
-    for (const [a, b] of E) {
-      if ((cv[a] > 0) === (cv[b] > 0)) continue;
-      const tt = cv[a] / (cv[a] - cv[b]);
-      sx += C[a][0] + (C[b][0] - C[a][0]) * tt; sy += C[a][1] + (C[b][1] - C[a][1]) * tt; sz += C[a][2] + (C[b][2] - C[a][2]) * tt; cnt++;
-    }
-    cellV[at(x, y, z)] = vp.length / 3;
-    vp.push(o[0] + (x + sx / cnt) * h, o[1] + (y + sy / cnt) * h, o[2] + (z + sz / cnt) * h);
-  }
-  const idx = [], stride = [1, nx, nx * ny];
-  for (let z = 1; z < nz - 1; z++) for (let y = 1; y < ny - 1; y++) for (let x = 1; x < nx - 1; x++) {
-    const i0 = at(x, y, z);
-    for (let ax = 0; ax < 3; ax++) {
-      const i1 = i0 + stride[ax], in0 = phi[i0] > 0, in1 = phi[i1] > 0;
-      if (in0 === in1) continue;
-      const sj = stride[(ax + 1) % 3], sk = stride[(ax + 2) % 3];
-      const a = cellV[i0], b = cellV[i0 - sj], c = cellV[i0 - sj - sk], d = cellV[i0 - sk];
-      if (a < 0 || b < 0 || c < 0 || d < 0) continue;
-      if (in0) idx.push(a, b, c, a, c, d); else idx.push(a, c, b, a, d, c);
-    }
-  }
-  // drop tiny disconnected fragments (voxel specks)
-  {
-    const n0 = vp.length / 3, par = new Int32Array(n0).map((_, i) => i);
-    const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
-    for (let i = 0; i < idx.length; i += 3) { par[find(idx[i])] = find(idx[i+1]); par[find(idx[i+2])] = find(idx[i+1]); }
-    const size = new Map(); for (let i = 0; i < n0; i++) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); }
-    const keep = []; for (let i = 0; i < idx.length; i += 3) if (size.get(find(idx[i])) >= 150) keep.push(idx[i], idx[i+1], idx[i+2]);
-    const remap = new Int32Array(n0).fill(-1), nvp = [];
-    for (let i = 0; i < keep.length; i++) { const v = keep[i]; if (remap[v] < 0) { remap[v] = nvp.length / 3; nvp.push(vp[v*3], vp[v*3+1], vp[v*3+2]); } keep[i] = remap[v]; }
-    vp.length = 0; for (const x of nvp) vp.push(x); idx.length = 0; for (const x of keep) idx.push(x);
-  }
-  // Taubin smoothing (shrink-free), light: the head's own detail stays
-  const nv = vp.length / 3, pos = new Float32Array(vp), adj = Array.from({ length: nv }, () => new Set());
-  for (let i = 0; i < idx.length; i += 3) { const a = idx[i], b = idx[i+1], c = idx[i+2]; adj[a].add(b).add(c); adj[b].add(a).add(c); adj[c].add(a).add(b); }
-  const adjA = adj.map(s => Int32Array.from(s)), tmp = new Float32Array(pos.length);
-  for (let it = 0; it < 6; it++) {
-    const fac = it % 2 ? -0.53 : 0.5;
-    for (let v = 0; v < nv; v++) {
-      const nbv = adjA[v]; let ax = 0, ay = 0, az = 0;
-      for (const u of nbv) { ax += pos[u*3]; ay += pos[u*3+1]; az += pos[u*3+2]; }
-      const kk = nbv.length || 1;
-      tmp[v*3] = pos[v*3] + fac * (ax / kk - pos[v*3]); tmp[v*3+1] = pos[v*3+1] + fac * (ay / kk - pos[v*3+1]); tmp[v*3+2] = pos[v*3+2] + fac * (az / kk - pos[v*3+2]);
-    }
-    pos.set(tmp);
-  }
-  // distance to each part's own surface (nearest voxel), for clipping the fused result to where it differs
-  const sdfAt = (pi, x, y, z) => sample(S[pi], Math.round((x - o[0]) / h), Math.round((y - o[1]) / h), Math.round((z - o[2]) / h));
-  return { pos, idx: nv > 65535 ? Uint32Array.from(idx) : Uint16Array.from(idx), sdfAt };
-}
+// ---------- reusable welded intersections ----------
 // boundary loops of a triangle list (directed edges with no twin), as vertex index arrays
 function boundaryLoops(I) {
   const K = 1 << 20, has = new Set();
@@ -829,6 +669,42 @@ function zipLoops(A, B, P) {
   }
   return out;
 }
+// Fill an unmatched cut without reusing a diagonal already in the surface.
+// A fixed fan can duplicate existing faces across a concave boundary.
+function capCutLoop(I, loop, P) {
+  const L = loop.slice(), K = 1 << 20, edge = (a,b) => Math.min(a,b)*K+Math.max(a,b), edges = new Set();
+  for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) edges.add(edge(I[t+e],I[t+(e+1)%3]));
+  const normal = [0,0,0];
+  for (let i = 0; i < L.length; i++) {
+    const a = L[i]*3, b = L[(i+1)%L.length]*3;
+    normal[0] += (P[a+1]-P[b+1])*(P[a+2]+P[b+2]);
+    normal[1] += (P[a+2]-P[b+2])*(P[a]+P[b]);
+    normal[2] += (P[a]-P[b])*(P[a+1]+P[b+1]);
+  }
+  const drop = normal.map(Math.abs).indexOf(Math.max(...normal.map(Math.abs))), axes = [0,1,2].filter(a=>a!==drop);
+  const cross = (a,b,c) => (P[b*3+axes[0]]-P[a*3+axes[0]])*(P[c*3+axes[1]]-P[a*3+axes[1]])-(P[b*3+axes[1]]-P[a*3+axes[1]])*(P[c*3+axes[0]]-P[a*3+axes[0]]);
+  let area = 0;
+  for (let i = 0; i < L.length; i++) { const a=L[i]*3,b=L[(i+1)%L.length]*3; area+=P[a+axes[0]]*P[b+axes[1]]-P[b+axes[0]]*P[a+axes[1]]; }
+  const sign = area < 0 ? -1 : 1;
+  while (L.length > 3) {
+    let best = -1, cost = Infinity;
+    for (let pass = 0; pass < 2 && best < 0; pass++) for (let i = 0; i < L.length; i++) {
+      const a=L[(i+L.length-1)%L.length],b=L[i],c=L[(i+1)%L.length];
+      if (a===c || edges.has(edge(a,c))) continue;
+      if (!pass) {
+        if (sign*cross(a,b,c)<=1e-14) continue;
+        if (L.some(v=>v!==a&&v!==b&&v!==c&&sign*cross(a,b,v)>=0&&sign*cross(b,c,v)>=0&&sign*cross(c,a,v)>=0)) continue;
+      }
+      const d=(P[a*3]-P[c*3])**2+(P[a*3+1]-P[c*3+1])**2+(P[a*3+2]-P[c*3+2])**2;
+      if (d<cost) {cost=d;best=i;}
+    }
+    if (best < 0) break;
+    const a=L[(best+L.length-1)%L.length],b=L[best],c=L[(best+1)%L.length];
+    I.push(a,c,b); edges.add(edge(a,c)); L.splice(best,1);
+  }
+  if (L.length===3) I.push(L[0],L[2],L[1]);
+  return L.length>3 ? L : [];
+}
 // nearest vertex of a point set (uniform hash grid)
 function nearestIndex(P, cell) {
   const g = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
@@ -846,61 +722,96 @@ function nearestIndex(P, cell) {
     return 0;
   };
 }
-// after the genome settles: head + crest become ONE mesh (the quick two-piece preview shows while sliders move)
-let blinking = false, fuseTimer = null, fusedMesh = null, headMI = null, baseMesh = null, eyeA = null;
-function fuseNow(pre, reg, jwv) {
-  if (!crestP) return;
-  const t0 = performance.now();
-  const r = fuseSolids([{ P: pre, I: D.I }, { P: crestP, I: D.crest.idx }], 0.003, 0.02);
-  // keep the original head everywhere except near the crest; there, the fused surface (crest + fillet) replaces it
-  const DR = 0.035, nH = pre.length / 3, near = new Uint8Array(nH), dC = (P, v) => r.sdfAt(1, P[v*3], P[v*3+1], P[v*3+2]);
-  for (let v = 0; v < nH; v++) near[v] = dC(pre, v) < DR ? 1 : 0;
-  const keepH = []; for (let t = 0; t < D.I.length; t += 3) if (!near[D.I[t]] && !near[D.I[t+1]] && !near[D.I[t+2]]) keepH.push(D.I[t], D.I[t+1], D.I[t+2]);
-  // the patch is cut along the head's own hole: where the fused surface lies on the head, a triangle stays only if
-  // the head vertex nearest to it was removed, so the two cut edges lie within half a head triangle of each other
-  const FP = r.pos, FI = r.idx, remap = new Int32Array(FP.length / 3).fill(-1), patchP = [], patchI = [], nearHead = nearestIndex(pre, 0.01);
-  for (let t = 0; t < FI.length; t += 3) {
-    const a = FI[t], b = FI[t+1], c = FI[t+2];
-    const cx = (FP[a*3] + FP[b*3] + FP[c*3]) / 3, cy = (FP[a*3+1] + FP[b*3+1] + FP[c*3+1]) / 3, cz = (FP[a*3+2] + FP[b*3+2] + FP[c*3+2]) / 3;
-    if (!near[nearHead(cx, cy, cz)] && Math.abs(r.sdfAt(0, cx, cy, cz)) < 0.006) continue;   // on the kept head: skip; off it (crest): keep
-    for (const v of [a, b, c]) { if (remap[v] < 0) { remap[v] = nH + patchP.length / 3; patchP.push(FP[v*3], FP[v*3+1], FP[v*3+2]); } patchI.push(remap[v]); }
-  }
-  const P2 = new Float32Array(pre.length + patchP.length); P2.set(pre); P2.set(patchP, pre.length);
-  // pinholes left by the clip (a few edges round) are capped with a fan; the real seams are zipped below
-  const caps = [], split = L => L.filter(l => { if (l.length >= 16) return true; for (let i = 1; i < l.length - 1; i++) caps.push(l[0], l[i+1], l[i]); return false; });
-  const LA = split(boundaryLoops(keepH)), LB = split(boundaryLoops(patchI));
-  window.__loops = { A: LA.map(l => l.length), B: LB.map(l => l.length) };
-  if (!LA.length || LA.length !== LB.length) { $('fuseOut').textContent = 'Fuse skipped (could not match the seams); showing the two pieces.'; return; }
-  // weld: every patch seam vertex is merged into the nearest vertex of the head's seam (walking both loops in
-  // step so it never jumps across); triangles that collapse are dropped, the small gaps left are capped
-  const band = [], weld = new Map();
-  for (let q = 0; q < LA.length; q++) {
-    const A = LA[q], B = LB[q], d2 = (a, b) => (P2[a*3]-P2[b*3])**2 + (P2[a*3+1]-P2[b*3+1])**2 + (P2[a*3+2]-P2[b*3+2])**2;
-    for (const b of B) { let best = A[0]; for (const a of A) if (d2(a, b) < d2(best, b)) best = a; weld.set(b, best); }
-  }
-  for (let t = 0; t < patchI.length; t += 3) for (let e = 0; e < 3; e++) { const w2 = weld.get(patchI[t+e]); if (w2 !== undefined) patchI[t+e] = w2; }
-  { const k = []; for (let t = 0; t < patchI.length; t += 3) { const a = patchI[t], b = patchI[t+1], c = patchI[t+2]; if (a !== b && b !== c && a !== c) k.push(a, b, c); } patchI.length = k.length; for (let i = 0; i < k.length; i++) patchI[i] = k[i]; }
-  for (const L of boundaryLoops(keepH.concat(patchI))) for (let i = 1; i < L.length - 1; i++) band.push(L[0], L[i+1], L[i]);
-  window.__seam = { P2, band, keepN: keepH.length, patchN: patchI.length, caps: caps.length, LA: LA.map(l => l.length), LB: LB.map(l => l.length) };
-  const all = keepH.concat(patchI, band, caps), n2 = P2.length / 3, I2 = n2 > 65535 ? Uint32Array.from(all) : Uint16Array.from(all);
-  // jaw weights and regions: the head's own; patch vertices take the nearest head vertex's
-  const nearest = nearestIndex(pre, 0.01), jw2 = new Float32Array(n2), reg2 = new Float32Array(n2 * 3);
-  jw2.set(jwv); reg2.set(reg);
-  for (let v = nH; v < n2; v++) { const k = nearest(P2[v*3], P2[v*3+1], P2[v*3+2]); jw2[v] = jwv[k]; for (let c = 0; c < 3; c++) reg2[v*3+c] = reg[k*3+c]; }
-  const a = D.eyes[0]; eyeA = near[a] ? nearestIndex(P2, 0.01)(pre[a*3], pre[a*3+1], pre[a*3+2]) : a;
-  carveEyes(P2, vertexNormals(P2, I2));
-  eyeA = null;
-  const N2 = vertexNormals(P2, I2), m = new pc.Mesh(app.graphicsDevice);
-  m.setPositions(P2); m.setIndices(I2);
-  const bi = new Uint8Array(n2 * 4), bw = new Float32Array(n2 * 4);
-  for (let v = 0; v < n2; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw2[v]; bw[v*4+1] = jw2[v]; }
-  m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, n2, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
-  m.skin = baseMesh.skin;
-  setSurface(m, P2, N2, jw2, reg2);
-  if (fusedMesh) fusedMesh.destroy();
-  fusedMesh = m; headMI.mesh = m; crestPart.ent.enabled = false; placeEyes();
-  mergeCreature(P2, Array.from(I2), jw2, reg2);
-  $('fuseOut').textContent = `Fused: crest grown into the head as one mesh (${(patchP.length / 3).toLocaleString()} new vertices, ${LA.length} seam${LA.length > 1 ? 's' : ''}, ${Math.round(performance.now() - t0)} ms).`;
+// Head + crest share welded connectivity; topology is initialized and refined in the worker.
+let blinking = false, fuseTimer = null, headMI = null, baseMesh = null, eyeA = null;
+function fuseHeadData(pre, reg, jwv, crestP) {
+  if(!crestP)return null;
+  const t0=performance.now(), J=joinParts(pre,D.I,{PP:crestP,I:D.crest.idx,inside:null},0.025,'head-crest');
+  if(!J.joined)throw new Error('Crest does not intersect the skull');
+  const nH=pre.length/3,n2=J.P.length/3,nearest=nearestIndex(pre,0.01),hMap=new Uint32Array(n2-nH),cMap=new Uint32Array(n2-nH),blend=new Float32Array(n2-nH).fill(1),jw2=new Float32Array(n2),reg2=new Float32Array(n2*3);
+  jw2.set(jwv);reg2.set(reg);
+  for(let q=0;q<n2-nH;q++){const v=nH+q,a=v*3,h=nearest(J.P[a],J.P[a+1],J.P[a+2]);hMap[q]=h;cMap[q]=q;jw2[v]=jwv[h];for(let k=0;k<3;k++)reg2[a+k]=reg[h*3+k];}
+  return {P:J.P,I:n2>65535?Uint32Array.from(J.I):Uint16Array.from(J.I),jw:jw2,reg:reg2,head0:pre,crest0:crestP,hMap,cMap,blend,ms:performance.now()-t0,seams:1};
+}
+// ---------- background topology refinement + live deformation of the welded crest ----------
+let activeFingerCount=null;
+let geometryWorker=null, workerBusy=false, queuedGeometry=null, geometryEpoch=0, refinementKey='', fusedHeadState=null;
+const workerStats={completed:0,discarded:0,ms:0,error:null};
+function liveHead(jw,reg) {
+  let F=fusedHeadState;
+  if(crestP && !F && !geometryWorker)try{F=fusedHeadState=fuseHeadData(headPre,reg,jw,crestP);}catch(error){workerStats.error=error.message;}
+  if (!crestP || !F || F.head0.length!==pos.length || F.crest0.length!==crestP.length) return {P:pos,I:D.I,jw,reg,fused:false};
+  const J=joinParts(pos,D.I,{PP:crestP,I:D.crest.idx,inside:null},0.025,'head-crest');
+  const n=pos.length/3,P=J.P,jw2=new Float32Array(P.length/3),reg2=new Float32Array(P.length);
+  jw2.set(jw);reg2.set(reg);
+  for(let q=0;q<F.hMap.length;q++){const v=n+q,a=v*3,h=F.hMap[q];jw2[v]=jw[h];for(let axis=0;axis<3;axis++)reg2[a+axis]=reg[h*3+axis];}
+  return {P,I:J.I,jw:jw2,reg:reg2,fused:true};
+}
+function initGeometryWorker() {
+  if(!window.Worker) { $('fuseOut').textContent='Live welded seams ready; background refinement unavailable in this browser.';return; }
+  const math=`
+    class Vec3 { constructor(x=0,y=0,z=0){this.x=x;this.y=y;this.z=z;} }
+    class Mat4 {
+      constructor(){this.data=new Float32Array(16);this.data[0]=this.data[5]=this.data[10]=this.data[15]=1;}
+      setFromEulerAngles(x,y,z){const r=Math.PI/180;x*=r;y*=r;z*=r;const sx=Math.sin(-x),cx=Math.cos(-x),sy=Math.sin(-y),cy=Math.cos(-y),sz=Math.sin(-z),cz=Math.cos(-z),d=this.data;d[0]=cy*cz;d[1]=-cy*sz;d[2]=sy;d[4]=cx*sz+cz*sx*sy;d[5]=cx*cz-sx*sy*sz;d[6]=-cy*sx;d[8]=sx*sz-cx*cz*sy;d[9]=cz*sx+cx*sy*sz;d[10]=cx*cy;return this;}
+      transformPoint(v,out){const d=this.data,x=v.x,y=v.y,z=v.z;out.x=d[0]*x+d[4]*y+d[8]*z+d[12];out.y=d[1]*x+d[5]*y+d[9]*z+d[13];out.z=d[2]*x+d[6]*y+d[10]*z+d[14];return out;}
+    }
+    const pc={Vec3,Mat4},window={},clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+    let D=null,genes={},neckData=null,neckEnd=null,armMemo=null,reuseJoins=false;
+    const joinCache=new Map();let bodyStash=null;
+  `;
+  const functions=[vertexNormals,meshRayInside,meshInside,boundaryLoops,zipLoops,capCutLoop,nearestIndex,fuseHeadData,smoothCollar,joinParts,computeNeck,placePiece,mirrorZ,buildArm,sweepTail,computeBody];
+  const source=math+'const BODY_KEYS='+JSON.stringify([...NECK_GENES,...BODY_GENES])+';const smooth='+smooth.toString()+';const HAND_POSE='+JSON.stringify(HAND_POSE)+';const withInside='+withInside.toString()+';'+functions.map(f=>f.toString()).join('\n')+`
+    function transfers(value,out=new Set()) {if(ArrayBuffer.isView(value))out.add(value.buffer);else if(value && typeof value==='object')for(const v of Object.values(value))transfers(v,out);return out;}
+    onmessage=e=>{
+      const q=e.data;if(q.type==='init'){D=q.D;return;}
+      try{
+        const t=performance.now();genes=q.genes;joinCache.clear();armMemo=null;
+        const bodyCacheKey=genes.mix.join(',')+'/'+BODY_KEYS.map(k=>genes[k]).join(',');let body;
+        if(bodyStash && bodyStash.key===bodyCacheKey){const cached=structuredClone(bodyStash);neckData=cached.neckData;neckEnd=cached.neckEnd;body=cached.body;for(const [key,C]of cached.templates)joinCache.set(key,C);}
+        else {const neck=computeNeck(q.P);neckData=neck.data;neckEnd=neck.end;body=computeBody();bodyStash=structuredClone({key:bodyCacheKey,neckData,neckEnd,body,templates:Array.from(joinCache)});}
+        let fused=null,fuseError=null;
+        if(q.crestP)try{fused=fuseHeadData(q.pre,q.reg,q.jw,q.crestP);}catch(error){fuseError=error.message;}
+        const hP=fused?fused.P:q.P,hI=fused?fused.I:D.I;
+        if(body.joined)joinParts(hP,hI,{PP:body.P,I:body.I,inside:null},neckEnd.r*0.8,fused?'head-body-crest':'head-body');
+        const result={epoch:q.epoch,fingers:genes.fingers,body,neckData,neckEnd,templates:Array.from(joinCache),fused,fuseError,ms:performance.now()-t};
+        postMessage(result,Array.from(transfers(result)));
+      }catch(error){postMessage({epoch:q.epoch,error:error.message});}
+    };
+  `;
+  const url=URL.createObjectURL(new Blob([source],{type:'application/javascript'}));
+  try { geometryWorker=new Worker(url); } catch(error) { URL.revokeObjectURL(url);workerStats.error=error.message;return; }
+  geometryWorker.onmessage=e=>{
+    workerBusy=false;const result=e.data;
+    if(result.epoch!==geometryEpoch){workerStats.discarded++;pumpGeometryWorker();return;}
+    if(result.error){workerStats.error=result.error;$('fuseOut').textContent='Seam refinement failed: '+result.error;pumpGeometryWorker();return;}
+    for(const [key,template] of result.templates)joinCache.set(key,template);
+    neckData=result.neckData;neckEnd=result.neckEnd;bodyJ=result.body.joined?result.body:null;activeFingerCount=result.fingers;bodyKey=neckKey+'/'+geometryKey(BODY_GENES);
+    workerStats.completed++;workerStats.ms=result.ms;workerStats.error=result.fuseError;
+    if(result.fused)fusedHeadState=result.fused;
+    const live=liveHead(cachedHeadJw,cachedHeadReg);mergeCreature(live.P,live.I,live.jw,live.reg);
+    if(live.fused)crestPart.ent.enabled=false;
+    $('fuseOut').textContent=result.fuseError?'Crest refinement: '+result.fuseError:live.fused?'Crest welded · local seam updates active':'Local welded seams active';
+    pumpGeometryWorker();
+  };
+  geometryWorker.onerror=e=>{workerStats.error=e.message;workerBusy=false;queuedGeometry=null;geometryWorker.terminate();geometryWorker=null;$('fuseOut').textContent='Live welded seams active; background refinement unavailable.';};
+  geometryWorker.postMessage({type:'init',D:{P:D.P,I:D.I,body:D.body,neckSeg:D.neckSeg,arm:D.arm,crest:D.crest,eyes:D.eyes}});
+  URL.revokeObjectURL(url);
+}
+function scheduleGeometryRefinement() {
+  const key=genes.mix.join(',')+'/'+geometryKey(['snout',...NECK_GENES,...BODY_GENES,'crest']);
+  if(key===refinementKey)return;
+  if(!refinementKey && !crestP){refinementKey=key;return;}
+  refinementKey=key;geometryEpoch++;clearTimeout(fuseTimer);
+  if(!geometryWorker)return;
+  $('fuseOut').textContent=crestP && !fusedHeadState?'Growing crest seam…':'Local welded seams active';
+  fuseTimer=setTimeout(()=>{queuedGeometry={type:'refine',epoch:geometryEpoch,genes:{...genes,mix:genes.mix.slice()},P:pos.slice(),pre:headPre.slice(),jw:cachedHeadJw.slice(),reg:cachedHeadReg.slice(),crestP:crestP?crestP.slice():null};pumpGeometryWorker();},180);
+}
+function pumpGeometryWorker() {
+  if(workerBusy || !queuedGeometry || !geometryWorker)return;
+  const q=queuedGeometry;queuedGeometry=null;workerBusy=true;
+  const transfers=[q.P.buffer,q.pre.buffer,q.jw.buffer,q.reg.buffer];if(q.crestP)transfers.push(q.crestP.buffer);
+  geometryWorker.postMessage(q,transfers);
 }
 // ---------- teeth: the tooth library placed along each jaw's gum line ----------
 // gum line = where the pink mouth meets skin on that jaw (behind any beak). One base tooth is wrapped onto every
@@ -1035,8 +946,8 @@ function placeTeeth(w, jw, reg) {
 // segment's ring profile (repeated, mirrored, along the length). Same skin material as the head; capped ends.
 let neck = null, neckEnd = null, neckData = null;
 function buildNeck() { const ent = new pc.Entity('neck'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); neck = { ent, mesh: null }; }
-function placeNeck() {
-  if (!neck || !D.neckSeg) return;
+function computeNeck(pos) {
+  if (!D.neckSeg) return;
   const n = pos.length / 3; let xmin = Infinity;
   for (let v = 0; v < n; v++) xmin = Math.min(xmin, pos[v*3]);
   // back of the head: its centre and half-sizes over the rearmost 6 cm
@@ -1056,7 +967,7 @@ function placeNeck() {
   const len = cum[M], at = d => { let i = 1; while (i < M && cum[i] < d) i++; const f = (d - cum[i-1]) / (cum[i] - cum[i-1] || 1); return [pts[i-1][0] + (pts[i][0] - pts[i-1][0]) * f, pts[i-1][1] + (pts[i][1] - pts[i-1][1]) * f]; };
   const S = D.neckSeg, NA = S.na, NT = S.nt, prof = (t, j) => { const tt = t - Math.floor(t), tm = tt < 0.5 ? 2 * tt : 2 - 2 * tt, y = tm * (NT - 1), i = Math.floor(y), f = y - i; const a = S.r[Math.min(NT - 1, i) * NA + j], b = S.r[Math.min(NT - 1, i + 1) * NA + j]; return a + (b - a) * f; };
   const segLen = 2 * S.aspect * Math.max(ry0, rz0);                      // one mirrored period of the folds
-  const NR = NA, NS = Math.max(24, Math.round(len / 0.006)), CAP = 8, P = [], I = [];
+  const NR = NA, NS = 96, CAP = 8, P = [], I = [];
   const ring = (d, scaleCap) => {
     const c = at(d), c1 = at(Math.max(0, d - 0.002)), c2 = at(Math.min(len, d + 0.002));
     let tx = c2[0] - c1[0], ty = c2[1] - c1[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
@@ -1083,21 +994,60 @@ function placeNeck() {
   let flipped = false;
   { const a = I[0] * 3, cc = at(0); if ((PP[a] - cc[0]) * NN[a] + (PP[a+1] - cc[1]) * NN[a+1] + PP[a+2] * NN[a+2] < 0) { flipped = true; for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } } }
   const N2 = vertexNormals(PP, I), nv = PP.length / 3;
-  // a fresh mesh each time, attached only once all its streams exist (the material picks its variant from them)
-  const m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(I) : Uint16Array.from(I));
-  setSurface(m, PP, N2, new Float32Array(nv), new Float32Array(nv * 3));
-  { const mi = new pc.MeshInstance(m, mat); mi.cull = false; neck.ent.render.meshInstances = [mi]; }
-  if (neck.mesh) neck.mesh.destroy(); neck.mesh = m;
-  neckData = { PP, NR, NS, st, flipped, I, inside: meshInside(PP, N2, 0.03) };
-  neckEnd = { p: at(len), d: (() => { const a = at(len), b = at(len - 0.01); const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [(a[0] - b[0]) / l, (a[1] - b[1]) / l]; })(), r: Math.max(ry0, rz0) * genes.neckFlare };
-  window.__neck = { len, ry0, rz0, nv, P: PP, N: N2, I, mesh: neck.mesh, ent: neck.ent };
+  const data = { PP, NR, NS, st, flipped, I, inside: null };
+  const end = { p: at(len), d: (() => { const a = at(len), b = at(len - 0.01); const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [(a[0] - b[0]) / l, (a[1] - b[1]) / l]; })(), r: Math.max(ry0, rz0) * genes.neckFlare };
+  return { data, end };
+}
+const NECK_GENES = ['cranium','height','jawDepth','width','boost','neckLen','neckAngle','neckCurve','neckThick','neckFlare','neckRings'];
+const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay'];
+const geometryKey = ids => ids.map(id => genes[id]).join(',');
+let neckKey = '', bodyKey = '';
+function placeNeck() {
+  const key = genes.mix.join(',') + '/' + geometryKey(NECK_GENES);
+  if (key === neckKey && neckData) return;
+  const result = computeNeck(pos); if (!result) return;
+  neckData = result.data; neckEnd = result.end; neckKey = key;
+  const { PP, I } = neckData, nv = PP.length / 3;
+  if (creatureMesh) return;
+  if (!neck.mesh) { neck.mesh = new pc.Mesh(app.graphicsDevice); neck.mesh.clear(true, true); const mi = new pc.MeshInstance(neck.mesh, mat); mi.cull = false; neck.ent.render.meshInstances = [mi]; }
+  neck.mesh.setIndices(nv > 65535 ? Uint32Array.from(I) : Uint16Array.from(I));
+  setSurface(neck.mesh, PP, vertexNormals(PP, I), new Float32Array(nv), new Float32Array(nv*3));
+  window.__neck = { P: PP, I, mesh: neck.mesh, ent: neck.ent };
 }
 // ---------- body: shared base body, blended per vertex by the body DNA (like the head), at the end of the neck ----------
 // body frame: x forward (the neck end), y up, z the mirror plane. The neck's end sits inside the front of the body.
 let body = null, bodyJ = null, creatureMesh = null, creatureData = null;
 function buildBody() { const ent = new pc.Entity('body'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); body = { ent, mesh: null }; }
-// inside test for a closed mesh: nearest vertex (hash grid) and its normal
-function meshInside(P, N, cell) {
+// Closed surfaces use triangle crossings. A nearest-vertex normal misclassifies
+// deep overlaps and concave folds, leaving caps and holes in the connection.
+function meshRayInside(P, I, cell) {
+  const grid = new Map(), triangles = [], key = (y, z) => y + ',' + z;
+  for (let t = 0; t < I.length; t += 3) {
+    const a = I[t] * 3, b = I[t+1] * 3, c = I[t+2] * 3;
+    const y = P[a+1], z = P[a+2], uy = P[b+1]-y, uz = P[b+2]-z, vy = P[c+1]-y, vz = P[c+2]-z;
+    const det = uy*vz-uz*vy; if (Math.abs(det) < 1e-14) continue;
+    const q = triangles.length; triangles.push([y,z,uy,uz,vy,vz,P[a],P[b]-P[a],P[c]-P[a],1/det]);
+    const y0 = Math.floor(Math.min(y,P[b+1],P[c+1])/cell), y1 = Math.floor(Math.max(y,P[b+1],P[c+1])/cell);
+    const z0 = Math.floor(Math.min(z,P[b+2],P[c+2])/cell), z1 = Math.floor(Math.max(z,P[b+2],P[c+2])/cell);
+    for (let j = y0; j <= y1; j++) for (let k = z0; k <= z1; k++) {
+      const s = key(j,k); if (!grid.has(s)) grid.set(s,[]); grid.get(s).push(q);
+    }
+  }
+  return (x,y,z) => {
+    // Consistent tiny offsets keep rays off shared projected edges and poles.
+    y += 1.3e-9; z += 2.7e-9;
+    const list = grid.get(key(Math.floor(y/cell),Math.floor(z/cell))); if (!list) return false;
+    let crossings = 0;
+    for (const q of list) {
+      const a = triangles[q], dy = y-a[0], dz = z-a[1];
+      const u = (dy*a[5]-dz*a[4])*a[9], v = (a[2]*dz-a[3]*dy)*a[9];
+      if (u >= 0 && v >= 0 && u+v <= 1 && a[6]+u*a[7]+v*a[8] > x+1e-8) crossings++;
+    }
+    return (crossings & 1) !== 0;
+  };
+}
+function meshInside(P, N, cell, I) {
+  if (I) return meshRayInside(P, I, cell);
   const g = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
   for (let v = 0; v < P.length / 3; v++) { const k = key(Math.floor(P[v*3] / cell), Math.floor(P[v*3+1] / cell), Math.floor(P[v*3+2] / cell)); if (!g.has(k)) g.set(k, []); g.get(k).push(v); }
   return (x, y, z) => {
@@ -1108,31 +1058,90 @@ function meshInside(P, N, cell) {
 }
 // neck + body -> one mesh: the neck is kept up to its last ring fully outside the body, the body loses the triangles
 // the neck covers, the ring is stitched to the body's hole, and the collar is smoothed into a fillet
-function joinParts(PB, IB, part, rCollar) {
+const joinCache = new Map();
+let reuseJoins = true;
+function smoothCollar(P, C) {
+  const { sel, wts, adj, scratch } = C;
+  if(!C.required) { const required=new Set(sel);for(const row of adj)for(const v of row)required.add(v);C.required=Uint32Array.from(required);C.lastInput=new Float32Array(C.required.length*3);C.lastOutput=new Float32Array(sel.length*3);C.hasOutput=false; }
+  let unchanged=C.hasOutput;
+  for(let i=0;i<C.required.length;i++) { const a=C.required[i]*3;for(let k=0;k<3;k++){const q=i*3+k;if(P[a+k]!==C.lastInput[q])unchanged=false;C.lastInput[q]=P[a+k];} }
+  if(unchanged) {for(let i=0;i<sel.length;i++){const a=sel[i]*3;P[a]=C.lastOutput[i*3];P[a+1]=C.lastOutput[i*3+1];P[a+2]=C.lastOutput[i*3+2];}return;}
+  for (let it = 0; it < 24; it++) {
+    const fac = it % 2 ? -0.53 : 0.5;
+    for (let i = 0; i < sel.length; i++) {
+      const v = sel[i], ns = adj[i]; let x = 0, y = 0, z = 0;
+      for (let q = 0; q < ns.length; q++) { const u = ns[q] * 3; x += P[u]; y += P[u+1]; z += P[u+2]; }
+      const a = v * 3, k = fac * wts[i], den = ns.length || 1;
+      scratch[i*3] = P[a] + k * (x / den - P[a]);
+      scratch[i*3+1] = P[a+1] + k * (y / den - P[a+1]);
+      scratch[i*3+2] = P[a+2] + k * (z / den - P[a+2]);
+    }
+    // Only the collar is touched. All rows read the previous iteration before any row is written.
+    for (let i = 0; i < sel.length; i++) { const a = sel[i] * 3; P[a] = scratch[i*3]; P[a+1] = scratch[i*3+1]; P[a+2] = scratch[i*3+2]; }
+  }
+  for(let i=0;i<sel.length;i++){const a=sel[i]*3;C.lastOutput[i*3]=P[a];C.lastOutput[i*3+1]=P[a+1];C.lastOutput[i*3+2]=P[a+2];}C.hasOutput=true;
+}
+function joinParts(PB, IB, part, rCollar, key) {
+  const cached = key && joinCache.get(key);
+  if (reuseJoins && cached && part && cached.nb === PB.length && cached.nn === part.PP.length) {
+    if (!cached.joined) return { P: PB, I: cached.I, joined: false };
+    const P = new Float32Array(PB.length + part.PP.length + (cached.capCenters?.length || 0)*3); P.set(PB); P.set(part.PP, PB.length);
+    for (const {v,source} of cached.capCenters || []) for (let k=0;k<3;k++) { let sum=0;for(const u of source)sum+=P[u*3+k];P[v*3+k]=sum/source.length; }
+    smoothCollar(P, cached);
+    return { P, I: cached.I, joined: true, capCenters:cached.capCenters };
+  }
   if (!part) return { P: PB, I: Array.from(IB), joined: false };
   const { PP, I: IN } = part, nb = PB.length / 3, nn = PP.length / 3;
-  const NB = vertexNormals(PB, IB), inBody = meshInside(PB, NB, 0.03), inNeck = part.inside;
+  const NB = vertexNormals(PB, IB), inBody = meshInside(PB, NB, 0.03, IB), inNeck = part.inside || meshInside(PP, vertexNormals(PP, IN), 0.03, IN);
   // cut both along their intersection: neck triangles outside the body, body triangles outside the neck
   const outN = new Uint8Array(nn); for (let v = 0; v < nn; v++) outN[v] = inBody(PP[v*3], PP[v*3+1], PP[v*3+2]) ? 0 : 1;
   const outB = new Uint8Array(nb); for (let v = 0; v < nb; v++) outB[v] = inNeck(PB[v*3], PB[v*3+1], PB[v*3+2]) ? 0 : 1;
   const I = []; for (let t = 0; t < IB.length; t += 3) if (outB[IB[t]] && outB[IB[t+1]] && outB[IB[t+2]]) I.push(IB[t], IB[t+1], IB[t+2]);
   const nI = []; for (let t = 0; t < IN.length; t += 3) if (outN[IN[t]] && outN[IN[t+1]] && outN[IN[t+2]]) nI.push(IN[t] + nb, IN[t+1] + nb, IN[t+2] + nb);
-  if (nI.length === IN.length) return { P: PB, I: Array.from(IB), joined: false };   // the neck does not reach the body
-  const P = new Float32Array((nb + nn) * 3); P.set(PB); P.set(PP, nb * 3);
-  // weld: each vertex on the neck's cut edge moves onto the nearest vertex of the body's cut edge
+  if (nI.length === IN.length) { const I = Array.from(IB); if (key) joinCache.set(key, { nb: PB.length, nn: PP.length, I, joined: false }); return { P: PB, I, joined: false }; }   // the neck does not reach the body
+  let P = new Float32Array((nb + nn) * 3); P.set(PB); P.set(PP, nb * 3);
+  // Connect complete cut loops with a triangle strip. Collapsing several cut
+  // vertices onto one nearest vertex creates nonmanifold fans and visible gaps.
   const bl = boundaryLoops(I), nl = boundaryLoops(nI);
   const bodyEdge = []; for (const L of bl) for (const v of L) bodyEdge.push(v);
   const d2 = (a, b) => (P[a*3]-P[b*3])**2 + (P[a*3+1]-P[b*3+1])**2 + (P[a*3+2]-P[b*3+2])**2;
-  const weld = new Map();
-  for (const L of nl) for (const v of L) { let best = -1, bd = Infinity; for (const u of bodyEdge) { const d = d2(v, u); if (d < bd) { bd = d; best = u; } } if (best >= 0 && bd < 0.04 * 0.04) weld.set(v, best); }
-  for (let t = 0; t < nI.length; t++) { const w2 = weld.get(nI[t]); if (w2 !== undefined) nI[t] = w2; }
-  for (let t = 0; t < nI.length; t += 3) { const a = nI[t], b = nI[t+1], c = nI[t+2]; if (a !== b && b !== c && a !== c) I.push(a, b, c); }
-  // whatever gaps are left along the seam are filled
-  for (const L of boundaryLoops(I)) for (let k = 1; k < L.length - 1; k++) I.push(L[0], L[k+1], L[k]);
+  for (const v of nI) I.push(v);
+  const candidates = [];
+  const loopDistance = (A,B) => {
+    let sum = 0;
+    for (const v of A) { let best = Infinity; for (const u of B) best = Math.min(best,d2(v,u)); sum += best; }
+    return sum/A.length;
+  };
+  const limit = Math.max(0.015,Math.min(0.06,rCollar*0.8));
+  for (let a = 0; a < bl.length; a++) for (let b = 0; b < nl.length; b++) {
+    const distance = Math.max(loopDistance(bl[a],nl[b]),loopDistance(nl[b],bl[a]));
+    if (distance < limit*limit) candidates.push({a,b,distance});
+  }
+  candidates.sort((a,b) => a.distance-b.distance);
+  const usedB = new Set(), usedN = new Set();
+  for (const c of candidates) {
+    if (usedB.has(c.a) || usedN.has(c.b)) continue;
+    usedB.add(c.a); usedN.add(c.b);
+    for (const v of zipLoops(bl[c.a],nl[c.b],P)) I.push(v);
+  }
+  // Only unmatched new cut loops need a cap. Paired seams stay connected by
+  // their strip, including when cached positions deform between refinements.
+  const capCenters = [];
+  for (const [loops,used] of [[bl,usedB],[nl,usedN]]) for (let i = 0; i < loops.length; i++) {
+    if (used.has(i)) continue;
+    const rest = capCutLoop(I,loops[i],P);
+    if (rest.length) {
+      const v=P.length/3, next=new Float32Array(P.length+3);next.set(P);
+      for(let k=0;k<3;k++)next[v*3+k]=rest.reduce((s,u)=>s+P[u*3+k],0)/rest.length;
+      P=next;capCenters.push({v,source:Uint32Array.from(rest)});
+      for(let j=0;j<rest.length;j++)I.push(v,rest[(j+1)%rest.length],rest[j]);
+    }
+  }
   // fillet: smooth a collar around the seam (weighted by distance to it)
   const nv = P.length / 3, adj = Array.from({ length: nv }, () => []);
   for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const a = I[t+e], b = I[t+(e+1)%3]; adj[a].push(b); adj[b].push(a); }
-  const seam = [...new Set(bodyEdge)], R = 1.8 * rCollar, sel = [], wts = [];
+  const seam = [...new Set(bodyEdge.concat(...nl))], neckJoin = key === 'body-neck' || key?.startsWith('head-body');
+  const R = Math.min(1.8 * rCollar, neckJoin ? 0.10 : 0.045), sel = [], wts = [];
   const gs = new Map(), ck = (x, y, z) => Math.floor(x / R) + ',' + Math.floor(y / R) + ',' + Math.floor(z / R);
   for (const u of seam) { const k = ck(P[u*3], P[u*3+1], P[u*3+2]); if (!gs.has(k)) gs.set(k, []); gs.get(k).push(u); }
   for (let v = 0; v < nv; v++) {
@@ -1141,12 +1150,12 @@ function joinParts(PB, IB, part, rCollar) {
     for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const l = gs.get((cx+dx) + ',' + (cy+dy) + ',' + (cz+dz)); if (l) for (const u of l) bd = Math.min(bd, d2(v, u)); }
     const d = Math.sqrt(bd); if (d < R) { sel.push(v); wts.push(0.5 + 0.5 * Math.cos(Math.PI * d / R)); }
   }
-  for (let it = 0; it < 24; it++) {
-    const Q = P.slice(), k0 = it % 2 ? -0.53 : 0.5;
-    sel.forEach((v, i) => { const a = adj[v]; let x = 0, y = 0, z = 0; for (const u of a) { x += Q[u*3]; y += Q[u*3+1]; z += Q[u*3+2]; } const k = k0 * wts[i];
-      P[v*3] += k * (x / a.length - Q[v*3]); P[v*3+1] += k * (y / a.length - Q[v*3+1]); P[v*3+2] += k * (z / a.length - Q[v*3+2]); });
-  }
-  return { P, I, joined: true };
+  const template = { nb: PB.length, nn: PP.length, I, joined: true, capCenters,
+    sel: Uint32Array.from(sel), wts: Float32Array.from(wts),
+    adj: sel.map(v => Uint32Array.from(adj[v])), scratch: new Float32Array(sel.length * 3) };
+  if (key) joinCache.set(key, template);
+  smoothCollar(P, template);
+  return { P, I, joined: true, capCenters };
 }
 // tail: the neck segment's folds swept along a spline from inside the hips, tapering to a point
 function sweepTail(P0, d0, ry0, rz0) {
@@ -1181,37 +1190,46 @@ function sweepTail(P0, d0, ry0, rz0) {
   const PP = new Float32Array(P), NN = vertexNormals(PP, I);
   { const a = NR * 2 * 3, cc = at(len * 2 / NS); if ((PP[a] - cc[0]) * NN[a] + (PP[a+1] - cc[1]) * NN[a+1] + PP[a+2] * NN[a+2] < 0) for (let q = 0; q < I.length; q += 3) { const x = I[q+1]; I[q+1] = I[q+2]; I[q+2] = x; } }
   const N2 = vertexNormals(PP, I);
-  return { PP, I, inside: meshInside(PP, N2, 0.03), r: Math.max(ry0, rz0) };
+  return { PP, I, inside: null, r: Math.max(ry0, rz0) };
 }
 // the whole animal as one skinned mesh: head (with its jaw weights and regions) + the body/neck/tail mesh, joined
 // where the neck enters the head; everything outside the head rides the skull bone
 // blink fast path: copy the head vertices the socket moved into the merged mesh, refresh its normals and surface
 function blinkUpdate() {
-  const C = creatureData, P = C.P, h0 = C.head0;
-  for (let v = 0; v < C.nh; v++) {
+  const C = creatureData, P = C.P, h0 = C.head0, nh = Math.min(C.nh, pos.length / 3);
+  for (let v = 0; v < nh; v++) {
     const a = v * 3;
     if (Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) > 1e-7) { P[a] = pos[a]; P[a+1] = pos[a+1]; P[a+2] = pos[a+2]; }
     else if (P[a] !== h0[a]) { /* collar-smoothed vertex: keep its merged position */ }
   }
-  for (let v = 0; v < C.nh; v++) { const a = v * 3; if (Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) <= 1e-7 && C.moved && C.moved[v]) { P[a] = h0[a]; P[a+1] = h0[a+1]; P[a+2] = h0[a+2]; } }
+  for (let v = 0; v < nh; v++) { const a = v * 3; if (Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) <= 1e-7 && C.moved && C.moved[v]) { P[a] = h0[a]; P[a+1] = h0[a+1]; P[a+2] = h0[a+2]; } }
   C.moved = C.moved || new Uint8Array(C.nh);
-  for (let v = 0; v < C.nh; v++) { const a = v * 3; C.moved[v] = Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) > 1e-7 ? 1 : 0; }
-  setSurface(creatureMesh, P, vertexNormals(P, C.I), C.jw, C.reg);
+  for (let v = 0; v < nh; v++) { const a = v * 3; C.moved[v] = Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) > 1e-7 ? 1 : 0; }
+  setSurface(creatureMesh, P, surfaceNormals(creatureMesh, P, C.I), C.jw, C.reg);
 }
 function mergeCreature(hP, hI, jw, reg) {
   if (!bodyJ || !headMI) return;
-  const part = { PP: bodyJ.P, I: bodyJ.I, inside: meshInside(bodyJ.P, vertexNormals(bodyJ.P, bodyJ.I), 0.03) };
-  const J = joinParts(hP, hI, part, neckEnd ? neckEnd.r * 0.8 : 0.05);
+  const part = { PP: bodyJ.P, I: bodyJ.I, inside: () => false };
+  if (!reuseJoins || !joinCache.has(hP.length > D.P.length ? 'head-body-crest' : 'head-body')) part.inside = meshInside(bodyJ.P, vertexNormals(bodyJ.P, bodyJ.I), 0.03, bodyJ.I);
+  const J = joinParts(hP, hI, part, neckEnd ? neckEnd.r * 0.8 : 0.05, hP.length > D.P.length ? 'head-body-crest' : 'head-body');
   if (!J.joined) return;
   const nh = hP.length / 3, nv = J.P.length / 3, jw2 = new Float32Array(nv), reg2 = new Float32Array(nv * 3);
   jw2.set(jw.subarray ? jw.subarray(0, nh) : jw.slice(0, nh)); reg2.set(reg.subarray ? reg.subarray(0, nh * 3) : reg.slice(0, nh * 3));
-  const m = new pc.Mesh(app.graphicsDevice); m.setPositions(J.P); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
-  const bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
-  for (let v = 0; v < nv; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw2[v]; bw[v*4+1] = jw2[v]; }
-  m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, nv, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
-  m.skin = baseMesh.skin;
-  setSurface(m, J.P, vertexNormals(J.P, J.I), jw2, reg2);
-  headMI.mesh = m; if (creatureMesh) creatureMesh.destroy(); creatureMesh = m;
+  for (const {v,source} of J.capCenters || []) {
+    for (const u of source) {jw2[v]+=jw2[u]/source.length;for(let k=0;k<3;k++)reg2[v*3+k]+=reg2[u*3+k]/source.length;}
+  }
+  const same = creatureMesh && creatureData && creatureData.I === J.I && creatureData.P.length === J.P.length;
+  const m = same ? creatureMesh : new pc.Mesh(app.graphicsDevice);
+  if (!same) { m.clear(true, true); m.setPositions(J.P); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I)); }
+  if (!same) {
+    const bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
+    for (let v = 0; v < nv; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw2[v]; bw[v*4+1] = jw2[v]; }
+    m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, nv, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
+    m.skin = baseMesh.skin;
+  }
+  setSurface(m, J.P, surfaceNormals(m, J.P, J.I), jw2, reg2);
+  if(!same)window.__uploads={dirtyVertices:nv,totalVertices:nv,bytes:m.vertexBuffer.numBytes,fullBytes:m.vertexBuffer.numBytes};
+  headMI.mesh = m; if (creatureMesh && creatureMesh !== m) creatureMesh.destroy(); creatureMesh = m;
   body.ent.enabled = false; neck.ent.enabled = false;
   window.__creature = { verts: nv };
   creatureData = { P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP) };
@@ -1223,14 +1241,17 @@ function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x a
     for (let a = 0; a < 3; a++) P[v*3+a] = o[a] + dx[a] * x + dy[a] * y + dz[a] * z; }
   return { PP: P, I: pc0.idx.slice() };
 }
-const withInside = m => { m.inside = meshInside(m.PP, vertexNormals(m.PP, m.I), 0.02); return m; };
+const withInside = m => { m.inside = null; return m; };
 function mirrorZ(m) { const P = m.PP.slice(); for (let v = 0; v < P.length; v += 3) P[v+2] *= -1; const I = m.I.slice(); for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } return withInside({ PP: P, I, r: m.r }); }
 const HAND_POSE = {   // from the Hand Pose Rig (sheet units, XYZ degrees, forearm frame)
   hand: { p: [0.403, 0.02, -0.003], r: [93, 4, -27], s: 0.5 },
   finger1: { p: [0.472, 0.009, 0.026], r: [15, -18, -32], s: 0.5 },
   finger2: { p: [0.525, -0.009, 0.003], r: [0, 0, -25], s: 0.5 },
   finger3: { p: [0.514, 0.003, -0.055], r: [-4, 20, -36], s: 0.45 } };
+let armMemo = null;
 function buildArm(sh, f, u, bodySc) {
+  const cacheKey = sh.concat(f, u, [bodySc], ['armSize','armThick','armShoulder','armElbow','armWrist','armSplay','handSize','fingerSize','fingers'].map(k => genes[k])).join(',');
+  if (reuseJoins && armMemo && armMemo.key === cacheKey) return armMemo.value;
   const K = D.arm; if (!K) return null;
   const s = genes.armSize * bodySc, th = genes.armThick, rad = Math.PI / 180, spl = genes.armSplay * rad;
   const dirAt = a => { const d = [Math.cos(a) * f[0] + Math.sin(a) * u[0], Math.cos(a) * f[1] + Math.sin(a) * u[1], 0], c = Math.cos(spl); return [d[0] * c, d[1] * c, Math.sin(spl)]; };
@@ -1254,23 +1275,24 @@ function buildArm(sh, f, u, bodySc) {
     return [0, 1, 2].map(i => el[i] + (fo0[0][i] * v.x + fo0[1][i] * v.y + fo0[2][i] * v.z) * s);
   };
   const posed = (key, piece, k) => {
-    // two fingers: each sits in a gap of the three-finger layout (position and angle averaged), centring the pair
     const HP = HAND_POSE, mix = (A, B) => ({ p: A.p.map((v, i) => (v + B.p[i]) / 2), r: A.r.map((v, i) => (v + B.r[i]) / 2), s: (A.s + B.s) / 2 });
-    const T = genes.fingers < 3 && key === 'finger1' ? mix(HP.finger1, HP.finger2) : genes.fingers < 3 && key === 'finger2' ? mix(HP.finger2, HP.finger3) : HP[key];
-    const M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3), tp = T.p;
+    const T = genes.fingers < 3 && key === 'finger1' ? mix(HP.finger1, HP.finger2) : genes.fingers < 3 && key === 'finger2' ? mix(HP.finger2, HP.finger3) : HP[key], M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3);
+    // two fingers: the pair moves over by half the spacing so it sits centred where the three-finger set was
+    const H3 = HAND_POSE.finger3.p, H2 = HAND_POSE.finger2.p, off = key.startsWith('finger') && genes.fingers < 3 ? [0, 1, 2].map(a => (H3[a] - H2[a]) / 2) : [0, 0, 0];
+    const tp = [0, 1, 2].map(a => T.p[a] + off[a]);
     for (let v = 0; v < n; v++) { const w = toWorld([Q[v*3], Q[v*3+1], Q[v*3+2]], M, tp, T.s * k); P[v*3] = w[0]; P[v*3+1] = w[1]; P[v*3+2] = w[2]; }
     return withInside({ PP: P, I: piece.idx.slice() });
   };
   window.__wrist = toWorld([0, 0, 0], new pc.Mat4(), hp, 1);
   let A = withInside(up);
-  for (const p of [withInside(fo), posed('hand', K.hand, hs)]) { const J = joinParts(A.PP, A.I, p, K.fore.rad * s * th); A = withInside({ PP: J.P, I: J.I }); }
+  let armJoin = 0; for (const p of [withInside(fo), posed('hand', K.hand, hs)]) { const J = joinParts(A.PP, A.I, p, K.fore.rad * s * th, 'arm-joint-' + armJoin++); A = withInside({ PP: J.P, I: J.I }); }
   const keys = genes.fingers >= 3 ? ['finger1', 'finger2', 'finger3'] : ['finger1', 'finger2'];   // 2 = T. rex, 3 = theropod; no thumb
-  for (const kf of keys) { const J = joinParts(A.PP, A.I, posed(kf, K.finger, fsz), K.finger.rad * s * HAND_POSE[kf].s * fsz); A = withInside({ PP: J.P, I: J.I }); }
+  for (const kf of keys) { const J = joinParts(A.PP, A.I, posed(kf, K.finger, fsz), K.finger.rad * s * HAND_POSE[kf].s * fsz, 'arm-' + kf); A = withInside({ PP: J.P, I: J.I }); }
   A.r = K.upper.rad * s * th;
-  return A;
+  armMemo = { key: cacheKey, value: A }; return A;
 }
-function placeBody() {
-  if (!body || !D.body || !neckEnd) return;
+function computeBody() {
+  if (!D.body || !neckEnd) return;
   const B = D.body, n = B.P.length / 3, wsum = (genes.bodyA + genes.bodyB + genes.bodyC) || 1, w = [genes.bodyA / wsum, genes.bodyB / wsum, genes.bodyC / wsum];
   const P = new Float32Array(n * 3), sc = genes.bodySize, k = genes.bodyBoost;
   for (let v = 0; v < n * 3; v++) { let d = 0; for (let t = 0; t < 3; t++) if (w[t]) d += w[t] * B.D[t][v]; P[v] = B.P[v] + d * k; }
@@ -1287,7 +1309,7 @@ function placeBody() {
     const x = (P[v*3] - ax) * sc, y = (P[v*3+1] - ay) * sc * genes.bodyHeight;
     P[v*3] = tx + x * c - y * s2; P[v*3+1] = ty + x * s2 + y * c; P[v*3+2] *= sc * genes.bodyWidth;
   }
-  const J1 = joinParts(P, B.I, neckData, neckEnd.r);
+  const J1 = joinParts(P, B.I, neckData, neckEnd.r, 'body-neck');
   // tail: from deep in the hips, backward along the body's axis
   // the body's own cross-section near its rear sets the tail's start: centred in it, 85% of its size
   const bl = xmax - xmin0, xe = xmin0 + 0.25 * bl; let sylo = Infinity, syhi = -Infinity, szw = 0;
@@ -1296,7 +1318,7 @@ function placeBody() {
   const rx0 = ((tx0 - ax) * sc), ry0b = ((ty0 - ay) * sc * genes.bodyHeight);
   const tStart = [tx + rx0 * c - ry0b * s2, ty + rx0 * s2 + ry0b * c];
   const tail = sweepTail(tStart, [bx, by], 0.8 * 0.5 * (syhi - sylo) * sc * genes.bodyHeight * genes.tailThick, 0.8 * szw * sc * genes.bodyWidth * genes.tailThick);
-  let J = joinParts(J1.P, J1.I, tail, tail.r);
+  let J = joinParts(J1.P, J1.I, tail, tail.r, 'body-tail');
   // arms: shoulder on the side of the chest, the arm built and merged on its own, mirrored for the other side
   { // shoulder: on the side wall of the chest at mid height, the shoulder ball half sunk into the skin
     const xs = xmin0 + 0.74 * bl, ys = ylo + 0.5 * (yhi - ylo); let zs = 0;
@@ -1304,13 +1326,21 @@ function placeBody() {
     const ball = D.arm ? D.arm.upper.rad * genes.armSize * sc * genes.armThick : 0;
     const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zs * sc * genes.bodyWidth - 0.5 * ball];
     const A = buildArm(sh, [c, s2], [-s2, c], sc);
-    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A); J = joinParts(J.P, J.I, part, A.r); } }
-  const nv = J.P.length / 3; window.__tailStart = tStart;
-  const N = vertexNormals(J.P, J.I), m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
-  setSurface(m, J.P, N, new Float32Array(nv), new Float32Array(nv * 3));
-  { const mi = new pc.MeshInstance(m, mat); mi.cull = false; body.ent.render.meshInstances = [mi]; } body.ent.enabled = true;
-  if (body.mesh) body.mesh.destroy(); body.mesh = m;
-  neck.ent.enabled = !J.joined; window.__join = { joined: J.joined, verts: nv }; bodyJ = J.joined ? J : null;
+    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side); } }
+  return J;
+}
+function placeBody() {
+  const key = neckKey + '/' + geometryKey(BODY_GENES);
+  if (bodyKey === key && bodyJ) return;
+  const J = computeBody(); if (!J) return; bodyKey = key;
+  const nv = J.P.length / 3;
+  bodyJ = J.joined ? J : null;
+  if (creatureMesh && J.joined) return;
+  if (!body.mesh) { body.mesh = new pc.Mesh(app.graphicsDevice); body.mesh.clear(true, true); const mi = new pc.MeshInstance(body.mesh, mat); mi.cull = false; body.ent.render.meshInstances = [mi]; }
+  body.mesh.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
+  setSurface(body.mesh, J.P, vertexNormals(J.P, J.I), new Float32Array(nv), new Float32Array(nv*3));
+  body.ent.enabled = true; neck.ent.enabled = !J.joined;
+  window.__join = { joined: J.joined, verts: nv }; bodyJ = J.joined ? J : null;
 }
 // ---------- tongue: a tapered, rounded rectangle swept along a spline on the floor of the lower jaw ----------
 const tongueMat = new pc.StandardMaterial();
@@ -1547,16 +1577,98 @@ function carveEyes(pos, nrm) {
   }
 }
 const BLINK_SQUASH = 0.8;
+const normalStates = new WeakMap();
+function surfaceNormals(m, P, I) {
+  const n = P.length / 3, nt = I.length / 3;
+  let C = normalStates.get(m);
+  if (!C || C.I !== I || C.P.length !== P.length) {
+    const degree = new Uint32Array(n);
+    for (let i = 0; i < I.length; i++) degree[I[i]]++;
+    const starts = new Uint32Array(n+1); for (let i = 0; i < n; i++) starts[i+1] = starts[i] + degree[i];
+    const faces = new Uint32Array(I.length), cursor = starts.slice();
+    for (let t = 0; t < nt; t++) for (let e = 0; e < 3; e++) faces[cursor[I[t*3+e]]++] = t;
+    C = { I, P: P.slice(), N: new Float32Array(P.length), sums: new Float64Array(P.length), faceN: new Float64Array(nt*3), starts, faces,
+      faceMark: new Uint32Array(nt), vertexMark: new Uint32Array(n), epoch: 0 };
+    normalStates.set(m, C);
+    const fn = C.faceN;
+    for (let t = 0; t < nt; t++) {
+      const a = I[t*3]*3, b = I[t*3+1]*3, c = I[t*3+2]*3;
+      const ex=P[b]-P[a], ey=P[b+1]-P[a+1], ez=P[b+2]-P[a+2], fx=P[c]-P[a], fy=P[c+1]-P[a+1], fz=P[c+2]-P[a+2];
+      fn[t*3]=ey*fz-ez*fy; fn[t*3+1]=ez*fx-ex*fz; fn[t*3+2]=ex*fy-ey*fx;
+      for (const v of [a,b,c]) for (let k=0;k<3;k++) C.sums[v+k]+=fn[t*3+k];
+    }
+    for (let v=0;v<n;v++) { const a=v*3, l=Math.hypot(C.sums[a],C.sums[a+1],C.sums[a+2])||1; for(let k=0;k<3;k++) C.N[a+k]=C.sums[a+k]/l; }
+    return C.N;
+  }
+  const epoch=++C.epoch, dirtyFaces=[], dirtyVerts=[];
+  for(let v=0;v<n;v++) {
+    const a=v*3; if(P[a]===C.P[a] && P[a+1]===C.P[a+1] && P[a+2]===C.P[a+2]) continue;
+    for(let j=C.starts[v];j<C.starts[v+1];j++) { const t=C.faces[j]; if(C.faceMark[t]!==epoch) {C.faceMark[t]=epoch;dirtyFaces.push(t);} }
+    C.P[a]=P[a];C.P[a+1]=P[a+1];C.P[a+2]=P[a+2];
+  }
+  for(const t of dirtyFaces) {
+    const a=I[t*3]*3,b=I[t*3+1]*3,c=I[t*3+2]*3;
+    const ex=P[b]-P[a],ey=P[b+1]-P[a+1],ez=P[b+2]-P[a+2],fx=P[c]-P[a],fy=P[c+1]-P[a+1],fz=P[c+2]-P[a+2];
+    const x=ey*fz-ez*fy,y=ez*fx-ex*fz,z=ex*fy-ey*fx, dx=x-C.faceN[t*3],dy=y-C.faceN[t*3+1],dz=z-C.faceN[t*3+2];
+    C.faceN[t*3]=x;C.faceN[t*3+1]=y;C.faceN[t*3+2]=z;
+    for(const va of [a,b,c]) { C.sums[va]+=dx;C.sums[va+1]+=dy;C.sums[va+2]+=dz;const v=va/3;if(C.vertexMark[v]!==epoch){C.vertexMark[v]=epoch;dirtyVerts.push(v);} }
+  }
+  for(const v of dirtyVerts) { const a=v*3,l=Math.hypot(C.sums[a],C.sums[a+1],C.sums[a+2])||1; C.N[a]=C.sums[a]/l;C.N[a+1]=C.sums[a+1]/l;C.N[a+2]=C.sums[a+2]/l; }
+  window.__localNormals={faces:dirtyFaces.length,totalFaces:nt,vertices:dirtyVerts.length};
+  return C.N;
+}
+const surfaceBuffers = new WeakMap();
 function setSurface(m, pos, nrm, jw, reg) {
-  const n = pos.length / 3, uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), uv2 = new Float32Array(n * 2), cl = new Uint8Array(n * 4);
-  for (let v = 0; v < n; v++) {
+  const n = pos.length / 3;
+  let buffers = surfaceBuffers.get(m);
+  if (!buffers || buffers.n !== n) { buffers = { n, uv0: new Float32Array(n*2), uv1: new Float32Array(n*2), uv2: new Float32Array(n*2), cl: new Uint8Array(n*4), previousP: new Float32Array(n*3), previousN: new Float32Array(n*3), previousJ: new Float32Array(n), previousR: new Float32Array(n*3), ready: false }; surfaceBuffers.set(m, buffers); }
+  const { uv0, uv1, uv2, cl, previousP, previousN, previousJ, previousR } = buffers;
+  const dirty=[];
+  for(let v=0;v<n;v++) {
+    const a=v*3;
+    if(!buffers.ready || pos[a]!==previousP[a] || pos[a+1]!==previousP[a+1] || pos[a+2]!==previousP[a+2] ||
+       nrm[a]!==previousN[a] || nrm[a+1]!==previousN[a+1] || nrm[a+2]!==previousN[a+2] || jw[v]!==previousJ[v] ||
+       reg[a]!==previousR[a] || reg[a+1]!==previousR[a+1] || reg[a+2]!==previousR[a+2]) dirty.push(v);
+  }
+  for (const v of dirty) {
     uv0[v*2] = pos[v*3]; uv0[v*2+1] = pos[v*3+1]; uv1[v*2] = pos[v*3+2]; uv1[v*2+1] = jw[v];
     const ny = nrm[v*3+1], belly = smooth(0.15, 0.7, -ny) * (1 - smooth(0.02, 0.09, pos[v*3+1] + 0.02));
     cl[v*4] = (nrm[v*3] * 0.5 + 0.5) * 255; cl[v*4+1] = (ny * 0.5 + 0.5) * 255; cl[v*4+2] = reg[v*3+2] * 255; cl[v*4+3] = belly * 255;
     uv2[v*2] = reg[v*3]; uv2[v*2+1] = reg[v*3+1];
   }
-  m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv0); m.setUvs(1, uv1); m.setUvs(2, uv2); m.setColors32(cl);
-  m.update(pc.PRIMITIVE_TRIANGLES, false);
+  const vb=m.vertexBuffer;
+  // VertexBuffer.unlock(offset,length) is supported by the pinned PlayCanvas 2.23 build.
+  // Update the existing storage and upload just dirty ranges; connectivity and bone indices stay intact.
+  if(buffers.ready && vb && m === creatureMesh && dirty.length < n*0.5) {
+    const storage=vb.lock(), floats=new Float32Array(storage), bytes=new Uint8Array(storage), elements=vb.format.elements;
+    const streams={ POSITION:[pos,3], NORMAL:[nrm,3], TEXCOORD0:[uv0,2], TEXCOORD1:[uv1,2], TEXCOORD2:[uv2,2], COLOR:[cl,4] };
+    const ranges=[];
+    for(const v of dirty) { const last=ranges[ranges.length-1]; if(last && v-last[1]<=32) last[1]=v;else ranges.push([v,v]); }
+    // Limit driver calls for scattered vertices. The CPU still only writes the changed vertices.
+    if(ranges.length>24 && dirty.length) ranges.splice(0,ranges.length,[dirty[0],dirty[dirty.length-1]]);
+    let uploaded=0;
+    for(const e of elements) {
+      const source=streams[e.name]; if(!source) continue;
+      const [data,components]=source, isColor=e.name==='COLOR';
+      for(const v of dirty) {
+        const at=e.offset+v*e.stride;
+        if(isColor) for(let k=0;k<components;k++) bytes[at+k]=data[v*components+k];
+        else for(let k=0;k<components;k++) floats[(at>>2)+k]=data[v*components+k];
+      }
+      for(const [lo,hi] of ranges) {
+        const first=e.offset+lo*e.stride,last=e.offset+hi*e.stride+components*(isColor?1:4);
+        const begin=first&~3,end=Math.min(vb.numBytes,(last+3)&~3);
+        vb.unlock(begin,end-begin); uploaded+=end-begin;
+      }
+    }
+    window.__uploads={dirtyVertices:dirty.length,totalVertices:n,bytes:uploaded,fullBytes:vb.numBytes};
+  } else {
+    m.setPositions(pos); m.setNormals(nrm); m.setUvs(0,uv0); m.setUvs(1,uv1); m.setUvs(2,uv2); m.setColors32(cl);
+    m.update(pc.PRIMITIVE_TRIANGLES,false);
+    if(m===creatureMesh) window.__uploads={dirtyVertices:dirty.length,totalVertices:n,bytes:m.vertexBuffer.numBytes,fullBytes:m.vertexBuffer.numBytes};
+  }
+  for(const v of dirty) { const a=v*3;for(let k=0;k<3;k++){previousP[a+k]=pos[a+k];previousN[a+k]=nrm[a+k];previousR[a+k]=reg[a+k];}previousJ[v]=jw[v]; }
+  buffers.ready=true;
 }
 function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; return genes.mix.map(x => x / s); }
 
@@ -1590,7 +1702,7 @@ app.on('update', dt => {
 function renderMix() {
   $('mix').innerHTML = D.names.map((nm, i) => `<div class="mix"><span style="color:${SPECIES_COLORS[i]}">${nm}</span><output id="mixOut${i}"></output>
     <input type="range" id="mix${i}" min="0" max="1" step="0.01" value="${genes.mix[i]}" aria-label="${nm} share"></div>`).join('');
-  D.names.forEach((_, i) => $(`mix${i}`).addEventListener('input', e => { genes.mix[i] = +e.target.value; if (genes.mix.every(x => x === 0)) genes.mix[i] = 0.01; rebuild(); syncMixOut(); }));
+  D.names.forEach((_, i) => $(`mix${i}`).addEventListener('input', e => { genes.mix[i] = +e.target.value; if (genes.mix.every(x => x === 0)) genes.mix[i] = 0.01; requestRebuild(); syncMixOut(); }));
   syncMixOut();
 }
 function syncMixOut() { const w = normWeights(); D.names.forEach((_, i) => $(`mixOut${i}`).textContent = Math.round(w[i] * 100) + '%'); }
@@ -1598,9 +1710,9 @@ function renderBar(w) { $('bar').innerHTML = w.map((x, i) => `<i style="width:${
 const GENE_FMT = v => (v >= 0 ? '+' : '') + Math.round(v * 100) + '%';
 for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = GENE_FMT(genes[id]); };
-  sync(); el.addEventListener('input', () => { sync(); rebuild(); });
+  sync(); el.addEventListener('input', () => { sync(); requestRebuild(); });
 }
-{ const el = $('boost'), out = $('boostOut'); const sync = () => { genes.boost = +el.value; out.textContent = '×' + genes.boost.toFixed(2); }; sync(); el.addEventListener('input', () => { sync(); rebuild(); }); }
+{ const el = $('boost'), out = $('boostOut'); const sync = () => { genes.boost = +el.value; out.textContent = '×' + genes.boost.toFixed(2); }; sync(); el.addEventListener('input', () => { sync(); requestRebuild(); }); }
 { const el = $('gape'), out = $('gapeOut'); const sync = () => { genes.gape = +el.value; out.textContent = genes.gape + '°'; }; sync(); el.addEventListener('input', sync); }
 $('roar').onclick = () => roarT = 0;
 $('blink').onclick = () => blinkT = 0;
@@ -1633,7 +1745,7 @@ $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(norm
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
     ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : '3 (theropod)', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
-  sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
+  sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) requestRebuild(); else applySkin(normWeights()); });
 }
 $('idle').onchange = e => view.idle = e.target.checked;
 function setUi() {
@@ -1645,14 +1757,16 @@ $('random').onclick = () => {
   genes.mix = new Array(N).fill(0); genes.mix[a] = 1 - t; genes.mix[b] = t;
   const r = (lo, hi) => Math.round((lo + Math.random() * (hi - lo)) * 100) / 100;
   Object.assign(genes, { snout: r(-0.15, 0.3), cranium: r(-0.15, 0.2), height: r(-0.15, 0.2), jawDepth: r(-0.1, 0.3), width: r(-0.1, 0.25), boost: r(0.9, 1.3) });
-  setUi(); rebuild();
+  setUi(); requestRebuild();
 };
-$('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
+$('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); requestRebuild(); };
 
 resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
+window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; }, get performanceStats() { return { worker:workerStats, uploads:window.__uploads, normals:window.__localNormals, seams:Array.from(joinCache,([key,C])=>({key,vertices:C.sel?C.sel.length:0})) }; }, get creature() { return creatureData; } };
 })();
 </script>
+
+</body></html>
