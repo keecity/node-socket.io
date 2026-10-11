@@ -764,25 +764,32 @@ function fuseNow(pre, reg, jwv) {
   const DR = 0.035, nH = pre.length / 3, near = new Uint8Array(nH), dC = (P, v) => r.sdfAt(1, P[v*3], P[v*3+1], P[v*3+2]);
   for (let v = 0; v < nH; v++) near[v] = dC(pre, v) < DR ? 1 : 0;
   const keepH = []; for (let t = 0; t < D.I.length; t += 3) if (!near[D.I[t]] && !near[D.I[t+1]] && !near[D.I[t+2]]) keepH.push(D.I[t], D.I[t+1], D.I[t+2]);
-  const FP = r.pos, FI = r.idx, remap = new Int32Array(FP.length / 3).fill(-1), patchP = [], patchI = [];
+  // the patch is cut along the head's own hole: where the fused surface lies on the head, a triangle stays only if
+  // the head vertex nearest to it was removed, so the two cut edges lie within half a head triangle of each other
+  const FP = r.pos, FI = r.idx, remap = new Int32Array(FP.length / 3).fill(-1), patchP = [], patchI = [], nearHead = nearestIndex(pre, 0.01);
   for (let t = 0; t < FI.length; t += 3) {
     const a = FI[t], b = FI[t+1], c = FI[t+2];
     const cx = (FP[a*3] + FP[b*3] + FP[c*3]) / 3, cy = (FP[a*3+1] + FP[b*3+1] + FP[c*3+1]) / 3, cz = (FP[a*3+2] + FP[b*3+2] + FP[c*3+2]) / 3;
-    if (r.sdfAt(1, cx, cy, cz) >= DR - 0.004) continue;
+    if (!near[nearHead(cx, cy, cz)] && Math.abs(r.sdfAt(0, cx, cy, cz)) < 0.006) continue;   // on the kept head: skip; off it (crest): keep
     for (const v of [a, b, c]) { if (remap[v] < 0) { remap[v] = nH + patchP.length / 3; patchP.push(FP[v*3], FP[v*3+1], FP[v*3+2]); } patchI.push(remap[v]); }
   }
   const P2 = new Float32Array(pre.length + patchP.length); P2.set(pre); P2.set(patchP, pre.length);
   // pinholes left by the clip (a few edges round) are capped with a fan; the real seams are zipped below
   const caps = [], split = L => L.filter(l => { if (l.length >= 16) return true; for (let i = 1; i < l.length - 1; i++) caps.push(l[0], l[i+1], l[i]); return false; });
   const LA = split(boundaryLoops(keepH)), LB = split(boundaryLoops(patchI));
+  window.__loops = { A: LA.map(l => l.length), B: LB.map(l => l.length) };
   if (!LA.length || LA.length !== LB.length) { $('fuseOut').textContent = 'Fuse skipped (could not match the seams); showing the two pieces.'; return; }
-  const cen = L => [0, 1, 2].map(a => L.reduce((s, v) => s + P2[v*3+a], 0) / L.length), band = [];
-  const used = new Set();
-  for (const A of LA) {
-    const ca = cen(A); let best = -1, bd = Infinity;
-    LB.forEach((B, k) => { if (used.has(k)) return; const cb = cen(B), d = (ca[0]-cb[0])**2 + (ca[1]-cb[1])**2 + (ca[2]-cb[2])**2; if (d < bd) { bd = d; best = k; } });
-    used.add(best); band.push(...zipLoops(A, LB[best], P2));
+  // weld: every patch seam vertex is merged into the nearest vertex of the head's seam (walking both loops in
+  // step so it never jumps across); triangles that collapse are dropped, the small gaps left are capped
+  const band = [], weld = new Map();
+  for (let q = 0; q < LA.length; q++) {
+    const A = LA[q], B = LB[q], d2 = (a, b) => (P2[a*3]-P2[b*3])**2 + (P2[a*3+1]-P2[b*3+1])**2 + (P2[a*3+2]-P2[b*3+2])**2;
+    for (const b of B) { let best = A[0]; for (const a of A) if (d2(a, b) < d2(best, b)) best = a; weld.set(b, best); }
   }
+  for (let t = 0; t < patchI.length; t += 3) for (let e = 0; e < 3; e++) { const w2 = weld.get(patchI[t+e]); if (w2 !== undefined) patchI[t+e] = w2; }
+  { const k = []; for (let t = 0; t < patchI.length; t += 3) { const a = patchI[t], b = patchI[t+1], c = patchI[t+2]; if (a !== b && b !== c && a !== c) k.push(a, b, c); } patchI.length = k.length; for (let i = 0; i < k.length; i++) patchI[i] = k[i]; }
+  for (const L of boundaryLoops(keepH.concat(patchI))) for (let i = 1; i < L.length - 1; i++) band.push(L[0], L[i+1], L[i]);
+  window.__seam = { P2, band, keepN: keepH.length, patchN: patchI.length, caps: caps.length, LA: LA.map(l => l.length), LB: LB.map(l => l.length) };
   const all = keepH.concat(patchI, band, caps), n2 = P2.length / 3, I2 = n2 > 65535 ? Uint32Array.from(all) : Uint16Array.from(all);
   // jaw weights and regions: the head's own; patch vertices take the nearest head vertex's
   const nearest = nearestIndex(pre, 0.01), jw2 = new Float32Array(n2), reg2 = new Float32Array(n2 * 3);
@@ -803,9 +810,11 @@ function fuseNow(pre, reg, jwv) {
   $('fuseOut').textContent = `Fused: crest grown into the head as one mesh (${(patchP.length / 3).toLocaleString()} new vertices, ${LA.length} seam${LA.length > 1 ? 's' : ''}, ${Math.round(performance.now() - t0)} ms).`;
 }
 // ---------- teeth: the tooth library placed along each jaw's gum line ----------
-// gum line = where the pink mouth meets skin on that jaw (behind any beak). Meat-eaters' share of the genome picks
-// fangs or molars, the dominant species picks the variant. Upper teeth hang from the skull, lower ride the jaw bone.
+// gum line = where the pink mouth meets skin on that jaw (behind any beak). One base tooth is wrapped onto every
+// library tooth (same vertices), all aligned at the gum line, so each species' tooth is a morph target and the
+// genome blends fang and molar shapes per vertex. Upper teeth hang from the skull, lower ride the jaw bone.
 const CARNIVORE = [1, 0, 0, 1, 1, 0, 0, 0, 0];   // Tyrant, Horned hunter, Spiked hunter
+const SPECIES_TOOTH = [0, 3, 4, 1, 2, 5, 3, 4, 5];   // library tooth per species: fangs 0-2, molars 3-5
 const toothMat = new pc.StandardMaterial();
 toothMat.diffuse = new pc.Color(0.86, 0.81, 0.68); toothMat.useMetalness = true; toothMat.metalness = 0; toothMat.gloss = 0.6; toothMat.cull = pc.CULLFACE_NONE; toothMat.update();
 const teethEnts = {};
@@ -835,10 +844,9 @@ function gumLine(pos, jw, reg, lower) {
 }
 function placeTeeth(w, jw, reg) {
   if (!D.teeth) return;
-  const carn = w.reduce((s, x, i) => s + x * CARNIVORE[i], 0), fangs = carn >= 0.5;
-  const ranked = w.map((x, i) => [x * (CARNIVORE[i] === (fangs ? 1 : 0) ? 1 : 0), i]).sort((a, b) => b[0] - a[0]);
-  const lib = D.teeth.filter(t => t.kind === (fangs ? 'fang' : 'molar')), tooth = lib[ranked[0][1] % lib.length];
-  const TP = tooth.pos, TI = tooth.idx, tn = TP.length / 3;
+  const carn = w.reduce((s, x, i) => s + x * CARNIVORE[i], 0);
+  const base = D.teeth.base, TI = base.idx, tn = base.pos.length / 3, TP = new Float32Array(tn * 3);
+  w.forEach((x, i) => { if (x <= 0) return; const T = D.teeth.targets[SPECIES_TOOTH[i]].pos; for (let k = 0; k < TP.length; k++) TP[k] += x * T[k]; });
   const g = w.reduce((s, x, i) => s + x * D.gapes[i], 0) * Math.PI / 180, N = genes.toothCount;
   let total = 0;
   for (const jaw of ['upper', 'lower']) {
@@ -852,12 +860,12 @@ function placeTeeth(w, jw, reg) {
     const P = new Float32Array(tn * 3 * N * 2), I = [];
     let o = 0;
     for (let k = 0; k < N; k++) {
-      const p = at((k + 0.5) * sp), taper = fangs ? 1.25 - 0.55 * k / Math.max(1, N - 1) : 1;
-      const sc = (fangs ? 1.7 * sp : 0.95 * sp / tooth.width) * genes.toothSize * taper;
+      const p = at((k + 0.5) * sp), taper = 1 + carn * (0.25 - 0.55 * k / Math.max(1, N - 1));   // fangs shrink toward the back
+      const sc = 0.8 * sp * genes.toothSize * taper;                       // gum width = 0.8 of the spacing
       p[2] -= 0.35 * sp;                                                    // a little inside the lip
       for (const sg of [1, -1]) {
         for (let v = 0; v < tn; v++) {
-          const lx = TP[v*3] * sc, ly = (TP[v*3+1] - tooth.sink) * sc, lz = TP[v*3+2] * sc;
+          const lx = TP[v*3] * sc, ly = TP[v*3+1] * sc, lz = TP[v*3+2] * sc;   // gum line at y = 0
           const x = p[0] + back[0] * lx + up[0] * ly, y = p[1] + back[1] * lx + up[1] * ly, z = (p[2] + lz) * sg;
           const q = (o + v) * 3;
           if (lower) { P[q] = x - D.pivot[0]; P[q+1] = y - D.pivot[1]; P[q+2] = z - D.pivot[2]; } else { P[q] = x; P[q+1] = y; P[q+2] = z; }
@@ -869,7 +877,7 @@ function placeTeeth(w, jw, reg) {
     const m = new pc.Mesh(app.graphicsDevice); m.setPositions(P.subarray(0, o * 3)); m.setNormals(vertexNormals(P.subarray(0, o * 3), I)); m.setIndices(o > 65535 ? Uint32Array.from(I) : Uint16Array.from(I)); m.update();
     T.mesh = m; T.ent.render.meshInstances = [new pc.MeshInstance(m, toothMat)]; total += N * 2;
   }
-  $('toothOut').textContent = `${fangs ? 'Fangs' : 'Molars'} (meat-eater share ${Math.round(carn * 100)}%), ${total} teeth along the gum lines.`;
+  $('toothOut').textContent = `Tooth shape ${Math.round(carn * 100)}% fang / ${Math.round((1 - carn) * 100)}% molar, ${total} teeth along the gum lines.`;
 }
 // ---------- crest: a separate part on the skull bone, rooted at a vertex on top of the spliced head ----------
 // local frame (x forward, y up, z sideways) with the front end at the origin; size = the species' share x the gene
@@ -1126,7 +1134,7 @@ $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i
 
 resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth.teeth; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
