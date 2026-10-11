@@ -277,7 +277,7 @@ const resize = () => { const r = canvas.parentElement.getBoundingClientRect(); a
 new ResizeObserver(resize).observe(canvas.parentElement);
 const cssColor = n => { const m = getComputedStyle(document.documentElement).getPropertyValue(n).trim().match(/\w\w/g).map(h => parseInt(h, 16) / 255); return new pc.Color(m[0], m[1], m[2]); };
 app.scene.ambientLight = new pc.Color(0.45, 0.45, 0.42);
-const camera = new pc.Entity(); camera.addComponent('camera', { clearColor: cssColor('--stage'), fov: 35, nearClip: 0.01, farClip: 20 }); app.root.addChild(camera);
+const camera = new pc.Entity(); camera.addComponent('camera', { clearColor: cssColor('--stage'), fov: 35, nearClip: 0.01, farClip: 300 }); app.root.addChild(camera);
 const syncTheme = () => camera.camera.clearColor = cssColor('--stage');
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncTheme); new MutationObserver(syncTheme).observe(document.documentElement, { attributes: true });
 const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.25, castShadows: false }); key.setEulerAngles(40, 35, 0); app.root.addChild(key);
@@ -300,7 +300,7 @@ canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.client
 let gizmoBusy = false;
 canvas.addEventListener('pointermove', e => { if (!drag || gizmoBusy) return; orbit.yaw -= (e.clientX - drag.x) * 0.4; orbit.pitch = clamp(orbit.pitch - (e.clientY - drag.y) * 0.3, -80, 80); drag = { x: e.clientX, y: e.clientY }; });
 canvas.addEventListener('pointerup', () => drag = null);
-canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = clamp(orbit.dist * (1 + e.deltaY * 0.001), 0.4, 4); }, { passive: false });
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = clamp(orbit.dist * (1 + e.deltaY * 0.001), 0.4, 30);   // out to a theme-park overview }, { passive: false });
 function updateCamera() {
   const y = orbit.yaw * pc.math.DEG_TO_RAD, p = orbit.pitch * pc.math.DEG_TO_RAD;
   camera.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist);
