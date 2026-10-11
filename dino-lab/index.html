@@ -2012,7 +2012,7 @@ function resolveSecondary(dt) {
   for (const b of sk) {
     const n = b.name; if (walkDriven.has(n) || under(n)) continue;
     const tgt = [0, 0, 0];
-    for (const d of driven) { const a = at[d]; if (!a) continue; const dd = Math.hypot(b.a[0] - a[0], b.a[1] - a[1], b.a[2] - a[2]), w = 0.7 * Math.exp(-((dd / R0) ** 2));
+    for (const d of driven) { const a = at[d]; if (!a) continue; const dd = Math.hypot(b.a[0] - a[0], b.a[1] - a[1], b.a[2] - a[2]), w = 0.25 * Math.exp(-((dd / R0) ** 2));
       const r = walkDriven.get(d); tgt[0] += w * r[2] * 0.3; tgt[1] += w * r[2] * 0.5 * Math.sign(a[2] || 1); tgt[2] += w * r[2] * 0.6; }   // roll, yaw toward the stepping side, pitch
     let st = springs.get(n); if (!st) springs.set(n, st = { a: [0, 0, 0], v: [0, 0, 0] });
     const lag = /^tail|^neck/.test(n) ? 18 : 40;   // tail and neck lag more
