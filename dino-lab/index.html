@@ -556,7 +556,7 @@ function rebuild() {
   if (!blinking) scheduleGeometryRefinement();
   applySkin(w);
   const gape = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
-  $('stat').innerHTML = `<b>${(n).toLocaleString()}</b> shared vertices · <b>2</b> bones (skull, jaw) · splice ${w.map((x, i) => `${D.names[i]} <b>${Math.round(x * 100)}%</b>`).join(' · ')} · sculpted gape ${gape.toFixed(0)}° · drag to orbit`;
+  $('stat').innerHTML = `<b>${(n).toLocaleString()}</b> shared vertices · <b>${2 + (creatureData && creatureData.skel ? creatureData.skel.length : 0)}</b> bones · splice ${w.map((x, i) => `${D.names[i]} <b>${Math.round(x * 100)}%</b>`).join(' · ')} · sculpted gape ${gape.toFixed(0)}° · drag to orbit`;
   renderBar(w);
   $('nverts').textContent = n.toLocaleString();
 }
@@ -999,7 +999,9 @@ function computeNeck(pos) {
   let flipped = false;
   { const a = I[0] * 3, cc = at(0); if ((PP[a] - cc[0]) * NN[a] + (PP[a+1] - cc[1]) * NN[a+1] + PP[a+2] * NN[a+2] < 0) { flipped = true; for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } } }
   const N2 = vertexNormals(PP, I), nv = PP.length / 3;
-  const data = { PP, NR, NS, st, flipped, I, inside: null };
+  const nRad = d => Math.max(ry0, rz0) * (1 + (genes.neckFlare - 1) * (d / len) ** 2), NB = Math.max(2, Math.round(len / 0.06)), chain = [];
+  for (let k = 0; k < NB; k++) { const d0 = len * (1 - k / NB), d1 = len * (1 - (k + 1) / NB); chain.push({ a: [...at(d0), 0], b: [...at(d1), 0], ra: nRad(d0), rb: nRad(d1) }); }
+  const data = { PP, NR, NS, st, flipped, I, inside: null, chain };
   const end = { p: at(len), d: (() => { const a = at(len), b = at(len - 0.01); const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [(a[0] - b[0]) / l, (a[1] - b[1]) / l]; })(), r: Math.max(ry0, rz0) * genes.neckFlare };
   return { data, end };
 }
@@ -1195,7 +1197,9 @@ function sweepTail(P0, d0, ry0, rz0) {
   const PP = new Float32Array(P), NN = vertexNormals(PP, I);
   { const a = NR * 2 * 3, cc = at(len * 2 / NS); if ((PP[a] - cc[0]) * NN[a] + (PP[a+1] - cc[1]) * NN[a+1] + PP[a+2] * NN[a+2] < 0) for (let q = 0; q < I.length; q += 3) { const x = I[q+1]; I[q+1] = I[q+2]; I[q+2] = x; } }
   const N2 = vertexNormals(PP, I);
-  return { PP, I, inside: null, r: Math.max(ry0, rz0) };
+  const tRad = d => Math.max(ry0, rz0) * Math.max(0.012, Math.pow(1 - d / len, genes.tailTaper)), NB = Math.max(3, Math.round(len / 0.1)), chain = [];
+  for (let k = 0; k < NB; k++) { const d0 = len * k / NB, d1 = len * (k + 1) / NB; chain.push({ a: [...at(d0), 0], b: [...at(d1), 0], ra: tRad(d0), rb: Math.max(tRad(d1), 0.25 * tRad(d0)) }); }
+  return { PP, I, inside: null, r: Math.max(ry0, rz0), chain };
 }
 // the whole animal as one skinned mesh: head (with its jaw weights and regions) + the body/neck/tail mesh, joined
 // where the neck enters the head; everything outside the head rides the skull bone
@@ -1212,6 +1216,51 @@ function blinkUpdate() {
   for (let v = 0; v < nh; v++) { const a = v * 3; C.moved[v] = Math.abs(pos[a] - h0[a]) + Math.abs(pos[a+1] - h0[a+1]) + Math.abs(pos[a+2] - h0[a+2]) > 1e-7 ? 1 : 0; }
   setSurface(creatureMesh, P, surfaceNormals(creatureMesh, P, C.I), C.jw, C.reg);
 }
+// ---------- skeleton: pelvis -> chest -> neck chain -> skull (-> jaw); pelvis -> tail chain; chest -> arm, hand, fingers per side ----------
+// bone counts follow the genes (about one neck bone per 6 cm, one tail bone per 10 cm), so long and short necks/tails get
+// as many bones as they need. Every bone rests unrotated at its joint; the skull keeps its rest pose at the head origin.
+let skelBones = [], skelInstance = null;
+function buildSkeleton(skel) {
+  bones.skull.reparent(head); bones.skull.setLocalPosition(0, 0, 0);
+  for (const e of skelBones) e.destroy();
+  const ents = {}, list = [bones.skull, bones.jaw], ibms = [new pc.Mat4(), new pc.Mat4().setTranslate(-D.pivot[0], -D.pivot[1], -D.pivot[2])], names = ['skull', 'jaw'];
+  for (const b of skel) {
+    const e = new pc.Entity(b.name), par = b.parent ? skel.find(q => q.name === b.parent) : null;
+    (par ? ents[b.parent] : head).addChild(e); ents[b.name] = e;
+    e.setLocalPosition(b.a[0] - (par ? par.a[0] : 0), b.a[1] - (par ? par.a[1] : 0), b.a[2] - (par ? par.a[2] : 0));
+    list.push(e); names.push(b.name); ibms.push(new pc.Mat4().setTranslate(-b.a[0], -b.a[1], -b.a[2]));
+  }
+  // the head rides the last neck bone
+  const last = skel.filter(b => b.name.startsWith('neck')).pop();
+  if (last) { bones.skull.reparent(ents[last.name]); bones.skull.setLocalPosition(-last.a[0], -last.a[1], -last.a[2]); }
+  skelBones = Object.values(ents); bones.rig = ents;
+  const skin = new pc.Skin(app.graphicsDevice, ibms, names);
+  skelInstance = new pc.SkinInstance(skin); skelInstance.bones = list; skelInstance.rootBone = head;
+  return skin;
+}
+// weights: head vertices keep skull/jaw; every other vertex goes to its two nearest bones of its own part, blended so joints
+// bend smoothly. On the body the distance is in units of each bone's radius, so chest skin stays on the spine next to the arm
+// each part only sees its own bones plus the ones it meets at its seam (so a fingertip never reaches for the spine)
+const RIG_ALLOW = { body: n => /^(pelvis|chest|neck1|tail1|upperArm_.)$/.test(n), neck: n => /^(chest|neck\d+)$/.test(n), tail: n => /^(pelvis|tail\d+)$/.test(n),
+  _L: n => n.endsWith('_L'), _R: n => n.endsWith('_R') };
+function rigWeights(P, nh, jw, skel, groups) {
+  const nv = P.length / 3, bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
+  for (let v = 0; v < nh; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw[v]; bw[v*4+1] = jw[v]; }
+  const S = skel.map(b => { const d = [b.b[0] - b.a[0], b.b[1] - b.a[1], b.b[2] - b.a[2]]; return { a: b.a, d, l2: d[0]*d[0] + d[1]*d[1] + d[2]*d[2] || 1e-9, ra: b.ra, rb: b.rb }; });
+  const all = S.map((_, k) => k), sets = (groups || []).map(g => ({ s: g.s + nh, e: g.e + nh, ks: all.filter(k => RIG_ALLOW[g.part](skel[k].name)), byRadius: g.part === 'body' }));
+  for (let v = nh; v < nv; v++) {
+    const x = P[v*3], y = P[v*3+1], z = P[v*3+2]; let b1 = 0, d1 = Infinity, b2 = 0, d2 = Infinity;
+    const g = sets.find(q => v >= q.s && v < q.e), ks = g ? g.ks : all, byR = !g || g.byRadius;
+    for (const k of ks) {
+      const q = S[k], t = Math.max(0, Math.min(1, ((x - q.a[0]) * q.d[0] + (y - q.a[1]) * q.d[1] + (z - q.a[2]) * q.d[2]) / q.l2));
+      const d = Math.hypot(x - q.a[0] - q.d[0] * t, y - q.a[1] - q.d[1] * t, z - q.a[2] - q.d[2] * t) / (byR ? q.ra + (q.rb - q.ra) * t : 0.05);
+      if (d < d1) { b2 = b1; d2 = d1; b1 = k; d1 = d; } else if (d < d2) { b2 = k; d2 = d; }
+    }
+    const f = Math.max(0, Math.min(1, (d2 - d1) / 0.35)), w2 = 0.5 * (1 - f * f * (3 - 2 * f));   // equal near a joint, none further away
+    bi[v*4] = b1 + 2; bi[v*4+1] = b2 + 2; bw[v*4] = 1 - w2; bw[v*4+1] = w2;
+  }
+  return { bi, bw };
+}
 function mergeCreature(hP, hI, jw, reg) {
   if (!bodyJ || !headMI) return;
   const part = { PP: bodyJ.P, I: bodyJ.I, inside: () => false };
@@ -1223,21 +1272,21 @@ function mergeCreature(hP, hI, jw, reg) {
   for (const {v,source} of J.capCenters || []) {
     for (const u of source) {jw2[v]+=jw2[u]/source.length;for(let k=0;k<3;k++)reg2[v*3+k]+=reg2[u*3+k]/source.length;}
   }
-  const same = creatureMesh && creatureData && creatureData.I === J.I && creatureData.P.length === J.P.length;
+  const same = creatureMesh && creatureData && creatureData.I === J.I && creatureData.P.length === J.P.length && creatureData.skel === bodyJ.skel;
   const m = same ? creatureMesh : new pc.Mesh(app.graphicsDevice);
   if (!same) { m.clear(true, true); m.setPositions(J.P); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I)); }
   if (!same) {
-    const bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
-    for (let v = 0; v < nv; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw2[v]; bw[v*4+1] = jw2[v]; }
+    const { bi, bw } = rigWeights(J.P, nh, jw2, bodyJ.skel, bodyJ.groups);
     m.setVertexStream(pc.SEMANTIC_BLENDINDICES, bi, 4, nv, pc.TYPE_UINT8); m.setVertexStream(pc.SEMANTIC_BLENDWEIGHT, bw, 4);
-    m.skin = baseMesh.skin;
+    m.skin = buildSkeleton(bodyJ.skel);
   }
   setSurface(m, J.P, surfaceNormals(m, J.P, J.I), jw2, reg2);
   if(!same)window.__uploads={dirtyVertices:nv,totalVertices:nv,bytes:m.vertexBuffer.numBytes,fullBytes:m.vertexBuffer.numBytes};
   headMI.mesh = m; if (creatureMesh && creatureMesh !== m) creatureMesh.destroy(); creatureMesh = m;
   body.ent.enabled = false; neck.ent.enabled = false;
   window.__creature = { verts: nv };
-  creatureData = { P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP), frame: bodyJ.breathFrame };
+  if (!same) headMI.skinInstance = skelInstance;
+  creatureData = { skel: bodyJ.skel, P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP), frame: bodyJ.breathFrame };
 }
 // ---------- arms: upper arm, forearm, hand and 2-4 fingers chained from the shoulder, each sunk into the one before ----------
 function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x along the limb) -> world
@@ -1247,7 +1296,7 @@ function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x a
   return { PP: P, I: pc0.idx.slice() };
 }
 const withInside = m => { m.inside = null; return m; };
-function mirrorZ(m) { const P = m.PP.slice(); for (let v = 0; v < P.length; v += 3) P[v+2] *= -1; const I = m.I.slice(); for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } return withInside({ PP: P, I, r: m.r }); }
+function mirrorZ(m) { const P = m.PP.slice(); for (let v = 0; v < P.length; v += 3) P[v+2] *= -1; const I = m.I.slice(); for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } return Object.assign(withInside({ PP: P, I, r: m.r }), { bones: m.bones && m.bones.map(b => ({ ...b, a: [b.a[0], b.a[1], -b.a[2]], b: [b.b[0], b.b[1], -b.b[2]] })) }); }
 const HAND_POSE = {   // from the Hand Pose Rig (sheet units, XYZ degrees, forearm frame)
   hand: { p: [0.403, 0.02, -0.003], r: [93, 4, -27], s: 0.5 },
   finger1: { p: [0.472, 0.009, 0.026], r: [15, -18, -32], s: 0.5 },
@@ -1283,17 +1332,19 @@ function buildArm(sh, f, u, bodySc) {
     const HP = HAND_POSE, mix = (A, B) => ({ p: A.p.map((v, i) => (v + B.p[i]) / 2), r: A.r.map((v, i) => (v + B.r[i]) / 2), s: (A.s + B.s) / 2 });
     const T = genes.fingers < 3 && key === 'finger1' ? mix(HP.finger1, HP.finger2) : genes.fingers < 3 && key === 'finger2' ? mix(HP.finger2, HP.finger3) : HP[key], M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3);
     // two fingers: the pair moves over by half the spacing so it sits centred where the three-finger set was
-    const H3 = HAND_POSE.finger3.p, H2 = HAND_POSE.finger2.p, off = key.startsWith('finger') && genes.fingers < 3 ? [0, 1, 2].map(a => (H3[a] - H2[a]) / 2) : [0, 0, 0];
-    const tp = [0, 1, 2].map(a => T.p[a] + off[a]);
+    const tp = T.p;
     for (let v = 0; v < n; v++) { const w = toWorld([Q[v*3], Q[v*3+1], Q[v*3+2]], M, tp, T.s * k); P[v*3] = w[0]; P[v*3+1] = w[1]; P[v*3+2] = w[2]; }
-    return withInside({ PP: P, I: piece.idx.slice() });
+    const bone = { a: toWorld([0, 0, 0], M, tp, T.s * k), b: toWorld([piece.len, 0, 0], M, tp, T.s * k), ra: piece.rad * T.s * k * s, rb: piece.rad * T.s * k * s * 0.6 };
+    return Object.assign(withInside({ PP: P, I: piece.idx.slice() }), { bone });
   };
   window.__wrist = toWorld([0, 0, 0], new pc.Mat4(), hp, 1);
   let A = withInside(up);
-  let armJoin = 0; for (const p of [withInside(fo), posed('hand', K.hand, hs)]) { const J = joinParts(A.PP, A.I, p, K.fore.rad * s * th, 'arm-joint-' + armJoin++); A = withInside({ PP: J.P, I: J.I }); }
+  const hand = posed('hand', K.hand, hs), armBones = [{ name: 'upperArm', parent: 'chest', a: sh, b: el, ra: K.upper.rad * s * th, rb: K.fore.rad * s * th },
+    { name: 'foreArm', parent: 'upperArm', a: el, b: wr, ra: K.fore.rad * s, rb: K.fore.rad * s * 0.8 }, { name: 'hand', parent: 'foreArm', ...hand.bone }];
+  let armJoin = 0; for (const p of [withInside(fo), hand]) { const J = joinParts(A.PP, A.I, p, K.fore.rad * s * th, 'arm-joint-' + armJoin++); A = withInside({ PP: J.P, I: J.I }); }
   const keys = genes.fingers >= 3 ? ['finger1', 'finger2', 'finger3'] : ['finger1', 'finger2'];   // 2 = T. rex, 3 = theropod; no thumb
-  for (const kf of keys) { const J = joinParts(A.PP, A.I, posed(kf, K.finger, fsz), K.finger.rad * s * HAND_POSE[kf].s * fsz, 'arm-' + kf); A = withInside({ PP: J.P, I: J.I }); }
-  A.r = K.upper.rad * s * th;
+  for (const kf of keys) { const fp = posed(kf, K.finger, fsz); armBones.push({ name: kf, parent: 'hand', ...fp.bone }); const J = joinParts(A.PP, A.I, fp, K.finger.rad * s * HAND_POSE[kf].s * fsz, 'arm-' + kf); A = withInside({ PP: J.P, I: J.I }); }
+  A.r = K.upper.rad * s * th; A.bones = armBones;
   armMemo = { key: cacheKey, value: A }; return A;
 }
 function computeBody() {
@@ -1314,7 +1365,7 @@ function computeBody() {
     const x = (P[v*3] - ax) * sc, y = (P[v*3+1] - ay) * sc * genes.bodyHeight;
     P[v*3] = tx + x * c - y * s2; P[v*3+1] = ty + x * s2 + y * c; P[v*3+2] *= sc * genes.bodyWidth;
   }
-  const J1 = joinParts(P, B.I, neckData, neckEnd.r, 'body-neck');
+  const J1 = joinParts(P, B.I, neckData, neckEnd.r, 'body-neck'), groups = [{ s: 0, e: n, part: 'body' }, { s: n, e: n + neckData.PP.length / 3, part: 'neck' }];   // vertex ranges per part, for skinning
   // tail: from deep in the hips, backward along the body's axis
   // the body's own cross-section near its rear sets the tail's start: centred in it, 85% of its size
   const bl = xmax - xmin0, xe = xmin0 + 0.25 * bl; let sylo = Infinity, syhi = -Infinity, szw = 0;
@@ -1323,7 +1374,12 @@ function computeBody() {
   const rx0 = ((tx0 - ax) * sc), ry0b = ((ty0 - ay) * sc * genes.bodyHeight);
   const tStart = [tx + rx0 * c - ry0b * s2, ty + rx0 * s2 + ry0b * c];
   const tail = sweepTail(tStart, [bx, by], 0.8 * 0.5 * (syhi - sylo) * sc * genes.bodyHeight * genes.tailThick, 0.8 * szw * sc * genes.bodyWidth * genes.tailThick);
+  groups.push({ s: J1.P.length / 3, e: J1.P.length / 3 + tail.PP.length / 3, part: 'tail' });
   let J = joinParts(J1.P, J1.I, tail, tail.r, 'body-tail');
+  const bodyR = 0.5 * (yhi - ylo) * sc * genes.bodyHeight, hip = [tStart[0], tStart[1], 0], neck0 = [...neckEnd.p, 0], mid = [0, 1, 2].map(i => (hip[i] + neck0[i]) / 2);
+  const skel = [{ name: 'pelvis', parent: null, a: hip, b: mid, ra: bodyR, rb: bodyR }, { name: 'chest', parent: 'pelvis', a: mid, b: neck0, ra: bodyR, rb: bodyR }];
+  neckData.chain.forEach((b, k) => skel.push({ ...b, name: 'neck' + (k + 1), parent: k ? 'neck' + k : 'chest' }));
+  tail.chain.forEach((b, k) => skel.push({ ...b, name: 'tail' + (k + 1), parent: k ? 'tail' + k : 'pelvis' }));
   // arms: shoulder on the side of the chest, the arm built and merged on its own, mirrored for the other side
   { // shoulder: on the side wall of the chest at mid height, the shoulder ball half sunk into the skin
     const xs = xmin0 + 0.74 * bl, ys = ylo + 0.5 * (yhi - ylo); let zs = 0;
@@ -1331,7 +1387,9 @@ function computeBody() {
     const ball = D.arm ? D.arm.upper.rad * genes.armSize * sc * genes.armThick : 0;
     const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zs * sc * genes.bodyWidth - 0.5 * ball];
     const A = buildArm(sh, [c, s2], [-s2, c], sc);
-    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side); } }
+    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? '_L' : '_R' }); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side);
+      for (const b of part.bones) skel.push({ ...b, name: b.name + (side > 0 ? '_L' : '_R'), parent: b.parent === 'chest' ? 'chest' : b.parent + (side > 0 ? '_L' : '_R') }); } }
+  J.skel = skel; J.groups = groups;
   J.breathFrame = { tx, ty, c, s: s2, ax, ay, sc, h: genes.bodyHeight, xmin0, bl, ylo, yhi };   // body frame -> animal, for the breathing sphere
   return J;
 }
@@ -1789,7 +1847,7 @@ resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; }, get performanceStats() { return { worker:workerStats, uploads:window.__uploads, normals:window.__localNormals, seams:Array.from(joinCache,([key,C])=>({key,vertices:C.sel?C.sel.length:0})) }; }, get creature() { return creatureData; } };
+window.__dino = { bones, setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; }, get performanceStats() { return { worker:workerStats, uploads:window.__uploads, normals:window.__localNormals, seams:Array.from(joinCache,([key,C])=>({key,vertices:C.sel?C.sel.length:0})) }; }, get creature() { return creatureData; } };
 })();
 </script>
 
