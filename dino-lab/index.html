@@ -1255,7 +1255,10 @@ function buildArm(sh, f, u, bodySc) {
   };
   const posed = (key, piece, k) => {
     const T = HAND_POSE[key], M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3);
-    for (let v = 0; v < n; v++) { const w = toWorld([Q[v*3], Q[v*3+1], Q[v*3+2]], M, T.p, T.s * k); P[v*3] = w[0]; P[v*3+1] = w[1]; P[v*3+2] = w[2]; }
+    // two fingers: the pair moves over by half the spacing so it sits centred where the three-finger set was
+    const H3 = HAND_POSE.finger3.p, H2 = HAND_POSE.finger2.p, off = key.startsWith('finger') && genes.fingers < 3 ? [0, 1, 2].map(a => (H3[a] - H2[a]) / 2) : [0, 0, 0];
+    const tp = [0, 1, 2].map(a => T.p[a] + off[a]);
+    for (let v = 0; v < n; v++) { const w = toWorld([Q[v*3], Q[v*3+1], Q[v*3+2]], M, tp, T.s * k); P[v*3] = w[0]; P[v*3+1] = w[1]; P[v*3+2] = w[2]; }
     return withInside({ PP: P, I: piece.idx.slice() });
   };
   window.__wrist = toWorld([0, 0, 0], new pc.Mat4(), hp, 1);
