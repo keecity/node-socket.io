@@ -1406,7 +1406,12 @@ function buildSkinnedLeg(hip, f, u, depth, T, g) {
     const p0 = w([Q[v*3], Q[v*3+1], Q[v*3+2]]), a = m4.xf(S[T.bi[v*2]], p0), b = m4.xf(S[T.bi[v*2+1]], p0), k = T.bw[v];
     PP[v*3] = a[0] + (b[0] - a[0]) * k; PP[v*3+1] = a[1] + (b[1] - a[1]) * k; PP[v*3+2] = a[2] + (b[2] - a[2]) * k;
   }
-  return { PP, I: T.idx.slice(), inside: null, r: rad, bones, rig: { hip, root, parts: rig } };
+  // the replacement toe (a copy of a good one, see legprep.py): rides its toe bone, fused onto the foot
+  let I = T.idx.slice(), P2 = PP;
+  if (T.toe) { const tq = T.toe.pos, m = tq.length / 3, TP = new Float32Array(m * 3), X = S[T.toe.bone];
+    for (let v = 0; v < m; v++) { const q = m4.xf(X, w([tq[v*3], tq[v*3+1], tq[v*3+2]])); TP[v*3] = q[0]; TP[v*3+1] = q[1]; TP[v*3+2] = q[2]; }
+    const J = joinParts(PP, I, { PP: TP, I: T.toe.idx, inside: null }, rad * 0.35, 'leg-toe-' + T.name); P2 = J.P; I = J.I; }
+  return { PP: P2, I, inside: null, r: rad, bones, rig: { hip, root, parts: rig } };
 }
 function buildLeg(hip, f, u, depth, K, g) {   // K: leg kit (biped: whole skinned legs; quadruped: thigh/shin/foot pieces); g: that leg pair's settings
   if (!K) return null;

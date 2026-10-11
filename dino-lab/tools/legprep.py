@@ -33,35 +33,65 @@ for name,r in zip(['slim','medium','heavy'],left):
     # ball: low on the metatarsus, straight under the ankle's column
     col=(np.abs(Y-0.1)<0.03)&(np.abs(X[:,0]-ankle[0])<0.06*H*1.5); ball=centre(X,col) if col.any() else ankle-np.array([0,0.7*(ankle[1]-y0),0])
     # toes: the low front points, split into three by side position; tip = furthest forward of each
-    low=(Y<0.12)&(X[:,0]>ball[0]+0.04*H); zs=np.sort(X[low,2]); cuts=np.quantile(zs,[1/3,2/3])
+    # toes fan out from the ball: take the low points well out from the ball and split them into three by their angle
+    # around it (1-D k-means on the angle); tip = the furthest point of each, base = the ball pushed a little that way
+    low=(Y<0.15); d=X[:,[0,2]]-ball[[0,2]]; rr=np.hypot(d[:,0],d[:,1]); out=low&(rr>0.55*rr[low].max()); ang=np.arctan2(d[out,1],d[out,0])
+    ca=np.quantile(ang,[1/6,1/2,5/6])
+    for _ in range(50): lab=np.argmin(np.abs(ang[:,None]-ca[None]),1); ca=np.array([ang[lab==k].mean() for k in range(3)])
     toes=[]
-    for k in range(3):
-        mk=low&(X[:,2]>=(cuts[k-1] if k else -9))&(X[:,2]<(cuts[k] if k<2 else 9)); tip=X[mk][np.argmax(X[mk,0])]
-        base=np.array([ball[0],ball[1],X[mk,2].mean()]); toes.append((base,tip))
+    for k in np.argsort(ca):
+        P_=X[out][lab==k]; dk=np.hypot(P_[:,0]-ball[0],P_[:,2]-ball[2]); tip=P_[np.argmax(dk)]
+        dirk=np.array([np.cos(ca[k]),0,np.sin(ca[k])]); toes.append((ball+dirk*0.02*H,tip))
     segs=[(hip,knee),(knee,ankle),(ankle,ball)]+toes
     def segd(P,a,b):
         d=b-a; t=np.clip(((P-a)@d)/(d@d),0,1); return np.linalg.norm(P-(a+t[:,None]*d),axis=1)
     D=np.stack([segd(X,a,b) for a,b in segs],1)
     o=np.argsort(D,1); b1,b2=o[:,0],o[:,1]; d1=D[np.arange(len(X)),b1]; d2=D[np.arange(len(X)),b2]
     t=np.clip((d2-d1)/(0.06*H),0,1); w2=0.5*(1-t*t*(3-2*t))
-    # toes: the generator sculpted them unevenly (one is a blob). Each toe is reshaped in its own frame (base -> tip) to the
-    # median length and thickness of the three; the change fades out where the toe's weight hands over to the foot
-    infl=np.zeros((len(X),3))
+    # toes: the generator made one toe a blob. Measure each toe (length, thickness), cut the one furthest from the others
+    # off (capped), and copy the cleanest other toe onto its place, turned to its direction. The copy is kept as its own
+    # closed piece (all on that toe's bone) and fused onto the foot in the viewer like every other join
+    def toe_frame(k):
+        a0,tp=toes[k]; L=np.linalg.norm(tp-a0); u=(tp-a0)/L; t=((X-a0)@u)/L; return a0,u,L,t
+    st=[]
     for k in range(3):
-        infl[:,k]=np.where(b1==3+k,1-w2,0)+np.where(b2==3+k,w2,0)
-    stats=[]
-    for k,(a0,tp) in enumerate(toes):
-        ax=tp-a0; L=np.linalg.norm(ax); u=ax/L; m=infl[:,k]>0.5; R_=X[m]-a0; t=R_@u; rad=np.linalg.norm(R_-np.outer(t,u),axis=1)
-        stats.append((L,np.median(rad)))
-    Lm=np.median([q[0] for q in stats]); Rm=np.median([q[1] for q in stats])
-    for k,(a0,tp) in enumerate(toes):
-        L,Rk=stats[k]; u=(tp-a0)/L; R_=X-a0; t=R_@u; perp=R_-np.outer(t,u)
-        Y_=a0+np.outer(t*Lm/L,u)+perp*(Rm/Rk); w_=infl[:,k][:,None]; X=X*(1-w_)+Y_*w_
-        toes[k]=(a0,a0+u*Lm)
-        print('  toe%d: length %.3f -> %.3f, thickness %.3f -> %.3f'%(k+1,L,Lm,Rk,Rm))
+        a0,u,L,t=toe_frame(k); m=(b1==3+k)&(t>0.2); rad=np.linalg.norm((X[m]-a0)-np.outer(t[m]*L,u),axis=1); st.append((L,np.median(rad)))
+    st=np.array(st); med=np.median(st,0); dev=np.abs(st/med-1).sum(1); bad=int(np.argmax(dev)); good=min((k for k in range(3) if k!=bad),key=lambda k:dev[k])
+    CUT=0.08                                                                 # fraction along the toe where it is cut
+    def cap(T,Q):
+        from collections import Counter
+        e=Counter(tuple(sorted(x)) for tr in T for x in ((tr[0],tr[1]),(tr[1],tr[2]),(tr[2],tr[0]))); nxt={}
+        for tr in T:
+            for a_,b_ in ((tr[0],tr[1]),(tr[1],tr[2]),(tr[2],tr[0])):
+                if e[tuple(sorted((a_,b_)))]==1: nxt[b_]=a_
+        Q=list(map(list,Q)); T=[list(x) for x in T]
+        while nxt:
+            v0=next(iter(nxt)); loop=[v0]
+            while nxt.get(loop[-1]) is not None and nxt[loop[-1]]!=v0: loop.append(nxt.pop(loop[-1]))
+            nxt.pop(loop[-1],None)
+            if len(loop)<3: continue
+            c=len(Q); Q.append(list(np.mean([Q[v] for v in loop],0))); T+=[[loop[i],loop[(i+1)%len(loop)],c] for i in range(len(loop))]
+        return np.array(T),np.array(Q)
+    def sub(keep,T,Q):
+        Tk=T[keep[T].all(1)]; used=np.unique(Tk); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); return rm[Tk],Q[used],used
+    # the copy: the good toe past the cut, capped, turned and moved onto the bad toe's root
+    ag,ug,Lg,tg=toe_frame(good); ab,ub,Lb,tb=toe_frame(bad)
+    dg=np.linalg.norm((X-ag)-np.outer(tg*Lg,ug),axis=1); inside=(tg>CUT)&(tg<1.15)&(dg<2.2*st[good][1])
+    Tg,Qg,_=sub(inside,T,X); Tg,Qg=cap(Tg,Qg)
+    v=np.cross(ug,ub); c_=ug@ub; Vx=np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]]); Rm=np.eye(3)+Vx+Vx@Vx/(1+c_)
+    Qc=(Qg-(ag+ug*CUT*Lg))@Rm.T+(ab+ub*CUT*Lb)
+    # the leg without the bad toe (cut a little further out than the copy starts, so the copy overlaps the stump)
+    db=np.linalg.norm((X-ab)-np.outer(tb*Lb,ub),axis=1); keep=~((tb>CUT+0.05)&(tb<1.2)&(db<2.2*st[bad][1])); T,X2,used=sub(keep,T,X); T,X2=cap(T,X2)
+    nold=len(used); bi_=np.stack([b1,b2],1)[used]; bw_=w2[used]
+    ncap=len(X2)-nold; bi_=np.vstack([bi_,np.full((ncap,2),3+bad)]); bw_=np.concatenate([bw_,np.zeros(ncap)])
+    X=X2; b1,b2,w2=bi_[:,0],bi_[:,1],bw_
+    toes[bad]=(ab,ab+ub*Lg)
+    toe_copy=dict(pos=Qc,idx=Tg,bone=3+bad)
+    print('  toe%d (length %.3f, thickness %.3f) replaced by a copy of toe%d (length %.3f, thickness %.3f)'%(bad+1,*st[bad],good+1,*st[good]))
     X-=hip
     J=lambda p:np.round(np.asarray(p)-hip,5).tolist()
-    types.append(dict(name=name,pos=np.round(X,5).ravel().tolist(),idx=T.ravel().tolist(),bi=np.stack([b1,b2],1).ravel().tolist(),bw=np.round(w2,4).tolist(),
+    toe_copy['pos']=toe_copy['pos']-hip
+    types.append(dict(name=name,toe=dict(pos=np.round(toe_copy['pos'],5).ravel().tolist(),idx=np.asarray(toe_copy['idx']).ravel().tolist(),bone=toe_copy['bone']),pos=np.round(X,5).ravel().tolist(),idx=np.asarray(T).ravel().tolist(),bi=np.stack([b1,b2],1).ravel().tolist(),bw=np.round(w2,4).tolist(),
         height=float(H),rad=float(np.median(np.abs(X[:,2]-X[:,2].mean()))),joints=dict(hip=J(hip),knee=J(knee),ankle=J(ankle),ball=J(ball),toes=[[J(a),J(b)] for a,b in toes])))
     print(name,'verts',len(X),'H %.3f knee %.2f ankle %.2f'%(H,yk,ya),'bones used',np.bincount(b1,minlength=6))
 json.dump(dict(types=types,bones=BONES,note='whole legs, positions relative to the hip; bi/bw: two bones per vertex (index into bones), bw = weight of the second'),open('../leg.json','w'))
