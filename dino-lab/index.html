@@ -106,7 +106,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     </section>
     <section>
       <h2>Legs</h2>
-      <div class="slider"><label for="legSize">Leg size</label><output id="legSizeOut"></output><input id="legSize" type="range" min="0.4" max="1.8" step="0.01" value="1"></div>
+      <div class="slider"><label for="legSize">Leg size</label><output id="legSizeOut"></output><input id="legSize" type="range" min="0.4" max="2.5" step="0.01" value="1.54"></div>
       <div class="slider"><label for="legThick">Leg thickness</label><output id="legThickOut"></output><input id="legThick" type="range" min="0.5" max="1.8" step="0.01" value="1"></div>
       <div class="slider"><label for="toeSize">Toe size</label><output id="toeSizeOut"></output><input id="toeSize" type="range" min="0.2" max="1.2" step="0.01" value="0.55"></div>
       <div class="slider"><label for="toeSpread">Toe spread</label><output id="toeSpreadOut"></output><input id="toeSpread" type="range" min="0" max="45" step="1" value="20"></div>
@@ -115,12 +115,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="legAnkle">Ankle</label><output id="legAnkleOut"></output><input id="legAnkle" type="range" min="-60" max="60" step="1" value="0"></div>
       <div class="slider"><label for="legSplay">Splay</label><output id="legSplayOut"></output><input id="legSplay" type="range" min="0" max="30" step="1" value="4"></div>
       <h2>Leg placement</h2>
+      <div id="legPart" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><button type="button" data-p="leg">Whole leg</button><button type="button" data-p="thigh">Thigh</button><button type="button" data-p="shin">Shin</button><button type="button" data-p="foot">Foot</button><button type="button" data-p="toe1">Toe 1</button><button type="button" data-p="toe2">Toe 2</button><button type="button" data-p="toe3">Toe 3</button></div>
       <div id="legGizmo" style="display:flex;gap:6px;margin-bottom:8px"><button type="button" data-g="off">Off</button><button type="button" data-g="move">Move</button><button type="button" data-g="rotate">Rotate</button><button type="button" data-g="scale">Scale</button></div>
-      <div class="slider"><label for="legX">Move back → front</label><output id="legXOut"></output><input id="legX" type="range" min="-0.6" max="0.6" step="0.005" value="0"></div>
-      <div class="slider"><label for="legY">Move down → up</label><output id="legYOut"></output><input id="legY" type="range" min="-0.6" max="0.6" step="0.005" value="0"></div>
-      <div class="slider"><label for="legZ">Move in → out</label><output id="legZOut"></output><input id="legZ" type="range" min="-0.3" max="0.3" step="0.005" value="0"></div>
-      <div class="slider"><label for="legRX">Rotate X (roll)</label><output id="legRXOut"></output><input id="legRX" type="range" min="-90" max="90" step="1" value="0"></div>
-      <div class="slider"><label for="legRY">Rotate Y (toe in/out)</label><output id="legRYOut"></output><input id="legRY" type="range" min="-90" max="90" step="1" value="0"></div>
+      <div class="slider"><label for="legX">Move back → front</label><output id="legXOut"></output><input id="legX" type="range" min="-0.6" max="0.6" step="0.005" value="-0.11"></div>
+      <div class="slider"><label for="legY">Move down → up</label><output id="legYOut"></output><input id="legY" type="range" min="-0.6" max="0.6" step="0.005" value="0.14"></div>
+      <div class="slider"><label for="legZ">Move in → out</label><output id="legZOut"></output><input id="legZ" type="range" min="-0.3" max="0.3" step="0.005" value="-0.07"></div>
+      <div class="slider"><label for="legRX">Rotate X (roll)</label><output id="legRXOut"></output><input id="legRX" type="range" min="-90" max="90" step="1" value="-4"></div>
+      <div class="slider"><label for="legRY">Rotate Y (toe in/out)</label><output id="legRYOut"></output><input id="legRY" type="range" min="-90" max="90" step="1" value="-17"></div>
       <div class="slider"><label for="legRZ">Rotate Z (swing)</label><output id="legRZOut"></output><input id="legRZ" type="range" min="-90" max="90" step="1" value="0"></div>
       <button id="legCopy" type="button">Copy leg settings</button>
       <textarea id="legOut" rows="4" readonly style="width:100%;font:11px monospace;margin-top:6px"></textarea>
@@ -461,7 +462,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1, legThick: 1, toeSize: 0.55, toeSpread: 20, legHip: 0, legKnee: 0, legAnkle: 0, legSplay: 4, legX: 0, legY: 0, legZ: 0, legRX: 0, legRY: 0, legRZ: 0 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1.54, legThick: 1, toeSize: 0.55, toeSpread: 20, legHip: 0, legKnee: 0, legAnkle: 0, legSplay: 4, legX: -0.11, legY: 0.14, legZ: -0.07, legRX: -4, legRY: -17, legRZ: 0, legPose: '{}' };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -788,7 +789,7 @@ function initGeometryWorker() {
     const joinCache=new Map();let bodyStash=null;
   `;
   const functions=[vertexNormals,meshRayInside,meshInside,boundaryLoops,zipLoops,capCutLoop,nearestIndex,fuseHeadData,smoothCollar,joinParts,computeNeck,jointCentre,placePiece,mirrorZ,buildArm,buildLeg,sweepTail,computeBody];
-  const source=math+'const BODY_KEYS='+JSON.stringify([...NECK_GENES,...BODY_GENES])+';const smooth='+smooth.toString()+';const HAND_POSE='+JSON.stringify(HAND_POSE)+';const withInside='+withInside.toString()+';'+functions.map(f=>f.toString()).join('\n')+`
+  const source=math+'const BODY_KEYS='+JSON.stringify([...NECK_GENES,...BODY_GENES])+';const smooth='+smooth.toString()+';const LEG_PARTS='+JSON.stringify(LEG_PARTS)+';const m4={trs:'+m4.trs.toString()+',mul:'+m4.mul.toString()+',xf:'+m4.xf.toString()+'};const HAND_POSE='+JSON.stringify(HAND_POSE)+';const withInside='+withInside.toString()+';'+functions.map(f=>f.toString()).join('\n')+`
     function transfers(value,out=new Set()) {if(ArrayBuffer.isView(value))out.add(value.buffer);else if(value && typeof value==='object')for(const v of Object.values(value))transfers(v,out);return out;}
     onmessage=e=>{
       const q=e.data;if(q.type==='init'){D=q.D;return;}
@@ -1028,7 +1029,7 @@ function computeNeck(pos) {
   return { data, end };
 }
 const NECK_GENES = ['cranium','height','jawDepth','width','boost','neckLen','neckAngle','neckCurve','neckThick','neckFlare','neckRings'];
-const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay','legX','legY','legZ','legRX','legRY','legRZ'];
+const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay','legX','legY','legZ','legRX','legRY','legRZ','legPose'];
 const geometryKey = ids => ids.map(id => genes[id]).join(',');
 let neckKey = '', bodyKey = '';
 function placeNeck() {
@@ -1382,6 +1383,15 @@ function buildArm(sh, f, u, bodySc) {
 }
 // ---------- legs: thigh, shin, foot and three toes from the leg kit, chained from the hip in the sculpted pose ----------
 // each piece keeps its sculpted angle (leg.json 'ang'); the hip/knee/ankle genes turn the chain from there
+// 4x4 column-major helpers (plain arrays, so they also run in the geometry worker)
+const m4 = {
+  trs: (t, r, k) => { const d = new pc.Mat4().setFromEulerAngles(r[0], r[1], r[2]).data, M = new Array(16).fill(0);
+    for (let c = 0; c < 3; c++) for (let w = 0; w < 3; w++) M[c*4+w] = d[c*4+w] * k; M[12] = t[0]; M[13] = t[1]; M[14] = t[2]; M[15] = 1; return M; },
+  mul: (A, B) => { const M = new Array(16); for (let c = 0; c < 4; c++) for (let w = 0; w < 4; w++) { let x = 0; for (let k = 0; k < 4; k++) x += A[k*4+w] * B[c*4+k]; M[c*4+w] = x; } return M; },
+  xf: (M, p) => [0, 1, 2].map(w => M[w] * p[0] + M[4+w] * p[1] + M[8+w] * p[2] + M[12+w]) };
+// leg pieces form a hierarchy: thigh -> shin -> foot -> toes. Each piece's pose (genes.legPose: move/turn/scale about its
+// own joint) carries everything below it, and every piece can still be posed on its own
+const LEG_PARTS = [['thigh', null], ['shin', 'thigh'], ['foot', 'shin'], ['toe1', 'foot'], ['toe2', 'foot'], ['toe3', 'foot']];
 function buildLeg(hip, f, u, depth) {
   const K = D.leg; if (!K) return null;
   const s = genes.legSize * depth * 1.1 / 0.75, th = genes.legThick, rad = Math.PI / 180, OV = 0.86;   // the sheet leg stands 0.75 tall: hip height ~1.1 body depths
@@ -1392,27 +1402,29 @@ function buildLeg(hip, f, u, depth) {
   // each joint: the far piece's end centre (its real cross-section centre, not its axis) meets the next piece's end centre
   const joint = (o, Fa, Pa, Fb, Pb) => { const ca = jointCentre(Pa, OV), cb = jointCentre(Pb, 0.04);
     return [0, 1, 2].map(i => o[i] + (Fa[0][i] * Pa.len * OV + (Fa[1][i] * ca[0] + Fa[2][i] * ca[1]) * th - (Fb[1][i] * cb[0] + Fb[2][i] * cb[1]) * th) * s); };
-  const F1 = frame(a1, sp), F2 = frame(a2, sp), F3 = frame(a3, sp * 0.5);
-  const thigh = placePiece(K.thigh, hip, ...F1, s, th), knee = joint(hip, F1, K.thigh, F2, K.shin);
-  const shin = placePiece(K.shin, knee, ...F2, s, th), ankle = joint(knee, F2, K.shin, F3, K.foot);
-  const foot = placePiece(K.foot, ankle, ...F3, s, th), ball = end(ankle, F3[0], K.foot.len * s * 0.8);
-  const bones = [{ name: 'thigh', parent: 'pelvis', a: hip, b: knee, ra: K.thigh.rad * s * th, rb: K.shin.rad * s * th }, { name: 'shin', parent: 'thigh', a: knee, b: ankle, ra: K.shin.rad * s * th, rb: K.shin.rad * s * th },
-    { name: 'foot', parent: 'shin', a: ankle, b: ball, ra: K.foot.rad * s * th, rb: K.foot.rad * s * th }];
-  let A = withInside(thigh);
-  for (const [i, p] of [shin, foot].entries()) { const J = joinParts(A.PP, A.I, withInside(p), K.shin.rad * s * th, 'leg-joint-' + i); A = withInside({ PP: J.P, I: J.I }); }
+  const F1 = frame(a1, sp), F2 = frame(a2, sp), F3 = frame(a3, sp * 0.5), knee = joint(hip, F1, K.thigh, F2, K.shin), ankle = joint(knee, F2, K.shin, F3, K.foot), ball = end(ankle, F3[0], K.foot.len * s * 0.8);
+  const parts = { thigh: { c: hip, m: placePiece(K.thigh, hip, ...F1, s, th), b: knee, ra: K.thigh.rad * s * th, rb: K.shin.rad * s * th },
+    shin: { c: knee, m: placePiece(K.shin, knee, ...F2, s, th), b: ankle, ra: K.shin.rad * s * th, rb: K.shin.rad * s * th },
+    foot: { c: ankle, m: placePiece(K.foot, ankle, ...F3, s, th), b: ball, ra: K.foot.rad * s * th, rb: K.foot.rad * s * th } };
   // toes: three, fanned about the ball of the foot, rooted a little inside the foot
   const a4 = a3 + (K.toe.ang - K.foot.ang) * rad, ts = s * genes.toeSize, side = F3[2];
-  [-1, 0, 1].forEach((k, i) => {
-    const o = [0, 1, 2].map(j => ball[j] + side[j] * k * K.foot.rad * s * th * 0.55), Ft = frame(a4, sp * 0.5 + k * genes.toeSpread * rad);
-    const toe = placePiece(K.toe, o, ...Ft, ts, 1), J = joinParts(A.PP, A.I, withInside(toe), K.toe.rad * ts, 'leg-toe' + i); A = withInside({ PP: J.P, I: J.I });
-    bones.push({ name: 'toe' + (i + 1), parent: 'foot', a: o, b: end(o, Ft[0], K.toe.len * ts), ra: K.toe.rad * ts, rb: K.toe.rad * ts * 0.5 });
-  });
-  // placement: the whole leg turned about the hip, then moved (left side; the right is its mirror)
-  const M = new pc.Mat4().setFromEulerAngles(genes.legRX, genes.legRY, genes.legRZ), off = [genes.legX, genes.legY, genes.legZ], q = new pc.Vec3();
-  const place = p => { q.x = p[0] - hip[0]; q.y = p[1] - hip[1]; q.z = p[2] - hip[2]; M.transformPoint(q, q); return [hip[0] + q.x + off[0], hip[1] + q.y + off[1], hip[2] + q.z + off[2]]; };
-  for (let v = 0; v < A.PP.length; v += 3) { const w = place([A.PP[v], A.PP[v+1], A.PP[v+2]]); A.PP[v] = w[0]; A.PP[v+1] = w[1]; A.PP[v+2] = w[2]; }
-  for (const b of bones) { b.a = place(b.a); b.b = place(b.b); }
-  A.r = K.thigh.rad * s * th; A.bones = bones;
+  [-1, 0, 1].forEach((k, i) => { const o = [0, 1, 2].map(j => ball[j] + side[j] * k * K.foot.rad * s * th * 0.55), Ft = frame(a4, sp * 0.5 + k * genes.toeSpread * rad);
+    parts['toe' + (i + 1)] = { c: o, m: placePiece(K.toe, o, ...Ft, ts, 1), b: end(o, Ft[0], K.toe.len * ts), ra: K.toe.rad * ts, rb: K.toe.rad * ts * 0.5 }; });
+  // whole-leg placement (turned about the hip, then moved), then each piece's own pose about its joint, parent first
+  const pose = JSON.parse(genes.legPose || '{}'), root = m4.mul(m4.trs([hip[0] + genes.legX, hip[1] + genes.legY, hip[2] + genes.legZ], [genes.legRX, genes.legRY, genes.legRZ], 1), m4.trs([-hip[0], -hip[1], -hip[2]], [0, 0, 0], 1));
+  const W = {}, rig = [], bones = [];
+  for (const [name, par] of LEG_PARTS) {
+    const q = parts[name], P = pose[name] || {}, pc0 = par ? parts[par].c : hip, t = P.p || [0, 0, 0];
+    const L = m4.trs([q.c[0] - pc0[0] + t[0], q.c[1] - pc0[1] + t[1], q.c[2] - pc0[2] + t[2]], P.r || [0, 0, 0], P.s || 1);
+    W[name] = m4.mul(par ? W[par] : m4.mul(root, m4.trs(hip, [0, 0, 0], 1)), L);
+    const X = m4.mul(W[name], m4.trs([-q.c[0], -q.c[1], -q.c[2]], [0, 0, 0], 1)), PP = q.m.PP;
+    for (let v = 0; v < PP.length; v += 3) { const w = m4.xf(X, [PP[v], PP[v+1], PP[v+2]]); PP[v] = w[0]; PP[v+1] = w[1]; PP[v+2] = w[2]; }
+    const k = P.s || 1; bones.push({ name, parent: par || 'pelvis', a: m4.xf(X, q.c), b: m4.xf(X, q.b), ra: q.ra * k, rb: q.rb * k });
+    rig.push({ name, parent: par, c: q.c, W: W[name] });
+  }
+  let A = withInside(parts.thigh.m);
+  ['shin', 'foot', 'toe1', 'toe2', 'toe3'].forEach((name, i) => { const J = joinParts(A.PP, A.I, withInside(parts[name].m), i < 2 ? K.shin.rad * s * th : K.toe.rad * ts, 'leg-' + name); A = withInside({ PP: J.P, I: J.I }); });
+  A.r = K.thigh.rad * s * th; A.bones = bones; A.rig = { hip, root, parts: rig };
   return A;
 }
 function computeBody() {
@@ -1462,10 +1474,10 @@ function computeBody() {
     for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xh) < 0.02 && Math.abs(P0b[v*3+1] - yh) < 0.03) zh = Math.max(zh, Math.abs(P0b[v*3+2]));
     const rx = (xh - ax) * sc, ry = (yh - ay) * sc * genes.bodyHeight, depth = (yhi - ylo) * sc * genes.bodyHeight;
     const hip = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zh * sc * genes.bodyWidth * 0.7];
-    const L = buildLeg(hip, [c, s2], [-s2, c], depth); groups.legHip = hip;
+    const L = buildLeg(hip, [c, s2], [-s2, c], depth); groups.legHip = hip; groups.legRig = L && L.rig;
     if (L) for (const side of [1, -1]) { const part = side > 0 ? L : mirrorZ(L), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? 'leg_L' : 'leg_R' }); J = joinParts(J.P, J.I, part, L.r, 'body-leg-' + side);
       for (const b of part.bones) skel.push({ ...b, name: b.name + (side > 0 ? '_L' : '_R'), parent: b.parent === 'pelvis' ? 'pelvis' : b.parent + (side > 0 ? '_L' : '_R') }); } }
-  J.skel = skel; J.groups = groups; J.legHip = groups.legHip;
+  J.skel = skel; J.groups = groups; J.legHip = groups.legHip; J.legRig = groups.legRig;
   J.breathFrame = { tx, ty, c, s: s2, ax, ay, sc, h: genes.bodyHeight, xmin0, bl, ylo, yhi };   // body frame -> animal, for the breathing sphere
   return J;
 }
@@ -1853,25 +1865,42 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   sync(); el.addEventListener('input', () => { sync(); requestRebuild(); });
 }
 { const keys = ['legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay','legX','legY','legZ','legRX','legRY','legRZ'];
-  $('legCopy').onclick = () => { const t = JSON.stringify(Object.fromEntries(keys.map(k => [k, genes[k]]))); $('legOut').value = t; $('legOut').select(); try { navigator.clipboard.writeText(t); } catch (e) {} }; }
-// leg gizmo: a handle at the left hip; moving, turning or scaling it sets the leg placement genes (the right leg mirrors)
-{ let gz = null, layer = null; const handle = new pc.Entity('legHandle');
-  const syncHandle = () => { const h = bodyJ && bodyJ.legHip; if (!h || !head) return; if (handle.parent !== head) head.addChild(handle);
-    handle.setLocalPosition(h[0] + genes.legX, h[1] + genes.legY, h[2] + genes.legZ); handle.setLocalEulerAngles(genes.legRX, genes.legRY, genes.legRZ); handle.setLocalScale(genes.legSize, genes.legSize, genes.legSize); };
-  const setGene = (id, v) => { genes[id] = v; const el = $(id); el.value = v; $(id + 'Out').textContent = el.value; el.dispatchEvent(new Event('input')); };
-  const apply = () => { const h = bodyJ.legHip, p = handle.getLocalPosition(), r = handle.getLocalEulerAngles(), k = handle.getLocalScale().x, q = x => Math.round(x * 1000) / 1000;
-    for (const [id, v] of [['legX', q(p.x - h[0])], ['legY', q(p.y - h[1])], ['legZ', q(p.z - h[2])], ['legRX', Math.round(r.x)], ['legRY', Math.round(r.y)], ['legRZ', Math.round(r.z)], ['legSize', q(k)]]) setGene(id, v); rebuild(); };
-  window.__legGizmo = mode => {
+  $('legCopy').onclick = () => { const t = JSON.stringify({ ...Object.fromEntries(keys.map(k => [k, genes[k]])), legPose: JSON.parse(genes.legPose || '{}') }); $('legOut').value = t; $('legOut').select(); try { navigator.clipboard.writeText(t); } catch (e) {} }; }
+// leg gizmo: pick a part (whole leg, thigh, shin, foot, a toe) and move / turn / scale it about its joint. Posing a part
+// carries everything below it; the right leg mirrors the left
+{ let gz = null, layer = null, mode = 'off', part = 'leg'; const handle = new pc.Entity('legHandle'), M = new pc.Mat4();
+  const rigOf = () => bodyJ && bodyJ.legRig, info = name => rigOf().parts.find(q => q.name === name);
+  const parentW = q => q.parent ? info(q.parent).W : m4.mul(rigOf().root, m4.trs(rigOf().hip, [0, 0, 0], 1));
+  const syncHandle = () => { const R = rigOf(); if (!R || !head) return false; if (handle.parent !== head) head.addChild(handle);
+    if (part === 'leg') { const h = R.hip; handle.setLocalPosition(h[0] + genes.legX, h[1] + genes.legY, h[2] + genes.legZ); handle.setLocalEulerAngles(genes.legRX, genes.legRY, genes.legRZ); handle.setLocalScale(genes.legSize, genes.legSize, genes.legSize); }
+    else { M.data.set(info(part).W); const t = M.getTranslation(), r = M.getEulerAngles(), k = M.getScale(); handle.setLocalPosition(t); handle.setLocalEulerAngles(r); handle.setLocalScale(k); }
+    return true; };
+  const setGene = (id, v) => { genes[id] = v; const el = $(id); el.value = v; el.dispatchEvent(new Event('input')); };
+  const q3 = x => Math.round(x * 1000) / 1000;
+  const apply = () => {
+    if (part === 'leg') { const h = rigOf().hip, p = handle.getLocalPosition(), r = handle.getLocalEulerAngles(), k = handle.getLocalScale().x;
+      for (const [id, v] of [['legX', q3(p.x - h[0])], ['legY', q3(p.y - h[1])], ['legZ', q3(p.z - h[2])], ['legRX', Math.round(r.x)], ['legRY', Math.round(r.y)], ['legRZ', Math.round(r.z)], ['legSize', q3(k)]]) setGene(id, v); }
+    else {   // local pose = inverse(parent) x handle, less the rest offset of this joint from its parent's
+      const q = info(part), P = new pc.Mat4(); P.data.set(parentW(q)); P.invert(); const L = new pc.Mat4().mul2(P, handle.getLocalTransform());
+      const c0 = q.parent ? info(q.parent).c : rigOf().hip, t = L.getTranslation(), r = L.getEulerAngles(), pose = JSON.parse(genes.legPose || '{}');
+      pose[part] = { p: [q3(t.x - (q.c[0] - c0[0])), q3(t.y - (q.c[1] - c0[1])), q3(t.z - (q.c[2] - c0[2]))], r: [Math.round(r.x), Math.round(r.y), Math.round(r.z)], s: q3(L.getScale().x) };
+      genes.legPose = JSON.stringify(pose); }
+    rebuild(); };
+  const show = () => {
     if (gz) { gz.detach(); gz.destroy(); gz = null; }
-    if (mode === 'off' || !bodyJ || !bodyJ.legHip) return;
+    if (mode === 'off' || !syncHandle()) return;
     if (!layer) { layer = pc.Gizmo.createLayer(app); camera.camera.layers = camera.camera.layers.concat(layer.id); }
     gz = new ({ move: pc.TranslateGizmo, rotate: pc.RotateGizmo, scale: pc.ScaleGizmo }[mode])(camera.camera, layer);
     if (mode === 'scale') gz.uniform = true;
-    gz.coordSpace = 'local'; syncHandle(); gz.attach([handle]);
+    gz.coordSpace = 'local'; gz.attach([handle]);
     gz.on('transform:start', () => { gizmoBusy = true; drag = null; });
     gz.on('transform:end', () => { gizmoBusy = false; apply(); syncHandle(); });
   };
-  document.querySelectorAll('#legGizmo button').forEach(b => b.onclick = () => window.__legGizmo(b.dataset.g)); }
+  const mark = () => { document.querySelectorAll('#legPart button').forEach(b => b.style.outline = b.dataset.p === part ? '2px solid currentColor' : ''); document.querySelectorAll('#legGizmo button').forEach(b => b.style.outline = b.dataset.g === mode ? '2px solid currentColor' : ''); };
+  window.__legGizmo = (m, p) => { if (m) mode = m; if (p) part = p; mark(); show(); };
+  window.__legHandle = handle; window.__legApply = apply;
+  document.querySelectorAll('#legGizmo button').forEach(b => b.onclick = () => window.__legGizmo(b.dataset.g));
+  document.querySelectorAll('#legPart button').forEach(b => b.onclick = () => window.__legGizmo(null, b.dataset.p)); mark(); }
 { const el = $('boost'), out = $('boostOut'); const sync = () => { genes.boost = +el.value; out.textContent = '×' + genes.boost.toFixed(2); }; sync(); el.addEventListener('input', () => { sync(); requestRebuild(); }); }
 { const el = $('gape'), out = $('gapeOut'); const sync = () => { genes.gape = +el.value; out.textContent = genes.gape + '°'; }; sync(); el.addEventListener('input', sync); }
 $('roar').onclick = () => roarT = 0;
