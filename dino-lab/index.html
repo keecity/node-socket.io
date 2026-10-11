@@ -461,7 +461,7 @@ function rebuild() {
   if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
   placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg);
   clearTimeout(fuseTimer);
-  if (pre) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
+  if (pre && !blinking) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
   else $('fuseOut').textContent = '';
   applySkin(w);
   const gape = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
@@ -784,7 +784,7 @@ function nearestIndex(P, cell) {
   };
 }
 // after the genome settles: head + crest become ONE mesh (the quick two-piece preview shows while sliders move)
-let fuseTimer = null, fusedMesh = null, headMI = null, baseMesh = null, eyeA = null;
+let blinking = false, fuseTimer = null, fusedMesh = null, headMI = null, baseMesh = null, eyeA = null;
 function fuseNow(pre, reg, jwv) {
   if (!crestP) return;
   const t0 = performance.now();
@@ -1134,7 +1134,7 @@ function placeEyes() {
     }
     mesh.setUvs(0, uv); mesh.update();
     const m = new pc.Mat4(); m.data.set([T[0], T[1], T[2], 0, B[0], B[1], B[2], 0, Nn[0], Nn[1], Nn[2], 0, 0, 0, 0, 1]);
-    ent.setLocalRotation(new pc.Quat().setFromMat4(m)); eyeballs[k].base = [rx, ry, rz]; ent.setLocalScale(rx, ry * (1 - BLINK_SQUASH * lidClose), rz);
+    ent.setLocalRotation(new pc.Quat().setFromMat4(m)); ent.setLocalScale(rx, ry, rz);
     ent.setLocalPosition(c[0] - n[0] * off, c[1] - n[1] * off, (c[2] - n[2] * off) * sg);
   });
   updateLids();
@@ -1181,7 +1181,7 @@ function carveEyes(pos, nrm) {
   // socket depth: the floor of the hole (the map's darkest grey, 0.39 below neutral) sits this far in
   const k = genes.eyeDepth / 0.39;
   // the whole eye area sinks in (a soft dish, wider than the socket), then the socket map is carved into it
-  const W = genes.recessWidth, R = genes.recess, reach = W * s * 1.2, cv = [];
+  const W = genes.recessWidth, R = genes.recess, reach = W * s * 1.2;
   for (let v = 0; v < N; v++) {
     const sg = pos[v*3+2] < 0 ? -1 : 1;                                  // mirror the frame for the left eye
     const dx = pos[v*3] - c[0], dy = pos[v*3+1] - c[1], dz = pos[v*3+2] * sg - c[2];
@@ -1195,28 +1195,11 @@ function carveEyes(pos, nrm) {
     const u = du / sx, w = dw / sy, fade = 1 - smooth(1.2, 1.8, Math.abs(dn) / s);
     let hc = 0;
     if (k && Math.abs(u) < 1 && Math.abs(w) < 1) hc = (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * k * fade;   // grey 0.5 = untouched skin
-    if (hc) cv.push(v, u, dw, k * fade, hc);
     h += hc;
     pos[v*3] += n[0] * h; pos[v*3+1] += n[1] * h; pos[v*3+2] += n[2] * h * sg;
   }
-  carveCache = { cv, n, sy };                                            // the socket carve, for blinking
 }
-// blink: the socket's height shrinks (re-carved from the depth map at height sy x (1 - BLINK_SQUASH x c)); nothing else
-let carveCache = null;
 const BLINK_SQUASH = 0.8;
-let shown = null, squintLast = -1;
-function applySquint(c) {
-  if (!shown || !carveCache || Math.abs(c - squintLast) < 0.005) return;
-  squintLast = c;
-  const { cv, n, sy } = carveCache, sy2 = sy * (1 - BLINK_SQUASH * c), P = new Float32Array(shown.pos);
-  for (let i = 0; i < cv.length; i += 5) {
-    const v = cv[i], u = cv[i+1], w = cv[i+2] / sy2, kf = cv[i+3], hc0 = cv[i+4], sg = P[v*3+2] < 0 ? -1 : 1;
-    const hc = Math.abs(w) < 1 ? (sampleMap(D.eyeDepth, 0.5 + u * 0.5, 0.5 - w * 0.5) - 0.5) * kf : 0, d = hc - hc0;
-    P[v*3] += n[0] * d; P[v*3+1] += n[1] * d; P[v*3+2] += n[2] * d * sg;
-  }
-  shown.m.setPositions(P); shown.m.update(pc.PRIMITIVE_TRIANGLES, false);
-  if (eye) mat.setParameter('uEyeS', new Float32Array([eye.sx, sy2]));   // wrinkles follow the socket height
-}
 function setSurface(m, pos, nrm, jw, reg) {
   const n = pos.length / 3, uv0 = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), uv2 = new Float32Array(n * 2), cl = new Uint8Array(n * 4);
   for (let v = 0; v < n; v++) {
@@ -1226,7 +1209,6 @@ function setSurface(m, pos, nrm, jw, reg) {
     uv2[v*2] = reg[v*3]; uv2[v*2+1] = reg[v*3+1];
   }
   m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv0); m.setUvs(1, uv1); m.setUvs(2, uv2); m.setColors32(cl);
-  shown = { m, pos: pos.slice() }; squintLast = -1;
   m.update(pc.PRIMITIVE_TRIANGLES, false);
 }
 function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; return genes.mix.map(x => x / s); }
@@ -1236,7 +1218,7 @@ let time = 0, roarT = -1, snapT = -1, blinkT = -1, blinkClock = 3;
 app.on('update', dt => {
   time += dt; updateCamera();
   if (D && view.idle && (blinkClock -= dt) < 0) { blinkT = 0; blinkClock = 2.5 + Math.random() * 4; }
-  if (blinkT >= 0) { blinkT += dt; const u = blinkT / 0.3; const c = u >= 1 ? 0 : Math.sin(Math.PI * u); if (u >= 1) blinkT = -1; if (c !== lidClose) { lidClose = c; updateLids(); for (const e of eyeballs) if (e.base) e.ent.setLocalScale(e.base[0], e.base[1] * (1 - BLINK_SQUASH * c), e.base[2]); applySquint(c); } }   // eye and the skin around it BLINK_SQUASH shorter at full blink
+  if (blinkT >= 0) { blinkT += dt; const u = blinkT / 0.3; const c = u >= 1 ? 0 : Math.sin(Math.PI * u); if (u >= 1) blinkT = -1; if (c !== lidClose) { lidClose = c; blinkSlider(c); } }
   if (!D) return;
   const w = normWeights(), sculpted = w.reduce((s, x, i) => s + x * D.gapes[i], 0);
   let open = genes.gape, shake = 0, lift = 0;
@@ -1275,6 +1257,13 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
 { const el = $('gape'), out = $('gapeOut'); const sync = () => { genes.gape = +el.value; out.textContent = genes.gape + '°'; }; sync(); el.addEventListener('input', sync); }
 $('roar').onclick = () => roarT = 0;
 $('blink').onclick = () => blinkT = 0;
+// blink = the Socket height slider moved down by BLINK_SQUASH and back (same path as dragging it)
+let blinkBaseSY = null;
+function blinkSlider(c) {
+  if (blinkBaseSY === null) blinkBaseSY = genes.eyeSY;
+  const el = $('eyeSY'); el.value = blinkBaseSY * (1 - BLINK_SQUASH * c); blinking = c > 0; el.dispatchEvent(new Event('input'));
+  if (c === 0) blinkBaseSY = null;
+}
 $('snap').onclick = () => snapT = 0;
 $('showBones').onchange = e => view.bones = e.target.checked;
 $('showWeights').onchange = e => { view.weights = e.target.checked; applySkin(normWeights()); };
@@ -1316,6 +1305,6 @@ resize(); app.start();
 Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' }))]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm]) => {
   data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
-window.__dino = { setBlink: c => { lidClose = c; updateLids(); for (const e of eyeballs) if (e.base) e.ent.setLocalScale(e.base[0], e.base[1] * (1 - BLINK_SQUASH * c), e.base[2]); applySquint(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
+window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
 </script>
