@@ -22,9 +22,12 @@ for name,r in zip(['hind','front','foot'],comps):
     m=root==r; vs=np.where(m)[0]; rm=-np.ones(len(V),int); rm[vs]=np.arange(len(vs)); T=rm[F[m[F[:,0]]]]; X=V[vs]
     d=np.array([*dirs[name],0.]); d/=np.linalg.norm(d); s=X@d; lo,hi=s.min(),s.max(); L0=hi-lo
     pe=X[s<lo+0.06*L0].mean(0); de=X[s>hi-0.06*L0].mean(0)
-    if name=='foot': pe=X[X[:,1]>X[:,1].max()-0.03].mean(0); de=np.array([X[:,0].max(),pe[1],pe[2]])   # ankle: top of the pad; far end: the toe tips, level
+    if name=='foot':   # ankle: top of the pad; far end: level, toward the toe tips (the toes point diagonally on the sheet)
+        pe=X[X[:,1]>X[:,1].max()-0.03].mean(0); c0=X.mean(0); dxz=np.hypot(X[:,0]-c0[0],X[:,2]-c0[2])
+        tips=X[(dxz>np.quantile(dxz,0.9))&(X[:,1]<X[:,1].min()+0.5*(X[:,1].max()-X[:,1].min()))]; td=tips.mean(0)-c0; td[1]=0; td/=np.linalg.norm(td)
+        td=-td; de=pe+td*0.1; print('foot toes point', td.round(2))
     ax=de-pe; L=np.linalg.norm(ax); ux=ax/L; up=np.array([0,1.,0]); uy=up-ux*(up@ux); uy/=np.linalg.norm(uy); uz=np.cross(ux,uy)
     Q=(X-pe)@np.stack([ux,uy,uz]).T; rad=float(np.median(np.hypot(Q[:,1],Q[:,2])))
-    out[name]=dict(pos=np.round(Q,5).ravel().tolist(),idx=T.ravel().tolist(),len=float(L),rad=rad,ang=float(np.degrees(np.arctan2(ux[1],ux[0]))))
+    out[name]=dict(pos=np.round(Q,5).ravel().tolist(),idx=T.ravel().tolist(),len=float(L),rad=rad,ang=0.0 if name=='foot' else float(np.degrees(np.arctan2(ux[1],ux[0]))))   # the foot is level: its frame already points along the toes
     print(name,'verts',len(Q),'len %.3f rad %.3f ang %.1f'%(L,rad,out[name]['ang']))
 json.dump(dict(hind=dict(thigh=out['hind'],foot=out['foot']),front=dict(thigh=out['front'],foot=out['foot']),note='quadruped legs: one-piece leg (as thigh) + shared foot; frames as leg.json'),open('../quad.json','w'))
