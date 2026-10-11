@@ -1258,8 +1258,8 @@ function buildSkeleton(skel) {
 // bend smoothly. On the body the distance is in units of each bone's radius, so chest skin stays on the spine next to the arm
 // each part only sees its own bones plus the ones it meets at its seam (so a fingertip never reaches for the spine)
 const RIG_ALLOW = { body: n => /^(pelvis|chest|neck1|tail1|upperArm_.|thigh_.|fthigh_.)$/.test(n), neck: n => /^(chest|neck\d+)$/.test(n), tail: n => /^(pelvis|tail\d+)$/.test(n),
-  arm_L: n => /^(upperArm|foreArm|hand|finger\d)_L$/.test(n), arm_R: n => /^(upperArm|foreArm|hand|finger\d)_R$/.test(n),
-  leg_L: n => /^(thigh|shin|foot|toe\d)_L$/.test(n), leg_R: n => /^(thigh|shin|foot|toe\d)_R$/.test(n),
+  arm_L: n => /^(upperArm|foreArm|hand|finger\db?)_L$/.test(n), arm_R: n => /^(upperArm|foreArm|hand|finger\db?)_R$/.test(n),
+  leg_L: n => /^(thigh|shin|foot|toe\db?)_L$/.test(n), leg_R: n => /^(thigh|shin|foot|toe\db?)_R$/.test(n),
   fleg_L: n => /^f(thigh|shin|foot)_L$/.test(n), fleg_R: n => /^f(thigh|shin|foot)_R$/.test(n) };
 function rigWeights(P, nh, jw, skel, groups) {
   const nv = P.length / 3, bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
@@ -1516,6 +1516,17 @@ function computeBody() {
       const L = buildLeg(at, [Math.sign(c) || 1, 0], [0, 1], depth, kit, legSettings(which)); if (!L) continue; L.rig.which = which; groups.legRig[which] = L.rig;
       for (const side of [1, -1]) { const part = side > 0 ? L : mirrorZ(L), s0 = J.P.length / 3, sd = side > 0 ? '_L' : '_R'; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: pre + 'leg' + sd }); J = joinParts(J.P, J.I, part, L.r, 'body-' + which + '-leg-' + side);
         for (const b of part.bones) skel.push({ ...b, name: pre + b.name + sd, parent: b.parent === 'pelvis' ? root : pre + b.parent + sd }); } } }
+  // full rig: a knuckle in every finger and toe (second bone from the middle to the tip), and a knee in the one-piece
+  // quadruped legs (their single leg bone split into thigh + shin at mid-length; the foot hangs off the shin)
+  const half = b => [0, 1, 2].map(i => (b.a[i] + b.b[i]) / 2);
+  for (const b of skel.slice()) {
+    if (/^(finger\d|toe\d)_[LR]$/.test(b.name)) { const m = half(b), tip = b.b; b.b = m; skel.push({ name: b.name.replace(/_([LR])$/, 'b_$1'), parent: b.name, a: m, b: tip, ra: b.rb, rb: b.rb * 0.7 }); }
+    else if (/^f?thigh_[LR]$/.test(b.name) && !skel.some(q => q.name === b.name.replace('thigh', 'shin'))) {
+      const m = half(b), end = b.b, shin = b.name.replace('thigh', 'shin'); b.b = m;
+      skel.splice(skel.indexOf(b) + 1, 0, { name: shin, parent: b.name, a: m, b: end, ra: b.rb, rb: b.rb });   // right after its parent
+      for (const q of skel) if (q.parent === b.name && q.name !== shin) q.parent = shin;
+    }
+  }
   J.skel = skel; J.groups = groups; J.legRig = groups.legRig;
   J.breathFrame = { tx, ty, c, s: s2, ax, ay, sc, h: genes.bodyHeight, xmin0, bl, ylo, yhi };   // body frame -> animal, for the breathing sphere
   return J;
@@ -1982,8 +1993,9 @@ function walkCycle(dt) {
   for (const [pre, sd, off] of legs) {
     const t = walkPhase + off, sw = Math.sin(t), lift = Math.max(0, Math.cos(t));        // sw > 0: leg forward; lift: swing phase
     const set = (n, z) => { const e = rig[pre + n + sd]; if (e) e.setLocalEulerAngles(0, 0, z); };
-    set('thigh', 24 * sw); set('shin', -35 * lift); set('foot', 20 * lift - 12 * Math.max(0, -sw));
-    for (const k of [1, 2, 3]) set('toe' + k, 25 * Math.max(0, -Math.cos(t)) * (sw < 0 ? 1 : 0));
+    const q = genes.stance === 'quad' ? 0.45 : 1;   // short columnar quadruped legs: a smaller swing and knee fold
+    set('thigh', 24 * q * sw); set('shin', -35 * q * lift); set('foot', (20 * lift - 12 * Math.max(0, -sw)) * q);
+    for (const k of [1, 2, 3]) { const c = 25 * Math.max(0, -Math.cos(t)) * (sw < 0 ? 1 : 0); set('toe' + k, c); set('toe' + k + 'b', -0.6 * c); }
   }
   if (rig.pelvis) { rig.pelvis.setLocalEulerAngles(0, 0, 2 * Math.sin(2 * walkPhase)); }
   for (let k = 1; rig['tail' + k]; k++) rig['tail' + k].setLocalEulerAngles(0, 4 * Math.sin(walkPhase - k * 0.4), 0);
