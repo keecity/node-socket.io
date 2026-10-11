@@ -111,6 +111,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="tailCurve">Curve</label><output id="tailCurveOut"></output><input id="tailCurve" type="range" min="-40" max="40" step="1" value="-30"></div>
       <div class="slider"><label for="tailThick">Thickness</label><output id="tailThickOut"></output><input id="tailThick" type="range" min="0.4" max="1.6" step="0.01" value="1"></div>
       <div class="slider"><label for="tailTaper">Taper</label><output id="tailTaperOut"></output><input id="tailTaper" type="range" min="0.5" max="2.5" step="0.05" value="1.3"></div>
+      <div class="slider"><label for="breathDepth">Breath depth</label><output id="breathDepthOut"></output><input id="breathDepth" type="range" min="0" max="0.04" step="0.001" value="0.012"></div>
+      <div class="slider"><label for="breathRate">Breaths per minute</label><output id="breathRateOut"></output><input id="breathRate" type="range" min="4" max="40" step="1" value="14"></div>
+      <div class="slider"><label for="breathRadius">Breath radius</label><output id="breathRadiusOut"></output><input id="breathRadius" type="range" min="0.1" max="0.6" step="0.01" value="0.32"></div>
+      <div class="slider"><label for="breathFwd">Breath centre (back → front)</label><output id="breathFwdOut"></output><input id="breathFwd" type="range" min="0.3" max="0.95" step="0.01" value="0.62"></div>
+      <div class="slider"><label for="breathUp">Breath centre (belly → back)</label><output id="breathUpOut"></output><input id="breathUp" type="range" min="0" max="0.8" step="0.01" value="0.3"></div>
       <div class="slider"><label for="tailFolds">Skin folds</label><output id="tailFoldsOut"></output><input id="tailFolds" type="range" min="0" max="3" step="0.05" value="1.5"></div>
     </section>
     <section>
@@ -434,7 +439,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -1232,7 +1237,7 @@ function mergeCreature(hP, hI, jw, reg) {
   headMI.mesh = m; if (creatureMesh && creatureMesh !== m) creatureMesh.destroy(); creatureMesh = m;
   body.ent.enabled = false; neck.ent.enabled = false;
   window.__creature = { verts: nv };
-  creatureData = { P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP) };
+  creatureData = { P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP), frame: bodyJ.breathFrame };
 }
 // ---------- arms: upper arm, forearm, hand and 2-4 fingers chained from the shoulder, each sunk into the one before ----------
 function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x along the limb) -> world
@@ -1327,6 +1332,7 @@ function computeBody() {
     const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zs * sc * genes.bodyWidth - 0.5 * ball];
     const A = buildArm(sh, [c, s2], [-s2, c], sc);
     if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side); } }
+  J.breathFrame = { tx, ty, c, s: s2, ax, ay, sc, h: genes.bodyHeight, xmin0, bl, ylo, yhi };   // body frame -> animal, for the breathing sphere
   return J;
 }
 function placeBody() {
@@ -1675,7 +1681,7 @@ function normWeights() { const s = genes.mix.reduce((a, b) => a + b, 0) || 1; re
 // ---------- jaw + idle animation ----------
 let time = 0, roarT = -1, snapT = -1, blinkT = -1, blinkClock = 3;
 app.on('update', dt => {
-  time += dt; updateCamera();
+  time += dt; updateCamera(); breathe();
   if (D && view.idle && (blinkClock -= dt) < 0) { blinkT = 0; blinkClock = 2.5 + Math.random() * 4; }
   if (blinkT >= 0) { blinkT += dt; const u = blinkT / 0.3; const c = u >= 1 ? 0 : Math.sin(Math.PI * u); if (u >= 1) blinkT = -1; if (c !== lidClose) { lidClose = c; blinkSlider(c); } }
   if (!D) return;
@@ -1718,6 +1724,24 @@ $('roar').onclick = () => roarT = 0;
 $('blink').onclick = () => blinkT = 0;
 // blink = the Socket height slider moved down by BLINK_SQUASH and back (same path as dragging it)
 let blinkBaseSY = null;
+// breathing: a sphere on the chest/belly; body vertices inside it move along their rest normal, cosine falloff to its edge
+function breathe() {
+  const C = creatureData; if (!C || !creatureMesh || !C.frame) return;
+  const key = ['breathRadius','breathFwd','breathUp'].map(k => genes[k]).join(',');
+  if (C.breathKey !== key) {
+    if (C.bv) for (let i = 0; i < C.bv.length; i++) { const a = C.bv[i] * 3; for (let k = 0; k < 3; k++) C.P[a+k] = C.b0[i*3+k]; }
+    const F = C.frame, x = (F.xmin0 + genes.breathFwd * F.bl - F.ax) * F.sc, y = (F.ylo + genes.breathUp * (F.yhi - F.ylo) - F.ay) * F.sc * F.h;
+    const cx = F.tx + x * F.c - y * F.s, cy = F.ty + x * F.s + y * F.c, r = genes.breathRadius * F.bl * F.sc, N = vertexNormals(C.P, C.I), bv = [], bw = [];
+    for (let v = C.nh; v < C.P.length / 3; v++) { const d = Math.hypot(C.P[v*3] - cx, C.P[v*3+1] - cy, C.P[v*3+2]) / r; if (d < 1) { bv.push(v); bw.push(0.5 + 0.5 * Math.cos(Math.PI * d)); } }
+    C.bv = Uint32Array.from(bv); C.bw = Float32Array.from(bw); C.b0 = new Float32Array(bv.length * 3); C.bn = new Float32Array(bv.length * 3);
+    for (let i = 0; i < bv.length; i++) for (let k = 0; k < 3; k++) { C.b0[i*3+k] = C.P[bv[i]*3+k]; C.bn[i*3+k] = N[bv[i]*3+k]; }
+    C.breathKey = key;
+  }
+  const amp = genes.breathDepth * 0.5 * (1 - Math.cos(time * genes.breathRate / 60 * 2 * Math.PI));   // 0 (exhaled) .. depth (inhaled)
+  if (amp === C.amp) return; C.amp = amp;
+  for (let i = 0; i < C.bv.length; i++) { const a = C.bv[i] * 3, o = amp * C.bw[i]; for (let k = 0; k < 3; k++) C.P[a+k] = C.b0[i*3+k] + C.bn[i*3+k] * o; }
+  setSurface(creatureMesh, C.P, surfaceNormals(creatureMesh, C.P, C.I), C.jw, C.reg);
+}
 function blinkSlider(c) {
   if (blinkBaseSY === null) blinkBaseSY = genes.eyeSY;
   const el = $('eyeSY'); el.value = blinkBaseSY * (1 - BLINK_SQUASH * c); blinking = true; el.dispatchEvent(new Event('input')); blinking = false;
@@ -1743,7 +1767,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : '3 (theropod)', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : '3 (theropod)', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['breathDepth', v => (v * 100).toFixed(1) + ' cm', false], ['breathRate', v => v + ' /min', false], ['breathRadius', v => Math.round(v * 100) + '% of the body', false], ['breathFwd', v => Math.round(v * 100) + '%', false], ['breathUp', v => Math.round(v * 100) + '%', false], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) requestRebuild(); else applySkin(normWeights()); });
 }
