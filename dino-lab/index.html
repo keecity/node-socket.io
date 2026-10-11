@@ -92,7 +92,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     <section>
       <h2>Eyes</h2>
       <div class="slider"><label for="eyeSX">Socket width (x)</label><output id="eyeSXOut"></output><input id="eyeSX" type="range" min="0.5" max="1.8" step="0.01" value="0.79"></div>
-      <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.572" max="1.8" step="0.01" value="0.572"></div>
+      <div class="slider"><label for="eyeSY">Socket height (y)</label><output id="eyeSYOut"></output><input id="eyeSY" type="range" min="0.02" max="1.8" step="0.01" value="0.5"></div>
       <div class="slider"><label for="eyeFwd">Forward / back</label><output id="eyeFwdOut"></output><input id="eyeFwd" type="range" min="-0.03" max="0.03" step="0.001" value="0.011"></div>
       <div class="slider"><label for="eyeUp">Up / down</label><output id="eyeUpOut"></output><input id="eyeUp" type="range" min="-0.03" max="0.03" step="0.001" value="-0.005"></div>
       <div class="slider"><label for="eyeDepth">Socket depth</label><output id="eyeDepthOut"></output><input id="eyeDepth" type="range" min="0" max="0.02" step="0.0005" value="0.008"></div>
@@ -371,7 +371,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.572, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 11, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 11, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -910,7 +910,7 @@ function placeTeeth(w, jw, reg) {
   const base = D.teeth.base, TI = base.idx, tn = base.pos.length / 3, TP = new Float32Array(tn * 3);
   w.forEach((x, i) => { if (x <= 0) return; const T = D.teeth.targets[SPECIES_TOOTH[i]].pos; for (let k = 0; k < TP.length; k++) TP[k] += x * T[k]; });
   const g = w.reduce((s, x, i) => s + x * D.gapes[i], 0) * Math.PI / 180, N = genes.toothCount;
-  const SINK = 0.08 + 0.27 * carn;   // sunk into the gum (gum widths): fangs deep, short molar crowns barely
+  const SINK = 0.08 + 0.87 * carn;   // sunk into the gum (gum widths): fang gum line at ~60% of its height (wide neck hidden), molars barely
   const inside = insideTest();
   let zExt = 0; for (let v = 0; v < tn; v++) if (TP[v*3+1] > 0) zExt = Math.max(zExt, Math.abs(TP[v*3+2]), Math.abs(TP[v*3]) * 0.15);   // crown half-width
   let total = 0;
@@ -944,10 +944,12 @@ function placeTeeth(w, jw, reg) {
       const bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;
       const sd = [bk[1]*up[2] - bk[2]*up[1], bk[2]*up[0] - bk[0]*up[2], bk[0]*up[1] - bk[1]*up[0]];
       // seat the tooth in tissue: step from the gum point into the jaw until it is inside the head, move it there
-      { let t = 0; while (t < 0.03 && !inside(p[0] - up[0] * t, p[1] - up[1] * t, p[2] - up[2] * t)) t += 0.001; if (t < 0.03) for (let a = 0; a < 3; a++) p[a] -= up[a] * t; }
+      let seat = 0; while (seat < 0.03 && !inside(p[0] - up[0] * seat, p[1] - up[1] * seat, p[2] - up[2] * seat)) seat += 0.001;
+      if (seat >= 0.03) seat = 0; for (let a = 0; a < 3; a++) p[a] -= up[a] * seat;
+      const sink = Math.max(0.05, SINK - seat / sc);                       // the seating step counts toward the sink
       for (const sg of [1, -1]) {
         for (let v = 0; v < tn; v++) {
-          const lx = TP[v*3] * sc, ly = (TP[v*3+1] - SINK) * sc, lz = TP[v*3+2] * sc;   // gum line sunk SINK into the gum
+          const lx = TP[v*3] * sc, ly = (TP[v*3+1] - sink) * sc, lz = TP[v*3+2] * sc;   // gum line sunk into the gum
           const x = p[0] + bk[0] * lx + up[0] * ly + sd[0] * lz, y = p[1] + bk[1] * lx + up[1] * ly + sd[1] * lz, z = (p[2] + bk[2] * lx + up[2] * ly + sd[2] * lz) * sg;
           const q = (o + v) * 3;
           if (lower) { P[q] = x - D.pivot[0]; P[q+1] = y - D.pivot[1]; P[q+2] = z - D.pivot[2]; } else { P[q] = x; P[q+1] = y; P[q+2] = z; }
@@ -1271,7 +1273,7 @@ $('gumCol').addEventListener('input', e => { skinUi.gum = hex2(e.target.value); 
 $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.value); applySkin(normWeights()); });
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
-for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => (v * EYE_SIZE * 100).toFixed(1) + ' cm', true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
+for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
     ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
