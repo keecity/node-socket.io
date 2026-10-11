@@ -82,6 +82,15 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <p class="note" id="fuseOut" aria-live="polite"></p>
     </section>
     <section>
+      <h2>Neck</h2>
+      <div class="slider"><label for="neckLen">Length</label><output id="neckLenOut"></output><input id="neckLen" type="range" min="0.15" max="1.2" step="0.01" value="0.45"></div>
+      <div class="slider"><label for="neckAngle">Angle</label><output id="neckAngleOut"></output><input id="neckAngle" type="range" min="-60" max="60" step="1" value="-15"></div>
+      <div class="slider"><label for="neckCurve">S-curve</label><output id="neckCurveOut"></output><input id="neckCurve" type="range" min="-45" max="45" step="1" value="18"></div>
+      <div class="slider"><label for="neckThick">Thickness</label><output id="neckThickOut"></output><input id="neckThick" type="range" min="0.5" max="1.5" step="0.01" value="1"></div>
+      <div class="slider"><label for="neckFlare">Base flare</label><output id="neckFlareOut"></output><input id="neckFlare" type="range" min="0.8" max="2.5" step="0.01" value="1.5"></div>
+      <div class="slider"><label for="neckRings">Skin folds</label><output id="neckRingsOut"></output><input id="neckRings" type="range" min="0" max="3" step="0.05" value="1.5"></div>
+    </section>
+    <section>
       <h2>Teeth</h2>
       <div class="slider"><label for="toothCount">Teeth per side</label><output id="toothCountOut"></output><input id="toothCount" type="range" min="13" max="20" step="1" value="13"></div>
       <div class="slider"><label for="toothSize">Tooth size</label><output id="toothSizeOut"></output><input id="toothSize" type="range" min="0.3" max="0.7" step="0.01" value="0.6"></div>
@@ -383,7 +392,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.45, neckAngle: -15, neckCurve: 18, neckThick: 1, neckFlare: 1.5, neckRings: 1.5 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -427,7 +436,7 @@ function build(data) {
   const si = new pc.SkinInstance(skin); si.bones = [bones.skull, bones.jaw]; si.rootBone = head;
   const mi = new pc.MeshInstance(mesh, mat, head); mi.skinInstance = si; mi.cull = false; headMI = mi; baseMesh = mesh;
   head.addComponent('render', { meshInstances: [mi] });
-  buildEyes(dev); buildLids(dev); buildCrest(dev); buildTeeth(dev); buildTongue();
+  buildEyes(dev); buildLids(dev); buildCrest(dev); buildTeeth(dev); buildTongue(); buildNeck();
   rebuild();
 }
 
@@ -471,7 +480,7 @@ function rebuild() {
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
   setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
   if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
-  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg);
+  placeEyes(); placeCrest(); placeTeeth(w, jwv, reg); placeTongue(jwv, reg); placeNeck();
   clearTimeout(fuseTimer);
   if (pre && !blinking) { $('fuseOut').textContent = 'Fusing head and crest…'; fuseTimer = setTimeout(() => { try { fuseNow(pre, reg, jwv); } catch (e) { console.error(e); $('fuseOut').textContent = 'Fuse failed: ' + e.message; } }, 350); }
   else $('fuseOut').textContent = '';
@@ -977,6 +986,66 @@ function placeTeeth(w, jw, reg) {
   }
   $('toothOut').textContent = `Tooth shape ${Math.round(carn * 100)}% fang / ${Math.round((1 - carn) * 100)}% molar, ${total} teeth along the gum lines.`;
 }
+// ---------- neck: the neck segment's skin profile swept along a spline from the back of the skull ----------
+// spline: cubic Bezier from inside the back of the head, backward at the Angle gene, bent by the S-curve gene.
+// section: an ellipse sized from the back of the head, flaring toward the base; its radius is modulated by the neck
+// segment's ring profile (repeated, mirrored, along the length). Same skin material as the head; capped ends.
+let neck = null;
+function buildNeck() { const ent = new pc.Entity('neck'); ent.addComponent('render', { meshInstances: [] }); bones.skull.addChild(ent); neck = { ent, mesh: null }; }
+function placeNeck() {
+  if (!neck || !D.neckSeg) return;
+  const n = pos.length / 3; let xmin = Infinity;
+  for (let v = 0; v < n; v++) xmin = Math.min(xmin, pos[v*3]);
+  // back of the head: its centre and half-sizes over the rearmost 6 cm
+  let cy = 0, c = 0, ylo = Infinity, yhi = -Infinity, zw = 0;
+  for (let v = 0; v < n; v++) if (pos[v*3] < xmin + 0.06) { cy += pos[v*3+1]; c++; ylo = Math.min(ylo, pos[v*3+1]); yhi = Math.max(yhi, pos[v*3+1]); zw = Math.max(zw, Math.abs(pos[v*3+2])); }
+  cy /= c;
+  const ry0 = 0.42 * (yhi - ylo) * genes.neckThick, rz0 = 0.8 * zw * genes.neckThick;
+  const P0 = [xmin + 0.07, cy - 0.15 * (yhi - ylo)];                    // starts inside the head, a little low
+  const L = genes.neckLen, A = genes.neckAngle * Math.PI / 180, K = genes.neckCurve * Math.PI / 180;
+  const dir = a => [-Math.cos(a), Math.sin(a)];
+  const P3 = [P0[0] + L * dir(A)[0], P0[1] + L * dir(A)[1]];
+  const P1 = [P0[0] + L / 3 * dir(A + K)[0], P0[1] + L / 3 * dir(A + K)[1]], P2 = [P3[0] - L / 3 * dir(A - K)[0], P3[1] - L / 3 * dir(A - K)[1]];
+  const bez = t => { const u = 1 - t; return [0, 1].map(i => u*u*u*P0[i] + 3*u*u*t*P1[i] + 3*u*t*t*P2[i] + t*t*t*P3[i]); };
+  // arc-length table
+  const M = 200, pts = [], cum = [0];
+  for (let i = 0; i <= M; i++) { pts.push(bez(i / M)); if (i) cum.push(cum[i-1] + Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])); }
+  const len = cum[M], at = d => { let i = 1; while (i < M && cum[i] < d) i++; const f = (d - cum[i-1]) / (cum[i] - cum[i-1] || 1); return [pts[i-1][0] + (pts[i][0] - pts[i-1][0]) * f, pts[i-1][1] + (pts[i][1] - pts[i-1][1]) * f]; };
+  const S = D.neckSeg, NA = S.na, NT = S.nt, prof = (t, j) => { const tt = t - Math.floor(t), tm = tt < 0.5 ? 2 * tt : 2 - 2 * tt, y = tm * (NT - 1), i = Math.floor(y), f = y - i; const a = S.r[Math.min(NT - 1, i) * NA + j], b = S.r[Math.min(NT - 1, i + 1) * NA + j]; return a + (b - a) * f; };
+  const segLen = 2 * S.aspect * Math.max(ry0, rz0);                      // one mirrored period of the folds
+  const NR = NA, NS = Math.max(24, Math.round(len / 0.006)), CAP = 8, P = [], I = [];
+  const ring = (d, scaleCap) => {
+    const c = at(d), c1 = at(Math.max(0, d - 0.002)), c2 = at(Math.min(len, d + 0.002));
+    let tx = c2[0] - c1[0], ty = c2[1] - c1[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const nx = -ty, ny = tx;                                             // up side of the neck, in the x-y plane
+    const u = d / len, flare = 1 + (genes.neckFlare - 1) * u * u;
+    for (let j = 0; j < NR; j++) {
+      const ph = 2 * Math.PI * j / NR, pr = 1 + (prof(d / segLen, j) - 1) * genes.neckRings;
+      const ey = Math.cos(ph) * ry0 * flare * pr * scaleCap, ez = Math.sin(ph) * rz0 * flare * pr * scaleCap;
+      // ny > 0 points backward-up for a backward-running neck: the dorsal side is +n when it points up
+      const sgn = ny >= 0 ? 1 : -1;
+      P.push(c[0] + sgn * nx * ey, c[1] + sgn * ny * ey, ez);
+    }
+  };
+  for (let k = 0; k <= NS; k++) ring(len * k / NS, 1);
+  // rounded cap at the far end
+  for (let k = 1; k <= CAP; k++) { const a = (k / CAP) * Math.PI / 2; ring(len + 0, Math.cos(a)); const base = P.length / 3 - NR, cap = Math.sin(a) * Math.min(ry0, rz0) * genes.neckFlare; const c = at(len), c1 = at(len - 0.002); let tx = c[0] - c1[0], ty = c[1] - c1[1]; const tl = Math.hypot(tx, ty) || 1; for (let j = 0; j < NR; j++) { P[(base + j) * 3] += tx / tl * cap; P[(base + j) * 3 + 1] += ty / tl * cap; } }
+  const rows = NS + 1 + CAP;
+  for (let k = 0; k < rows - 1; k++) for (let j = 0; j < NR; j++) { const a = k * NR + j, b = k * NR + (j + 1) % NR, c = a + NR, d = b + NR; I.push(a, b, c, b, d, c); }
+  const tip = P.length / 3, ct = at(len), c1 = at(len - 0.002); { let tx = ct[0] - c1[0], ty = ct[1] - c1[1]; const tl = Math.hypot(tx, ty) || 1; const cap = Math.min(ry0, rz0) * genes.neckFlare; P.push(ct[0] + tx / tl * cap, ct[1] + ty / tl * cap, 0); }
+  for (let j = 0; j < NR; j++) I.push((rows - 1) * NR + j, (rows - 1) * NR + (j + 1) % NR, tip);
+  const st = P.length / 3; P.push(P0[0] + 0.02, P0[1], 0); for (let j = 0; j < NR; j++) I.push((j + 1) % NR, j, st);   // front end, inside the head
+  // outward winding check
+  const PP = new Float32Array(P), NN = vertexNormals(PP, I);
+  { const a = I[0] * 3, cc = at(0); if ((PP[a] - cc[0]) * NN[a] + (PP[a+1] - cc[1]) * NN[a+1] + PP[a+2] * NN[a+2] < 0) { for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } } }
+  const N2 = vertexNormals(PP, I), nv = PP.length / 3;
+  // a fresh mesh each time, attached only once all its streams exist (the material picks its variant from them)
+  const m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(I) : Uint16Array.from(I));
+  setSurface(m, PP, N2, new Float32Array(nv), new Float32Array(nv * 3));
+  neck.ent.render.meshInstances = [new pc.MeshInstance(m, mat)];
+  if (neck.mesh) neck.mesh.destroy(); neck.mesh = m;
+  window.__neck = { len, ry0, rz0, nv, P: PP, N: N2, I, mesh: neck.mesh, ent: neck.ent };
+}
 // ---------- tongue: a tapered, rounded rectangle swept along a spline on the floor of the lower jaw ----------
 const tongueMat = new pc.StandardMaterial();
 tongueMat.diffuse = new pc.Color(1, 1, 1); tongueMat.useMetalness = true; tongueMat.metalness = 0; tongueMat.gloss = 0.5; tongueMat.useMetalnessSpecularColor = true; tongueMat.specularityFactor = 0.3; tongueMat.update();
@@ -1296,7 +1365,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
 }
@@ -1315,8 +1384,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' }))]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
