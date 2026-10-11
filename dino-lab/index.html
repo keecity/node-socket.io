@@ -900,9 +900,11 @@ function placeTeeth(w, jw, reg) {
 }
 // ---------- tongue: a tapered, rounded rectangle swept along a spline on the floor of the lower jaw ----------
 const tongueMat = new pc.StandardMaterial();
-tongueMat.diffuse = new pc.Color(0.62, 0.25, 0.28); tongueMat.useMetalness = true; tongueMat.metalness = 0; tongueMat.gloss = 0.72; tongueMat.update();
+tongueMat.diffuse = new pc.Color(1, 1, 1); tongueMat.useMetalness = true; tongueMat.metalness = 0; tongueMat.gloss = 0.72; tongueMat.update();
 let tongue = null;
 function buildTongue() {
+  const dev = app.graphicsDevice, tex = (img, srgb) => { const t = new pc.Texture(dev, { width: img.width, height: img.height, format: srgb ? pc.PIXELFORMAT_SRGBA8 : pc.PIXELFORMAT_RGBA8, mipmaps: true, anisotropy: 8, addressU: pc.ADDRESS_MIRRORED_REPEAT, addressV: pc.ADDRESS_MIRRORED_REPEAT }); t.setSource(img); return t; };
+  tongueMat.diffuseMap = tex(D.tongueTex, true); tongueMat.normalMap = tex(D.tongueNrm, false); tongueMat.bumpiness = 0.8; tongueMat.update();
   const ent = new pc.Entity('tongue'); ent.addComponent('render', { meshInstances: [] }); bones.jaw.addChild(ent); tongue = { ent, mesh: null };
 }
 function placeTongue(jw, reg) {
@@ -935,33 +937,37 @@ function placeTongue(jw, reg) {
   const NS = 36, NR = 32, EXP = 2.6;                                        // stations, ring points, rounded-rectangle exponent
   const cum = [0]; for (let i = 1; i < dense.length; i++) cum.push(cum[i-1] + Math.hypot(dense[i][0] - dense[i-1][0], dense[i][1] - dense[i-1][1]));
   const L = cum[cum.length - 1], at = d => { let i = 1; while (i < cum.length - 1 && cum[i] < d) i++; const f = (d - cum[i-1]) / (cum[i] - cum[i-1] || 1); return dense[i-1].map((v, a) => v + (dense[i][a] - v) * f); };
-  const P = [], I = [];
+  const P = [], I = [], UV = [], TILE = 0.03, stationC = [];
   for (let k = 0; k <= NS; k++) {
     const s = k / NS, c = at(s * L), c2 = at(Math.min(L, s * L + 0.002)), c1 = at(Math.max(0, s * L - 0.002));
     let tx = c2[0] - c1[0], ty = c2[1] - c1[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
     const ux = -ty, uy = tx;                                              // up, in the jaw's plane
     // taper toward the tip, rounded off over the last 18%, and a little narrower where it leaves the throat
     const tip = s > 0.82 ? Math.sqrt(Math.max(0, 1 - ((s - 0.82) / 0.18) ** 2)) : 1;
-    const hw = genes.tongueWidth * c[2] * (1 - 0.35 * s) * tip * (0.85 + 0.15 * Math.min(1, s / 0.1)), th = 0.5 * hw + 0.0005;
-    const cy = th * 0.55;                                                  // rests on the floor, its belly sunk a little
+    const hw0 = genes.tongueWidth * c[2] * (1 - 0.35 * s) * (0.85 + 0.15 * Math.min(1, s / 0.1)), hw = hw0 * tip, th = 0.5 * hw + 0.0005;
+    const cy = 0.5 * (0.5 * hw0 + 0.0005) * 0.55 * 2;                    // centre height of the full section: the tip closes onto it, not onto the floor
+    stationC[k] = [c[0] + ux * cy, c[1] + uy * cy];                                                  // rests on the floor, its belly sunk a little
     for (let r = 0; r < NR; r++) {
       const a = 2 * Math.PI * r / NR, ca = Math.cos(a), sa = Math.sin(a);
       const ez = Math.sign(ca) * Math.abs(ca) ** (2 / EXP) * hw;
       let ey = Math.sign(sa) * Math.abs(sa) ** (2 / EXP) * th;
-      if (sa > 0) ey -= 0.18 * th * Math.exp(-((ez / hw) ** 2) / 0.04) * tip;   // soft groove down the middle of the top
+      if (sa > 0) ey -= 0.18 * th * Math.exp(-((ez / Math.max(hw, 1e-5)) ** 2) / 0.04) * (1 - smooth(0.6, 0.9, s));   // soft groove, fading out before the tip
       P.push(c[0] + ux * (cy + ey) - D.pivot[0], c[1] + uy * (cy + ey) - D.pivot[1], ez - D.pivot[2]);
+      UV.push(s * L / TILE, (r / NR) * 2 * (hw + th) * 2 / TILE);
     }
   }
   for (let k = 0; k < NS; k++) for (let r = 0; r < NR; r++) {
     const a = k * NR + r, b = k * NR + (r + 1) % NR, c = a + NR, d = b + NR;
     I.push(a, c, b, b, c, d);
   }
-  const back = P.length / 3; P.push(at(0)[0] - D.pivot[0], at(0)[1] - D.pivot[1] + 0.0005, -D.pivot[2]);   // caps
+  const back = P.length / 3; P.push(stationC[0][0] - D.pivot[0], stationC[0][1] - D.pivot[1], -D.pivot[2]); UV.push(0, 0);   // caps at the section centres
   for (let r = 0; r < NR; r++) I.push(back, r, (r + 1) % NR);
-  const tipV = P.length / 3, ct = at(L); P.push(ct[0] - D.pivot[0], ct[1] - D.pivot[1], -D.pivot[2]);
+  const tipV = P.length / 3; P.push(stationC[NS][0] - D.pivot[0], stationC[NS][1] - D.pivot[1], -D.pivot[2]); UV.push(L / TILE, 0);
   for (let r = 0; r < NR; r++) I.push(tipV, NS * NR + (r + 1) % NR, NS * NR + r);
   // light smoothing of the rings so the taper reads as one soft form
-  const m = new pc.Mesh(app.graphicsDevice); m.setPositions(P); m.setNormals(vertexNormals(new Float32Array(P), I)); m.setIndices(I); m.update();
+  const NN = vertexNormals(new Float32Array(P), I), m = new pc.Mesh(app.graphicsDevice);
+  m.setPositions(P); m.setNormals(NN); m.setUvs(0, UV); m.setIndices(I);
+  m.setVertexStream(pc.SEMANTIC_TANGENT, new Float32Array(pc.calculateTangents(P, Array.from(NN), UV, I)), 4); m.update();
   tongue.mesh = m; tongue.ent.render.meshInstances = [new pc.MeshInstance(m, tongueMat)];
   window.__tongue = { P, I, NS, NR };
 }
@@ -1219,8 +1225,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); rebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' }))]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; } };
 })();
