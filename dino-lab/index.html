@@ -93,14 +93,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     </section>
     <section>
       <h2>Arms</h2>
-      <div class="slider"><label for="fingers">Fingers</label><output id="fingersOut"></output><input id="fingers" type="range" min="2" max="4" step="1" value="2"></div>
+      <div class="slider"><label for="fingers">Fingers</label><output id="fingersOut"></output><input id="fingers" type="range" min="2" max="3" step="1" value="2"></div>
       <div class="slider"><label for="armSize">Arm size</label><output id="armSizeOut"></output><input id="armSize" type="range" min="0.1" max="1" step="0.01" value="0.16"></div>
       <div class="slider"><label for="armThick">Arm thickness</label><output id="armThickOut"></output><input id="armThick" type="range" min="0.5" max="1.8" step="0.01" value="1"></div>
       <div class="slider"><label for="handSize">Hand size</label><output id="handSizeOut"></output><input id="handSize" type="range" min="0.3" max="1.2" step="0.01" value="0.5"></div>
       <div class="slider"><label for="fingerSize">Finger size</label><output id="fingerSizeOut"></output><input id="fingerSize" type="range" min="0.3" max="1.8" step="0.01" value="1.05"></div>
       <div class="slider"><label for="armShoulder">Shoulder</label><output id="armShoulderOut"></output><input id="armShoulder" type="range" min="-100" max="20" step="1" value="-75"></div>
       <div class="slider"><label for="armElbow">Elbow</label><output id="armElbowOut"></output><input id="armElbow" type="range" min="0" max="140" step="1" value="95"></div>
-      <div class="slider"><label for="armWrist">Wrist</label><output id="armWristOut"></output><input id="armWrist" type="range" min="-60" max="60" step="1" value="-25"></div>
+      <div class="slider"><label for="armWrist">Wrist</label><output id="armWristOut"></output><input id="armWrist" type="range" min="-60" max="60" step="1" value="0"></div>
       <div class="slider"><label for="armSplay">Splay</label><output id="armSplayOut"></output><input id="armSplay" type="range" min="0" max="45" step="1" value="12"></div>
     </section>
     <section>
@@ -433,7 +433,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: -25, armSplay: 12 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -1225,6 +1225,11 @@ function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x a
 }
 const withInside = m => { m.inside = meshInside(m.PP, vertexNormals(m.PP, m.I), 0.02); return m; };
 function mirrorZ(m) { const P = m.PP.slice(); for (let v = 0; v < P.length; v += 3) P[v+2] *= -1; const I = m.I.slice(); for (let t = 0; t < I.length; t += 3) { const x = I[t+1]; I[t+1] = I[t+2]; I[t+2] = x; } return withInside({ PP: P, I, r: m.r }); }
+const HAND_POSE = {   // from the Hand Pose Rig (sheet units, XYZ degrees, forearm frame)
+  hand: { p: [0.403, 0.02, -0.003], r: [93, 4, -27], s: 0.5 },
+  finger1: { p: [0.472, 0.009, 0.026], r: [15, -18, -32], s: 0.5 },
+  finger2: { p: [0.525, -0.009, 0.003], r: [0, 0, -25], s: 0.5 },
+  finger3: { p: [0.514, 0.003, -0.055], r: [-4, 20, -36], s: 0.45 } };
 function buildArm(sh, f, u, bodySc) {
   const K = D.arm; if (!K) return null;
   const s = genes.armSize * bodySc, th = genes.armThick, rad = Math.PI / 180, spl = genes.armSplay * rad;
@@ -1237,23 +1242,27 @@ function buildArm(sh, f, u, bodySc) {
   const up = placePiece(K.upper, sh, dx, dy, dz, s, th);
   const el = [0, 1, 2].map(i => sh[i] + dx[i] * K.upper.len * s * OV);
   [dx, dy, dz] = frame(a2);
-  const fo = placePiece(K.fore, el, dx, dy, dz, s, th);
+  const fo = placePiece(K.fore, el, dx, dy, dz, s, 1);
   const wr = [0, 1, 2].map(i => el[i] + dx[i] * K.fore.len * s * OV);
-  [dx, dy, dz] = frame(a3);
-  const hs = genes.handSize, ha = placePiece(K.hand, wr, dx, dy, dz, s * hs, th); window.__wrist = wr;
-  let A = withInside(up);
-  for (const p of [fo, ha]) { const J = joinParts(A.PP, A.I, withInside(p), K.fore.rad * s * th); A = withInside({ PP: J.P, I: J.I }); }
-  // fingers from inside the palm, spread across its far edge; 4 = three fingers and a thumb
-  const nf = Math.min(3, genes.fingers), fs = s * genes.fingerSize, H = K.hand;
-  const fingerAt = (yLocal, xLocal, ang, scale) => {
-    const o = [0, 1, 2].map(i => wr[i] + dx[i] * xLocal * s * hs + dy[i] * yLocal * s * hs * th), b = a3 + ang;
-    const [fx, fy, fz] = frame(b); return withInside(placePiece(K.finger, o, fx, fy.map(v => -v), fz.map(v => -v), scale, 1));   // turned over: the finger curls down like a claw
+  // hand and fingers: the pose made in the Hand Pose Rig, in the forearm's frame (forearm at its origin, unrotated);
+  // the wrist gene turns the whole hand about the wrist; hand/finger size genes scale against the posed defaults
+  const fo0 = [dx, dy, dz], hs = genes.handSize / 0.5, fsz = genes.fingerSize / 1.05, wa = genes.armWrist * rad;
+  const Rw = new pc.Mat4().setFromEulerAngles(0, 0, genes.armWrist), hp = HAND_POSE.hand.p;
+  const toWorld = (q, M, p, sc) => {                      // piece point q -> pose frame -> wrist turn -> forearm frame -> world
+    const v = new pc.Vec3(q[0] * sc, q[1] * sc, q[2] * sc); M.transformPoint(v, v); v.x += p[0]; v.y += p[1]; v.z += p[2];
+    v.x -= hp[0]; v.y -= hp[1]; v.z -= hp[2]; Rw.transformPoint(v, v); v.x += hp[0]; v.y += hp[1]; v.z += hp[2];
+    return [0, 1, 2].map(i => el[i] + (fo0[0][i] * v.x + fo0[1][i] * v.y + fo0[2][i] * v.z) * s);
   };
-  for (let k = 0; k < nf; k++) {
-    const t = nf === 1 ? 0.5 : k / (nf - 1), y = (H.ymin + (H.ymax - H.ymin) * (0.2 + 0.6 * t)), ang = (t - 0.5) * 0.35 * (nf - 1);
-    const Fm = fingerAt(y, H.len * 0.78, ang, fs); const J = joinParts(A.PP, A.I, Fm, K.finger.rad * fs); A = withInside({ PP: J.P, I: J.I });
-  }
-  if (genes.fingers >= 4) { const Fm = fingerAt(H.ymin * 0.45, H.len * 0.6, -0.8, fs * 0.65); const J = joinParts(A.PP, A.I, Fm, K.finger.rad * fs * 0.65); A = withInside({ PP: J.P, I: J.I }); }
+  const posed = (key, piece, k) => {
+    const T = HAND_POSE[key], M = new pc.Mat4().setFromEulerAngles(...T.r), Q = piece.pos, n = Q.length / 3, P = new Float32Array(n * 3);
+    for (let v = 0; v < n; v++) { const w = toWorld([Q[v*3], Q[v*3+1], Q[v*3+2]], M, T.p, T.s * k); P[v*3] = w[0]; P[v*3+1] = w[1]; P[v*3+2] = w[2]; }
+    return withInside({ PP: P, I: piece.idx.slice() });
+  };
+  window.__wrist = toWorld([0, 0, 0], new pc.Mat4(), hp, 1);
+  let A = withInside(up);
+  for (const p of [withInside(fo), posed('hand', K.hand, hs)]) { const J = joinParts(A.PP, A.I, p, K.fore.rad * s * th); A = withInside({ PP: J.P, I: J.I }); }
+  const keys = genes.fingers >= 3 ? ['finger1', 'finger2', 'finger3'] : ['finger1', 'finger2'];   // 2 = T. rex, 3 = theropod; no thumb
+  for (const kf of keys) { const J = joinParts(A.PP, A.I, posed(kf, K.finger, fsz), K.finger.rad * s * HAND_POSE[kf].s * fsz); A = withInside({ PP: J.P, I: J.I }); }
   A.r = K.upper.rad * s * th;
   return A;
 }
@@ -1619,7 +1628,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : v === 3 ? '3 (theropod)' : '3 + thumb', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : '3 (theropod)', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
 }
