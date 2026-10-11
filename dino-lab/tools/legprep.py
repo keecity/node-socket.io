@@ -76,12 +76,20 @@ for name,r in zip(['slim','medium','heavy'],left):
         Tk=T[keep[T].all(1)]; used=np.unique(Tk); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); return rm[Tk],Q[used],used
     # the copy: the good toe past the cut, capped, turned and moved onto the bad toe's root
     ag,ug,Lg,tg=toe_frame(good); ab,ub,Lb,tb=toe_frame(bad)
-    dg=np.linalg.norm((X-ag)-np.outer(tg*Lg,ug),axis=1); inside=(tg>CUT)&(tg<1.15)&(dg<2.2*st[good][1])
-    Tg,Qg,_=sub(inside,T,X); Tg,Qg=cap(Tg,Qg)
+    dg=np.linalg.norm((X-ag)-np.outer(tg*Lg,ug),axis=1); inside=(tg>-0.06)&(tg<1.15)&(dg<2.2*st[good][1])
+    Tg,Qg,_=sub(inside,T,X)
+    # keep only the toe itself: the largest connected piece of the selection (stray bits of foot surface become slivers)
+    pr=np.arange(len(Qg))
+    def fr(x):
+        while pr[x]!=x: pr[x]=pr[pr[x]]; x=pr[x]
+        return x
+    for tr in Tg: r0=fr(tr[0]); pr[fr(tr[1])]=r0; pr[fr(tr[2])]=r0
+    rt=np.array([fr(x) for x in range(len(Qg))]); big=np.bincount(rt).argmax(); Tg,Qg,_=sub(rt==big,Tg,Qg)
+    # no cap on the copy: its open root is buried in the foot (a fan over that uneven edge makes spikes)
     v=np.cross(ug,ub); c_=ug@ub; Vx=np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]]); Rm=np.eye(3)+Vx+Vx@Vx/(1+c_)
     Qc=(Qg-(ag+ug*CUT*Lg))@Rm.T+(ab+ub*CUT*Lb)
     # the leg without the bad toe (cut a little further out than the copy starts, so the copy overlaps the stump)
-    db=np.linalg.norm((X-ab)-np.outer(tb*Lb,ub),axis=1); keep=~((tb>CUT+0.05)&(tb<1.2)&(db<2.2*st[bad][1])); T,X2,used=sub(keep,T,X); T,X2=cap(T,X2)
+    db=np.linalg.norm((X-ab)-np.outer(tb*Lb,ub),axis=1); keep=~((tb>CUT+0.05)&(tb<1.2)&(db<3.2*st[bad][1])); T,X2,used=sub(keep,T,X); T,X2=cap(T,X2)
     nold=len(used); bi_=np.stack([b1,b2],1)[used]; bw_=w2[used]
     ncap=len(X2)-nold; bi_=np.vstack([bi_,np.full((ncap,2),3+bad)]); bw_=np.concatenate([bw_,np.zeros(ncap)])
     X=X2; b1,b2,w2=bi_[:,0],bi_[:,1],bw_

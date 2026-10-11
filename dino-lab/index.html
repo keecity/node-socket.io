@@ -1113,7 +1113,7 @@ function joinParts(PB, IB, part, rCollar, key) {
   }
   if (!part) return { P: PB, I: Array.from(IB), joined: false };
   const { PP, I: IN } = part, nb = PB.length / 3, nn = PP.length / 3;
-  const NB = vertexNormals(PB, IB), inBody = meshInside(PB, NB, 0.03, IB), inNeck = part.inside || meshInside(PP, vertexNormals(PP, IN), 0.03, IN);
+  const NB = vertexNormals(PB, IB), inBody = part.openHost ? meshInside(PB, NB, part.openHost, null) : meshInside(PB, NB, 0.03, IB), inNeck = part.inside || meshInside(PP, vertexNormals(PP, IN), 0.03, IN);
   // cut both along their intersection: neck triangles outside the body, body triangles outside the neck
   const outN = new Uint8Array(nn); for (let v = 0; v < nn; v++) outN[v] = inBody(PP[v*3], PP[v*3+1], PP[v*3+2]) ? 0 : 1;
   const outB = new Uint8Array(nb); for (let v = 0; v < nb; v++) outB[v] = inNeck(PB[v*3], PB[v*3+1], PB[v*3+2]) ? 0 : 1;
@@ -1410,7 +1410,10 @@ function buildSkinnedLeg(hip, f, u, depth, T, g) {
   let I = T.idx.slice(), P2 = PP;
   if (T.toe) { const tq = T.toe.pos, m = tq.length / 3, TP = new Float32Array(m * 3), X = S[T.toe.bone];
     for (let v = 0; v < m; v++) { const q = m4.xf(X, w([tq[v*3], tq[v*3+1], tq[v*3+2]])); TP[v*3] = q[0]; TP[v*3+1] = q[1]; TP[v*3+2] = q[2]; }
-    const J = joinParts(PP, I, { PP: TP, I: T.toe.idx, inside: null }, rad * 0.35, 'leg-toe-' + T.name); P2 = J.P; I = J.I; }
+    // the cut leg and the open-rooted toe are not watertight: inside tests use the nearest surface's facing, not ray crossings
+    const J = joinParts(PP, I, { PP: TP, I: T.toe.idx, inside: meshInside(TP, vertexNormals(TP, T.toe.idx), 0.12), openHost: 0.12 }, rad * 0.35, 'leg-toe-' + T.name);
+    if (J.joined) { P2 = J.P; I = J.I; }
+    else { P2 = new Float32Array(PP.length + TP.length); P2.set(PP); P2.set(TP, PP.length); I = I.concat(Array.from(T.toe.idx, x => x + n)); } }   // no overlap found: keep the toe on
   return { PP: P2, I, inside: null, r: rad, bones, rig: { hip, root, parts: rig } };
 }
 function buildLeg(hip, f, u, depth, K, g) {   // K: leg kit (biped: whole skinned legs; quadruped: thigh/shin/foot pieces); g: that leg pair's settings
