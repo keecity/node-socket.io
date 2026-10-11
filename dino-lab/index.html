@@ -112,7 +112,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <h2>Leg placement</h2>
       <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px">Stance <select id="stance"><option value="biped">Biped (2 legs, arms)</option><option value="quad">Quadruped (4 legs)</option></select></label>
       <div id="legPair" hidden style="display:flex;gap:6px;margin-bottom:6px"><button type="button" data-pair="hind">Hind legs</button><button type="button" data-pair="front">Front legs</button></div>
-      <div id="legPart" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><button type="button" data-p="leg">Whole leg</button><button type="button" data-p="thigh">Thigh</button><button type="button" data-p="shin">Shin</button><button type="button" data-p="foot">Foot</button><button type="button" data-p="toe1">Toe 1</button><button type="button" data-p="toe2">Toe 2</button><button type="button" data-p="toe3">Toe 3</button></div>
+      <div id="legPart" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><button type="button" data-p="leg">Whole leg</button><button type="button" data-p="thigh">Thigh</button><button type="button" data-p="shin">Shin</button><button type="button" data-p="foot">Foot</button><button type="button" data-p="toe1">Toe 1</button><button type="button" data-p="toe2">Toe 2</button><button type="button" data-p="toe3">Toe 3</button><button type="button" data-p="placedToe">Placed toe</button></div>
       <div id="legGizmo" style="display:flex;gap:6px;margin-bottom:8px"><button type="button" data-g="off">Off</button><button type="button" data-g="move">Move</button><button type="button" data-g="rotate">Rotate</button><button type="button" data-g="scale">Scale</button></div>
       <button id="legCopy" type="button">Copy leg settings</button>
       <textarea id="legOut" rows="4" readonly style="width:100%;font:11px monospace;margin-top:6px"></textarea>
@@ -453,7 +453,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1, toeSize: 0.55, stance: 'biped', bipedLeg: '{}', hindLeg: '{}', frontLeg: '{}', legType: 2 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1, toeSize: 0.55, stance: 'biped', bipedLeg: '{}', toePlace: '{}', hindLeg: '{}', frontLeg: '{}', legType: 2 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -1020,7 +1020,7 @@ function computeNeck(pos) {
   return { data, end };
 }
 const NECK_GENES = ['cranium','height','jawDepth','width','boost','neckLen','neckAngle','neckCurve','neckThick','neckFlare','neckRings'];
-const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','toeSize','stance','bipedLeg','hindLeg','frontLeg','legType'];
+const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','toeSize','stance','bipedLeg','toePlace','hindLeg','frontLeg','legType'];
 const geometryKey = ids => ids.map(id => genes[id]).join(',');
 let neckKey = '', bodyKey = '';
 function placeNeck() {
@@ -1113,7 +1113,7 @@ function joinParts(PB, IB, part, rCollar, key) {
   }
   if (!part) return { P: PB, I: Array.from(IB), joined: false };
   const { PP, I: IN } = part, nb = PB.length / 3, nn = PP.length / 3;
-  const NB = vertexNormals(PB, IB), inBody = part.openHost ? meshInside(PB, NB, part.openHost, null) : meshInside(PB, NB, 0.03, IB), inNeck = part.inside || meshInside(PP, vertexNormals(PP, IN), 0.03, IN);
+  const NB = vertexNormals(PB, IB), inBody = meshInside(PB, NB, 0.03, IB), inNeck = part.inside || meshInside(PP, vertexNormals(PP, IN), 0.03, IN);
   // cut both along their intersection: neck triangles outside the body, body triangles outside the neck
   const outN = new Uint8Array(nn); for (let v = 0; v < nn; v++) outN[v] = inBody(PP[v*3], PP[v*3+1], PP[v*3+2]) ? 0 : 1;
   const outB = new Uint8Array(nb); for (let v = 0; v < nb; v++) outB[v] = inNeck(PB[v*3], PB[v*3+1], PB[v*3+2]) ? 0 : 1;
@@ -1406,15 +1406,17 @@ function buildSkinnedLeg(hip, f, u, depth, T, g) {
     const p0 = w([Q[v*3], Q[v*3+1], Q[v*3+2]]), a = m4.xf(S[T.bi[v*2]], p0), b = m4.xf(S[T.bi[v*2+1]], p0), k = T.bw[v];
     PP[v*3] = a[0] + (b[0] - a[0]) * k; PP[v*3+1] = a[1] + (b[1] - a[1]) * k; PP[v*3+2] = a[2] + (b[2] - a[2]) * k;
   }
-  // the replacement toe (a copy of a good one, see legprep.py): rides its toe bone, fused onto the foot
-  let I = T.idx.slice(), P2 = PP;
-  if (T.toe) { const tq = T.toe.pos, m = tq.length / 3, TP = new Float32Array(m * 3), X = S[T.toe.bone];
-    for (let v = 0; v < m; v++) { const q = m4.xf(X, w([tq[v*3], tq[v*3+1], tq[v*3+2]])); TP[v*3] = q[0]; TP[v*3+1] = q[1]; TP[v*3+2] = q[2]; }
-    // the cut leg and the open-rooted toe are not watertight: inside tests use the nearest surface's facing, not ray crossings
-    const J = joinParts(PP, I, { PP: TP, I: T.toe.idx, inside: meshInside(TP, vertexNormals(TP, T.toe.idx), 0.12), openHost: 0.12 }, rad * 0.35, 'leg-toe-' + T.name);
-    if (J.joined) { P2 = J.P; I = J.I; }
-    else { P2 = new Float32Array(PP.length + TP.length); P2.set(PP); P2.set(TP, PP.length); I = I.concat(Array.from(T.toe.idx, x => x + n)); } }   // no overlap found: keep the toe on
-  return { PP: P2, I, inside: null, r: rad, bones, rig: { hip, root, parts: rig } };
+  let P2 = PP, I = T.idx.slice(), toeRig = null;
+  // the replacement toe (legprep.py), not welded yet: shown on its toe bone at the placement from the toe gizmo
+  // (genes.toePlace[type] = {p, r, s} in sheet units about the hole's centre); once placed, legprep.py welds it in
+  if (T.toe) {
+    const pl = JSON.parse(genes.toePlace || '{}')[T.name] || {}, tp = pl.p || [0, 0, 0], ce = T.toe.centre, Rp = m4.trs([0, 0, 0], pl.r || [0, 0, 0], pl.s || 1);
+    const tq = T.toe.pos, m = tq.length / 3, X = S[T.toe.bone]; P2 = new Float32Array(PP.length + m * 3); P2.set(PP);
+    for (let v = 0; v < m; v++) { const q = m4.xf(Rp, [tq[v*3], tq[v*3+1], tq[v*3+2]]), wq = m4.xf(X, w([ce[0] + tp[0] + q[0], ce[1] + tp[1] + q[1], ce[2] + tp[2] + q[2]])); P2[n*3 + v*3] = wq[0]; P2[n*3 + v*3+1] = wq[1]; P2[n*3 + v*3+2] = wq[2]; }
+    I = I.concat(Array.from(T.toe.idx, x => x + n));
+    toeRig = { type: T.name, hip, s, centre: ce, place: { p: tp, r: pl.r || [0, 0, 0], s: pl.s || 1 }, S: X };
+  }
+  return { PP: P2, I, inside: null, r: rad, bones, rig: { hip, root, parts: rig, toe: toeRig } };
 }
 function buildLeg(hip, f, u, depth, K, g) {   // K: leg kit (biped: whole skinned legs; quadruped: thigh/shin/foot pieces); g: that leg pair's settings
   if (!K) return null;
@@ -1908,7 +1910,7 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   sync(); el.addEventListener('input', () => { sync(); requestRebuild(); });
 }
 { const keys = ['legType','legSize','toeSize'];
-  $('legCopy').onclick = () => { const t = JSON.stringify({ ...Object.fromEntries(keys.map(k => [k, genes[k]])), bipedLeg: JSON.parse(genes.bipedLeg || '{}'), stance: genes.stance, hindLeg: JSON.parse(genes.hindLeg || '{}'), frontLeg: JSON.parse(genes.frontLeg || '{}') }); $('legOut').value = t; $('legOut').select(); try { navigator.clipboard.writeText(t); } catch (e) {} }; }
+  $('legCopy').onclick = () => { const t = JSON.stringify({ ...Object.fromEntries(keys.map(k => [k, genes[k]])), bipedLeg: JSON.parse(genes.bipedLeg || '{}'), toePlace: JSON.parse(genes.toePlace || '{}'), stance: genes.stance, hindLeg: JSON.parse(genes.hindLeg || '{}'), frontLeg: JSON.parse(genes.frontLeg || '{}') }); $('legOut').value = t; $('legOut').select(); try { navigator.clipboard.writeText(t); } catch (e) {} }; }
 // leg gizmo: pick a part (whole leg, thigh, shin, foot, a toe) and move / turn / scale it about its joint. Posing a part
 // carries everything below it; the right leg mirrors the left
 { let gz = null, layer = null, mode = 'off', part = 'leg'; const handle = new pc.Entity('legHandle'), M = new pc.Mat4();
@@ -1916,6 +1918,8 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   const rigOf = () => bodyJ && bodyJ.legRig && bodyJ.legRig[key()], info = name => rigOf().parts.find(q => q.name === name);
   const parentW = q => q.parent ? info(q.parent).W : m4.mul(rigOf().root, m4.trs(rigOf().hip, [0, 0, 0], 1));
   const syncHandle = () => { const R = rigOf(); if (!R || !head) return false; if (handle.parent !== head) head.addChild(handle);
+    if (part === 'placedToe') { const t = R.toe; if (!t) return false; const pl = t.place, wp = m4.xf(t.S, [t.hip[0] + (t.centre[0] + pl.p[0]) * t.s, t.hip[1] + (t.centre[1] + pl.p[1]) * t.s, t.hip[2] + (t.centre[2] + pl.p[2]) * t.s]);
+      handle.setLocalPosition(wp[0], wp[1], wp[2]); handle.setLocalEulerAngles(pl.r[0], pl.r[1], pl.r[2]); handle.setLocalScale(pl.s, pl.s, pl.s); return true; }
     if (!info(part === 'leg' ? 'thigh' : part)) return false;
     if (part === 'leg') { const h = R.hip, g = { ...LEG_DEFAULT, size: 1, ...JSON.parse(genes[key() + 'Leg'] || '{}') }; handle.setLocalPosition(h[0] + g.x, h[1] + g.y, h[2] + g.z); handle.setLocalEulerAngles(g.rx, g.ry, g.rz); handle.setLocalScale(g.size, g.size, g.size); }
     else { M.data.set(info(part).W); const t = M.getTranslation(), r = M.getEulerAngles(), k = M.getScale(); handle.setLocalPosition(t); handle.setLocalEulerAngles(r); handle.setLocalScale(k); }
@@ -1924,6 +1928,10 @@ for (const id of ['snout', 'cranium', 'height', 'jawDepth', 'width']) {
   const q3 = x => Math.round(x * 1000) / 1000;
   const apply = () => {
     const quadKey = key() + 'Leg', cfg = JSON.parse(genes[quadKey] || '{}');
+    if (part === 'placedToe') {   // back to sheet units about the hole centre: undo the toe bone, the leg's hip offset and scale
+      const t = rigOf().toe, Si = new pc.Mat4(); Si.data.set(t.S); Si.invert(); const q = Si.transformPoint(handle.getLocalPosition().clone()), r = handle.getLocalEulerAngles();
+      const all = JSON.parse(genes.toePlace || '{}'); all[t.type] = { p: [0, 1, 2].map(i => q3(([q.x, q.y, q.z][i] - t.hip[i]) / t.s - t.centre[i])), r: [Math.round(r.x), Math.round(r.y), Math.round(r.z)], s: q3(handle.getLocalScale().x) };
+      genes.toePlace = JSON.stringify(all); rebuild(); return; }
     if (part === 'leg') { const h = rigOf().hip, p = handle.getLocalPosition(), r = handle.getLocalEulerAngles(), k = handle.getLocalScale().x;
       const vals = { x: q3(p.x - h[0]), y: q3(p.y - h[1]), z: q3(p.z - h[2]), rx: Math.round(r.x), ry: Math.round(r.y), rz: Math.round(r.z), size: q3(k) };
       genes[quadKey] = JSON.stringify({ ...cfg, ...vals }); }
