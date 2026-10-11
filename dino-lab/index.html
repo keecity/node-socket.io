@@ -84,7 +84,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     <section>
       <h2>Teeth</h2>
       <div class="slider"><label for="toothCount">Teeth per side</label><output id="toothCountOut"></output><input id="toothCount" type="range" min="0" max="20" step="1" value="11"></div>
-      <div class="slider"><label for="toothSize">Tooth size</label><output id="toothSizeOut"></output><input id="toothSize" type="range" min="0.4" max="2" step="0.05" value="1"></div>
+      <div class="slider"><label for="toothSize">Tooth size</label><output id="toothSizeOut"></output><input id="toothSize" type="range" min="0.3" max="0.7" step="0.01" value="0.6"></div>
       <p class="note" id="toothOut"></p>
     </section>
     <section>
@@ -344,7 +344,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 11, toothSize: 1 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 11, toothSize: 0.6 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
