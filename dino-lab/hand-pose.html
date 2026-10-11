@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hand Pose Rig</title>
+<style>
+:root{--bg:#eef0ec;--panel:#fafaf7;--ink:#1d2320;--muted:#5d665f;--line:#d9ddd6;--accent:#2f7a5b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1f1d;--panel:#232826;--ink:#e6ebe7;--muted:#9aa49d;--line:#353c38;--accent:#5ec29a}}
+:root[data-theme="dark"]{--bg:#1b1f1d;--panel:#232826;--ink:#e6ebe7;--muted:#9aa49d;--line:#353c38;--accent:#5ec29a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,sans-serif;display:flex;height:100vh}
+#view{flex:1;min-width:0;position:relative}canvas{width:100%;height:100%;display:block}
+#hint{position:absolute;left:12px;bottom:10px;color:var(--muted);font-size:12px}
+aside{width:340px;max-width:45vw;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:12px 14px}
+h1{font-size:17px;margin:0 0 8px}h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
+select,button,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+button{cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0}
+.s{display:grid;grid-template-columns:22px 1fr 54px;gap:6px;align-items:center;margin:2px 0}
+.s label{color:var(--muted);font-size:12px}.s output{font:12px ui-monospace,monospace;text-align:right}
+input[type=range]{width:100%;accent-color:var(--accent)}
+textarea{width:100%;height:150px;font:11px ui-monospace,monospace}
+@media (max-width:700px){body{flex-direction:column}aside{width:100%;max-width:none;height:50vh;border-left:0;border-top:1px solid var(--line)}#view{height:50vh;flex:none}}
+</style></head><body>
+<div id="view"><canvas id="cv"></canvas><div id="hint">drag to orbit · wheel to zoom</div></div>
+<aside>
+<h1>Hand Pose Rig</h1>
+<div class="row"><label for="part">Piece</label><select id="part"></select></div>
+<h2>Move (cm)</h2><div id="move"></div>
+<h2>Rotate (°)</h2><div id="rot"></div>
+<h2>Scale</h2><div id="scl"></div>
+<div class="row"><button id="resetPart">Reset piece</button><button id="resetAll">Reset all</button></div>
+<h2>Settings to paste back</h2>
+<textarea id="out" readonly aria-label="Pose settings JSON"></textarea>
+<div class="row"><button class="primary" id="copy">Copy</button><span id="copied" style="color:var(--muted)"></span></div>
+</aside>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/playcanvas/2.3.3/playcanvas.min.js"></script>
+<script>
+(async () => {
+const $ = id => document.getElementById(id);
+const K = (await (await fetch('arm.json')).json()).parts;
+const canvas = $('cv'), app = new pc.Application(canvas, { graphicsDeviceOptions: { antialias: true } });
+app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
+const resize = () => { const r = canvas.parentElement.getBoundingClientRect(); app.resizeCanvas(r.width, r.height); };
+new ResizeObserver(resize).observe(canvas.parentElement);
+const bg = () => { const c = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().match(/\w\w/g).map(h => parseInt(h, 16) / 255); return new pc.Color(c[0], c[1], c[2]); };
+app.scene.ambientLight = new pc.Color(0.4, 0.4, 0.38);
+const cam = new pc.Entity(); cam.addComponent('camera', { clearColor: bg(), fov: 35, nearClip: 0.01, farClip: 50 }); app.root.addChild(cam);
+for (const [i, e] of [[1.1, [40, 35, 0]], [0.4, [-25, -150, 0]], [0.35, [20, -70, 0]]]) { const l = new pc.Entity(); l.addComponent('light', { type: 'directional', intensity: i }); l.setEulerAngles(...e); app.root.addChild(l); }
+const colors = { fore: [0.62, 0.55, 0.42], hand: [0.55, 0.62, 0.45], finger: [0.75, 0.6, 0.4] };
+const meshOf = p => { const m = new pc.Mesh(app.graphicsDevice), P = new Float32Array(p.pos), n = P.length / 3, N = new Float32Array(n * 3), I = p.idx;
+  for (let t = 0; t < I.length; t += 3) { const a = I[t]*3, b = I[t+1]*3, c = I[t+2]*3, u = [P[b]-P[a], P[b+1]-P[a+1], P[b+2]-P[a+2]], v = [P[c]-P[a], P[c+1]-P[a+1], P[c+2]-P[a+2]], f = [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]]; for (const o of [a, b, c]) for (let k = 0; k < 3; k++) N[o+k] += f[k]; }
+  m.setPositions(P); m.setNormals(N); m.setIndices(I); m.update(); return m; };
+const meshes = { fore: meshOf(K.fore), hand: meshOf(K.hand), finger: meshOf(K.finger) };
+// pieces: forearm at the origin, hand at its end, fingers along the palm's far edge; units are sheet units (≈ m)
+const DEF = {
+  forearm: { kind: 'fore', p: [0, 0, 0], r: [0, 0, 0], s: 1 },
+  hand: { kind: 'hand', p: [K.fore.len * 0.86, 0, 0], r: [0, 0, 0], s: 0.5 },
+  finger1: { kind: 'finger', p: [K.fore.len * 0.86 + K.hand.len * 0.39, 0.04, 0], r: [0, 0, -10], s: 0.5 },
+  finger2: { kind: 'finger', p: [K.fore.len * 0.86 + K.hand.len * 0.39, -0.03, 0], r: [0, 0, -25], s: 0.5 },
+  finger3: { kind: 'finger', p: [K.fore.len * 0.86 + K.hand.len * 0.39, -0.08, 0], r: [0, 0, -40], s: 0.45 },
+  thumb: { kind: 'finger', p: [K.fore.len * 0.86 + K.hand.len * 0.2, -0.05, 0.03], r: [0, 40, -60], s: 0.3 },
+};
+let state = JSON.parse(JSON.stringify(DEF));
+const ents = {};
+for (const [name, d] of Object.entries(state)) {
+  const mat = new pc.StandardMaterial(); const c = colors[d.kind]; mat.diffuse = new pc.Color(...c); mat.gloss = 0.3; mat.cull = pc.CULLFACE_NONE; mat.update();
+  const e = new pc.Entity(name); e.addComponent('render', { meshInstances: [new pc.MeshInstance(meshes[d.kind], mat)] }); app.root.addChild(e); ents[name] = { e, mat };
+}
+const apply = () => { for (const [n, d] of Object.entries(state)) { const e = ents[n].e; e.setLocalPosition(...d.p); e.setLocalEulerAngles(...d.r); e.setLocalScale(d.s, d.s, d.s); ents[n].mat.emissive = n === $('part').value ? new pc.Color(0.12, 0.1, 0.02) : new pc.Color(0, 0, 0); ents[n].mat.update(); }
+  $('out').value = JSON.stringify({ units: 'sheet units (1 = 1 m); rotations XYZ degrees; pieces in arm.json frames', pieces: state }, (k, v) => typeof v === 'number' ? Math.round(v * 1000) / 1000 : v, 1); };
+$('part').innerHTML = Object.keys(state).map(n => `<option>${n}</option>`).join('');
+const slider = (host, label, get, set, min, max, step, fmt) => { const w = document.createElement('div'); w.className = 's';
+  w.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><output></output>`; host.appendChild(w);
+  const i = w.querySelector('input'), o = w.querySelector('output'); i.setAttribute('aria-label', host.id + ' ' + label);
+  const sync = () => { i.value = get(); o.textContent = fmt(+i.value); }; i.addEventListener('input', () => { set(+i.value); o.textContent = fmt(+i.value); apply(); }); return sync; };
+let syncs = [];
+const build = () => { for (const id of ['move', 'rot', 'scl']) $(id).innerHTML = ''; const cur = () => state[$('part').value];
+  syncs = [...['X', 'Y', 'Z'].map((L, a) => slider($('move'), L, () => cur().p[a] * 100, v => cur().p[a] = v / 100, -60, 60, 0.1, v => v.toFixed(1))),
+           ...['X', 'Y', 'Z'].map((L, a) => slider($('rot'), L, () => cur().r[a], v => cur().r[a] = v, -180, 180, 1, v => v + '°')),
+           slider($('scl'), '×', () => cur().s, v => cur().s = v, 0.1, 2, 0.01, v => v.toFixed(2))];
+  syncs.forEach(f => f()); apply(); };
+$('part').onchange = build;
+$('resetPart').onclick = () => { const n = $('part').value; state[n] = JSON.parse(JSON.stringify(DEF[n])); build(); };
+$('resetAll').onclick = () => { state = JSON.parse(JSON.stringify(DEF)); build(); };
+$('copy').onclick = async () => { try { await navigator.clipboard.writeText($('out').value); $('copied').textContent = 'Copied'; } catch { $('out').select(); $('copied').textContent = 'Press Ctrl+C'; } };
+// orbit
+const orbit = { yaw: 30, pitch: -20, dist: 1.4, t: new pc.Vec3(0.45, 0, 0) }; let drag = null;
+canvas.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e => { if (!drag) return; orbit.yaw -= (e.clientX - drag[0]) * 0.4; orbit.pitch = Math.max(-89, Math.min(89, orbit.pitch - (e.clientY - drag[1]) * 0.4)); drag = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.2, Math.min(6, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
+  cam.setPosition(orbit.t.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.t.y - Math.sin(p) * orbit.dist, orbit.t.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.t); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => cam.camera.clearColor = bg());
+resize(); app.start(); build();
+})();
+</script></body></html>
