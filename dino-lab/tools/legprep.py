@@ -44,6 +44,21 @@ for name,r in zip(['slim','medium','heavy'],left):
     D=np.stack([segd(X,a,b) for a,b in segs],1)
     o=np.argsort(D,1); b1,b2=o[:,0],o[:,1]; d1=D[np.arange(len(X)),b1]; d2=D[np.arange(len(X)),b2]
     t=np.clip((d2-d1)/(0.06*H),0,1); w2=0.5*(1-t*t*(3-2*t))
+    # toes: the generator sculpted them unevenly (one is a blob). Each toe is reshaped in its own frame (base -> tip) to the
+    # median length and thickness of the three; the change fades out where the toe's weight hands over to the foot
+    infl=np.zeros((len(X),3))
+    for k in range(3):
+        infl[:,k]=np.where(b1==3+k,1-w2,0)+np.where(b2==3+k,w2,0)
+    stats=[]
+    for k,(a0,tp) in enumerate(toes):
+        ax=tp-a0; L=np.linalg.norm(ax); u=ax/L; m=infl[:,k]>0.5; R_=X[m]-a0; t=R_@u; rad=np.linalg.norm(R_-np.outer(t,u),axis=1)
+        stats.append((L,np.median(rad)))
+    Lm=np.median([q[0] for q in stats]); Rm=np.median([q[1] for q in stats])
+    for k,(a0,tp) in enumerate(toes):
+        L,Rk=stats[k]; u=(tp-a0)/L; R_=X-a0; t=R_@u; perp=R_-np.outer(t,u)
+        Y_=a0+np.outer(t*Lm/L,u)+perp*(Rm/Rk); w_=infl[:,k][:,None]; X=X*(1-w_)+Y_*w_
+        toes[k]=(a0,a0+u*Lm)
+        print('  toe%d: length %.3f -> %.3f, thickness %.3f -> %.3f'%(k+1,L,Lm,Rk,Rm))
     X-=hip
     J=lambda p:np.round(np.asarray(p)-hip,5).tolist()
     types.append(dict(name=name,pos=np.round(X,5).ravel().tolist(),idx=T.ravel().tolist(),bi=np.stack([b1,b2],1).ravel().tolist(),bw=np.round(w2,4).tolist(),
