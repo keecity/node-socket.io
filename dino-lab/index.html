@@ -1508,7 +1508,8 @@ function computeBody() {
     const pairs = genes.stance === 'quad' ? [['hind', hip, D.quad, 'pelvis', ''], ['front', shoulder, D.quad, 'chest', 'f']] : [['biped', hip, D.leg, 'pelvis', '']];
     groups.legRig = {};
     for (const [which, at, kit, root, pre] of pairs) {
-      const L = buildLeg(at, [c, s2], [-s2, c], depth, kit, legSettings(which)); if (!L) continue; L.rig.which = which; groups.legRig[which] = L.rig;
+      // legs stand level (foot flat on the ground) whatever the body's pitch
+      const L = buildLeg(at, [Math.sign(c) || 1, 0], [0, 1], depth, kit, legSettings(which)); if (!L) continue; L.rig.which = which; groups.legRig[which] = L.rig;
       for (const side of [1, -1]) { const part = side > 0 ? L : mirrorZ(L), s0 = J.P.length / 3, sd = side > 0 ? '_L' : '_R'; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: pre + 'leg' + sd }); J = joinParts(J.P, J.I, part, L.r, 'body-' + which + '-leg-' + side);
         for (const b of part.bones) skel.push({ ...b, name: pre + b.name + sd, parent: b.parent === 'pelvis' ? root : pre + b.parent + sd }); } } }
   J.skel = skel; J.groups = groups; J.legRig = groups.legRig;
