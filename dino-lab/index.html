@@ -430,7 +430,7 @@ function rebuild() {
   // ID regions (mouth, keratin, sites), mixed by the same DNA weights
   const reg = new Float32Array(n * 3);
   w.forEach((x, k) => { if (x <= 0) return; const R = D.R[k]; for (let v = 0; v < n; v++) for (let c = 0; c < 3; c++) reg[v*3+c] += x * R[v*4+c] / 255; });
-  setSurface(mesh, pos, nrm, jwv, reg);
+  setSurface(mesh, pos, nrm, jwv, reg); window.__reg = reg;
   if (headMI && headMI.mesh !== baseMesh) headMI.mesh = baseMesh;                      // quick preview: two pieces
   placeEyes(); placeCrest(); placeTeeth(w, jwv, reg);
   clearTimeout(fuseTimer);
@@ -828,18 +828,22 @@ function buildTeeth(dev) {
   }
 }
 function gumLine(pos, jw, reg, lower) {
-  const pts = [];
+  // per slice along the jaw: the mouth's half-width at that jaw's pink surface; the tooth row runs on the pink
+  // surface at GUM of that half-width (inside the lip), behind any beak
+  const GUM = 0.78, BW = 0.008, B = new Map();
   for (let v = 0; v < pos.length / 3; v++) {
-    if (pos[v*3+2] < 0.004 || reg[v*3] < 0.5 || (lower ? jw[v] < 0.5 : jw[v] >= 0.5) || pos[v*3] < 0.015) continue;
-    let skin = false, beak = reg[v*3+1] > 0.3;
-    for (const u of D.adj[v]) { if (reg[u*3] < 0.5) skin = true; if (reg[u*3+1] > 0.3) beak = true; }
-    if (skin && !beak) pts.push(v);
+    if (pos[v*3+2] < 0 || reg[v*3] < 0.5 || reg[v*3+1] > 0.3 || (lower ? jw[v] < 0.5 : jw[v] >= 0.5) || pos[v*3] < 0.015) continue;
+    const k = Math.round(pos[v*3] / BW); if (!B.has(k)) B.set(k, []); B.get(k).push(v);
   }
-  // bin along x (front to back) into a smooth polyline
-  const B = new Map();
-  for (const v of pts) { const k = Math.round(pos[v*3] / 0.008); if (!B.has(k)) B.set(k, [0, 0, 0, 0]); const b = B.get(k); b[0] += pos[v*3]; b[1] += pos[v*3+1]; b[2] += pos[v*3+2]; b[3]++; }
-  let L = [...B.entries()].sort((a, b) => b[0] - a[0]).map(([, b]) => [b[0] / b[3], b[1] / b[3], b[2] / b[3]]);
-  L = L.map((p, i) => [0, 1, 2].map(a => { let s = 0, c = 0; for (let d = -1; d <= 1; d++) { const q = L[i + d]; if (q) { s += q[a]; c++; } } return s / c; }));
+  let L = [];
+  for (const [, vs] of [...B.entries()].sort((a, b) => b[0] - a[0])) {
+    if (vs.length < 3) continue;
+    let wz = 0; for (const v of vs) wz = Math.max(wz, pos[v*3+2]);
+    const tz = GUM * wz; let sx = 0, sy = 0, sw = 0;
+    for (const v of vs) { const d = Math.abs(pos[v*3+2] - tz), w = Math.max(0, 1 - d / (0.15 * wz + 1e-4)); sx += pos[v*3] * w; sy += pos[v*3+1] * w; sw += w; }
+    if (sw > 0) L.push([sx / sw, sy / sw, tz, wz]);
+  }
+  L = L.map((p, i) => [0, 1, 2, 3].map(a => { let s = 0, c = 0; for (let d = -1; d <= 1; d++) { const q = L[i + d]; if (q) { s += q[a]; c++; } } return s / c; }));
   return L;
 }
 function placeTeeth(w, jw, reg) {
@@ -848,34 +852,44 @@ function placeTeeth(w, jw, reg) {
   const base = D.teeth.base, TI = base.idx, tn = base.pos.length / 3, TP = new Float32Array(tn * 3);
   w.forEach((x, i) => { if (x <= 0) return; const T = D.teeth.targets[SPECIES_TOOTH[i]].pos; for (let k = 0; k < TP.length; k++) TP[k] += x * T[k]; });
   const g = w.reduce((s, x, i) => s + x * D.gapes[i], 0) * Math.PI / 180, N = genes.toothCount;
+  let zExt = 0; for (let v = 0; v < tn; v++) if (TP[v*3+1] > 0) zExt = Math.max(zExt, Math.abs(TP[v*3+2]), Math.abs(TP[v*3]) * 0.15);   // crown half-width
   let total = 0;
   for (const jaw of ['upper', 'lower']) {
     const lower = jaw === 'lower', line = gumLine(pos, jw, reg, lower), T = teethEnts[jaw];
     if (T.mesh) { T.ent.render.meshInstances = []; T.mesh.destroy(); T.mesh = null; }
     if (line.length < 3 || N === 0) continue;
     const cum = [0]; for (let i = 1; i < line.length; i++) cum.push(cum[i-1] + Math.hypot(line[i][0]-line[i-1][0], line[i][1]-line[i-1][1], line[i][2]-line[i-1][2]));
-    const len = cum[cum.length - 1], sp = len / N, at = sD => { let i = 1; while (i < cum.length - 1 && cum[i] < sD) i++; const f = (sD - cum[i-1]) / (cum[i] - cum[i-1] || 1); return [0, 1, 2].map(a => line[i-1][a] + (line[i][a] - line[i-1][a]) * f); };
+    const len = cum[cum.length - 1], sp = len / N, at = sD => { let i = 1; while (i < cum.length - 1 && cum[i] < sD) i++; const f = (sD - cum[i-1]) / (cum[i] - cum[i-1] || 1); return [0, 1, 2, 3].map(a => line[i-1][a] + (line[i][a] - line[i-1][a]) * f); };
     // tooth frame: up = away from the gum toward the other jaw; back = along the jaw toward the hinge
     const up = lower ? [Math.sin(g), Math.cos(g), 0] : [0, -1, 0], back = lower ? [-Math.cos(g), Math.sin(g), 0] : [-1, 0, 0];
     const P = new Float32Array(tn * 3 * N * 2), I = [];
     let o = 0;
     for (let k = 0; k < N; k++) {
       const p = at((k + 0.5) * sp), taper = 1 + carn * (0.25 - 0.55 * k / Math.max(1, N - 1));   // fangs shrink toward the back
-      const sc = 0.8 * sp * genes.toothSize * taper;                       // gum width = 0.8 of the spacing
-      p[2] -= 0.35 * sp;                                                    // a little inside the lip
+      let sc = 0.8 * sp * genes.toothSize * taper;                         // gum width = 0.8 of the spacing
+      // fit inside the lip: the tooth's widest point stays MARGIN inside the lip edge (half-width p[3]); centre moves
+      // inward as needed (not past 40% of the half-width); if the mouth is still too narrow, the tooth shrinks
+      const MARGIN = 0.002, lip = p[3];
+      sc = Math.min(sc, (lip * 0.6 - MARGIN) / zExt);
+      p[2] = Math.min(p[2], lip - MARGIN - zExt * sc);
+      // along the row (toward the hinge), level in the jaw's plane
+      const p2 = at(Math.min(len, (k + 0.5) * sp + 0.004)), p1 = at(Math.max(0, (k + 0.5) * sp - 0.004));
+      const bk = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]], bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;   // toward the hinge
       for (const sg of [1, -1]) {
         for (let v = 0; v < tn; v++) {
-          const lx = TP[v*3] * sc, ly = TP[v*3+1] * sc, lz = TP[v*3+2] * sc;   // gum line at y = 0
-          const x = p[0] + back[0] * lx + up[0] * ly, y = p[1] + back[1] * lx + up[1] * ly, z = (p[2] + lz) * sg;
+          const lx = TP[v*3] * sc, ly = TP[v*3+1] * sc * (TP[v*3+1] < 0 ? 0.3 : 1), lz = TP[v*3+2] * sc;   // gum line at y = 0; roots kept short so they stay inside thin snouts
+          const x = p[0] + bk[0] * lx + up[0] * ly, y = p[1] + bk[1] * lx + up[1] * ly, z = (p[2] + bk[2] * lx + lz) * sg;
           const q = (o + v) * 3;
           if (lower) { P[q] = x - D.pivot[0]; P[q+1] = y - D.pivot[1]; P[q+2] = z - D.pivot[2]; } else { P[q] = x; P[q+1] = y; P[q+2] = z; }
         }
-        for (let t = 0; t < TI.length; t += 3) sg > 0 ? I.push(o + TI[t], o + TI[t+1], o + TI[t+2]) : I.push(o + TI[t], o + TI[t+2], o + TI[t+1]);
+        // the lower frame (back, up, z) is left-handed and so is the mirrored side: flip winding so normals face out
+        for (let t = 0; t < TI.length; t += 3) ((sg > 0) !== lower) ? I.push(o + TI[t], o + TI[t+1], o + TI[t+2]) : I.push(o + TI[t], o + TI[t+2], o + TI[t+1]);
         o += tn;
       }
     }
     const m = new pc.Mesh(app.graphicsDevice); m.setPositions(P.subarray(0, o * 3)); m.setNormals(vertexNormals(P.subarray(0, o * 3), I)); m.setIndices(o > 65535 ? Uint32Array.from(I) : Uint16Array.from(I)); m.update();
     T.mesh = m; T.ent.render.meshInstances = [new pc.MeshInstance(m, toothMat)]; total += N * 2;
+    window.__toothP = window.__toothP || {}; window.__toothP[jaw] = { P: P.subarray(0, o * 3), lower };
   }
   $('toothOut').textContent = `Tooth shape ${Math.round(carn * 100)}% fang / ${Math.round((1 - carn) * 100)}% molar, ${total} teeth along the gum lines.`;
 }
