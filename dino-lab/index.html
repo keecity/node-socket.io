@@ -92,6 +92,15 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="bodyBoost">Body feature strength</label><output id="bodyBoostOut"></output><input id="bodyBoost" type="range" min="0" max="1.6" step="0.05" value="1"></div>
     </section>
     <section>
+      <h2>Tail</h2>
+      <div class="slider"><label for="tailLen">Length</label><output id="tailLenOut"></output><input id="tailLen" type="range" min="0.3" max="3" step="0.01" value="1.6"></div>
+      <div class="slider"><label for="tailAngle">Angle</label><output id="tailAngleOut"></output><input id="tailAngle" type="range" min="-40" max="40" step="1" value="-6"></div>
+      <div class="slider"><label for="tailCurve">Curve</label><output id="tailCurveOut"></output><input id="tailCurve" type="range" min="-40" max="40" step="1" value="10"></div>
+      <div class="slider"><label for="tailThick">Thickness</label><output id="tailThickOut"></output><input id="tailThick" type="range" min="0.4" max="1.6" step="0.01" value="1"></div>
+      <div class="slider"><label for="tailTaper">Taper</label><output id="tailTaperOut"></output><input id="tailTaper" type="range" min="0.5" max="2.5" step="0.05" value="1.3"></div>
+      <div class="slider"><label for="tailFolds">Skin folds</label><output id="tailFoldsOut"></output><input id="tailFolds" type="range" min="0" max="3" step="0.05" value="1.5"></div>
+    </section>
+    <section>
       <h2>Neck</h2>
       <div class="slider"><label for="neckLen">Length</label><output id="neckLenOut"></output><input id="neckLen" type="range" min="0.15" max="1.2" step="0.01" value="0.45"></div>
       <div class="slider"><label for="neckAngle">Angle</label><output id="neckAngleOut"></output><input id="neckAngle" type="range" min="-60" max="60" step="1" value="-15"></div>
@@ -412,7 +421,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.45, neckAngle: -15, neckCurve: 18, neckThick: 1, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 2.2, bodyBoost: 1, bodyWidth: 1, bodyHeight: 1 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.45, neckAngle: -15, neckCurve: 18, neckThick: 1, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 2.2, bodyBoost: 1, bodyWidth: 1, bodyHeight: 1, tailLen: 1.6, tailAngle: -6, tailCurve: 10, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -1063,7 +1072,7 @@ function placeNeck() {
   // a fresh mesh each time, attached only once all its streams exist (the material picks its variant from them)
   const m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(I) : Uint16Array.from(I));
   setSurface(m, PP, N2, new Float32Array(nv), new Float32Array(nv * 3));
-  neck.ent.render.meshInstances = [new pc.MeshInstance(m, mat)];
+  { const mi = new pc.MeshInstance(m, mat); mi.cull = false; neck.ent.render.meshInstances = [mi]; }
   if (neck.mesh) neck.mesh.destroy(); neck.mesh = m;
   neckData = { PP, NR, NS, st, flipped, I, inside: meshInside(PP, N2, 0.03) };
   neckEnd = { p: at(len), d: (() => { const a = at(len), b = at(len - 0.01); const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [(a[0] - b[0]) / l, (a[1] - b[1]) / l]; })(), r: Math.max(ry0, rz0) * genes.neckFlare };
@@ -1085,10 +1094,10 @@ function meshInside(P, N, cell) {
 }
 // neck + body -> one mesh: the neck is kept up to its last ring fully outside the body, the body loses the triangles
 // the neck covers, the ring is stitched to the body's hole, and the collar is smoothed into a fillet
-function joinNeckBody(PB, IB) {
-  if (!neckData) return { P: PB, I: Array.from(IB), joined: false };
-  const { PP, I: IN } = neckData, nb = PB.length / 3, nn = PP.length / 3;
-  const NB = vertexNormals(PB, IB), inBody = meshInside(PB, NB, 0.03), inNeck = neckData.inside;
+function joinParts(PB, IB, part, rCollar) {
+  if (!part) return { P: PB, I: Array.from(IB), joined: false };
+  const { PP, I: IN } = part, nb = PB.length / 3, nn = PP.length / 3;
+  const NB = vertexNormals(PB, IB), inBody = meshInside(PB, NB, 0.03), inNeck = part.inside;
   // cut both along their intersection: neck triangles outside the body, body triangles outside the neck
   const outN = new Uint8Array(nn); for (let v = 0; v < nn; v++) outN[v] = inBody(PP[v*3], PP[v*3+1], PP[v*3+2]) ? 0 : 1;
   const outB = new Uint8Array(nb); for (let v = 0; v < nb; v++) outB[v] = inNeck(PB[v*3], PB[v*3+1], PB[v*3+2]) ? 0 : 1;
@@ -1109,7 +1118,7 @@ function joinNeckBody(PB, IB) {
   // fillet: smooth a collar around the seam (weighted by distance to it)
   const nv = P.length / 3, adj = Array.from({ length: nv }, () => []);
   for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const a = I[t+e], b = I[t+(e+1)%3]; adj[a].push(b); adj[b].push(a); }
-  const seam = [...new Set(bodyEdge)], R = 1.2 * neckEnd.r, sel = [], wts = [];
+  const seam = [...new Set(bodyEdge)], R = 1.2 * rCollar, sel = [], wts = [];
   const gs = new Map(), ck = (x, y, z) => Math.floor(x / R) + ',' + Math.floor(y / R) + ',' + Math.floor(z / R);
   for (const u of seam) { const k = ck(P[u*3], P[u*3+1], P[u*3+2]); if (!gs.has(k)) gs.set(k, []); gs.get(k).push(u); }
   for (let v = 0; v < nv; v++) {
@@ -1125,14 +1134,49 @@ function joinNeckBody(PB, IB) {
   }
   return { P, I, joined: true };
 }
+// tail: the neck segment's folds swept along a spline from inside the hips, tapering to a point
+function sweepTail(P0, d0, ry0, rz0) {
+  const L = genes.tailLen, A = genes.tailAngle * Math.PI / 180, K = genes.tailCurve * Math.PI / 180;
+  const base = Math.atan2(d0[1], d0[0]), dirA = a => [Math.cos(base + a), Math.sin(base + a)];
+  const P3 = [P0[0] + L * dirA(A)[0], P0[1] + L * dirA(A)[1]];
+  const P1 = [P0[0] + L / 3 * dirA(0)[0], P0[1] + L / 3 * dirA(0)[1]], P2 = [P3[0] - L / 3 * dirA(A + K)[0], P3[1] - L / 3 * dirA(A + K)[1]];
+  const bez = t => { const u = 1 - t; return [0, 1].map(i => u*u*u*P0[i] + 3*u*u*t*P1[i] + 3*u*t*t*P2[i] + t*t*t*P3[i]); };
+  const M = 240, pts = [], cum = [0];
+  for (let i = 0; i <= M; i++) { pts.push(bez(i / M)); if (i) cum.push(cum[i-1] + Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])); }
+  const len = cum[M], at = d => { let i = 1; while (i < M && cum[i] < d) i++; const f = (d - cum[i-1]) / (cum[i] - cum[i-1] || 1); return [pts[i-1][0] + (pts[i][0] - pts[i-1][0]) * f, pts[i-1][1] + (pts[i][1] - pts[i-1][1]) * f]; };
+  const S = D.neckSeg, NA = S.na, NT = S.nt, prof = (t, j) => { const tt = t - Math.floor(t), tm = tt < 0.5 ? 2 * tt : 2 - 2 * tt, y = tm * (NT - 1), i = Math.floor(y), f = y - i; const a = S.r[Math.min(NT - 1, i) * NA + j], b = S.r[Math.min(NT - 1, i + 1) * NA + j]; return a + (b - a) * f; };
+  const NR = NA, NS = Math.max(40, Math.round(len / 0.008)), P = [], I = [];
+  let s0 = 0;
+  for (let k = 0; k <= NS; k++) {
+    const d = len * k / NS, u = d / len, c = at(d), c1 = at(Math.max(0, d - 0.003)), c2 = at(Math.min(len, d + 0.003));
+    let tx = c2[0] - c1[0], ty = c2[1] - c1[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const nx = -ty, ny = tx, sgn = ny >= 0 ? 1 : -1;
+    // taper: full at the hips, thinning toward a fine point (Taper gene shapes the falloff)
+    const t = Math.max(0.012, Math.pow(1 - u, genes.tailTaper)), segLen = 2 * S.aspect * Math.max(ry0, rz0) * Math.max(0.25, t);
+    s0 += k ? (len / NS) / segLen : 0;
+    for (let j = 0; j < NR; j++) {
+      const ph = 2 * Math.PI * j / NR, pr = 1 + (prof(s0, j) - 1) * genes.tailFolds;
+      const ey = Math.cos(ph) * ry0 * t * pr, ez = Math.sin(ph) * rz0 * t * pr;
+      P.push(c[0] + sgn * nx * ey, c[1] + sgn * ny * ey, ez);
+    }
+  }
+  for (let k = 0; k < NS; k++) for (let j = 0; j < NR; j++) { const a = k * NR + j, b = k * NR + (j + 1) % NR, c = a + NR, d = b + NR; I.push(a, b, c, b, d, c); }
+  const tip = P.length / 3, ct = at(len); P.push(ct[0] + (ct[0] - at(len - 0.01)[0]) * 0.4, ct[1] + (ct[1] - at(len - 0.01)[1]) * 0.4, 0);
+  for (let j = 0; j < NR; j++) I.push(NS * NR + j, NS * NR + (j + 1) % NR, tip);
+  const st = P.length / 3; P.push(P0[0] - d0[0] * 0.02, P0[1] - d0[1] * 0.02, 0); for (let j = 0; j < NR; j++) I.push((j + 1) % NR, j, st);
+  const PP = new Float32Array(P), NN = vertexNormals(PP, I);
+  { const a = NR * 2 * 3, cc = at(len * 2 / NS); if ((PP[a] - cc[0]) * NN[a] + (PP[a+1] - cc[1]) * NN[a+1] + PP[a+2] * NN[a+2] < 0) for (let q = 0; q < I.length; q += 3) { const x = I[q+1]; I[q+1] = I[q+2]; I[q+2] = x; } }
+  const N2 = vertexNormals(PP, I);
+  return { PP, I, inside: meshInside(PP, N2, 0.03), r: Math.max(ry0, rz0) };
+}
 function placeBody() {
   if (!body || !D.body || !neckEnd) return;
   const B = D.body, n = B.P.length / 3, wsum = (genes.bodyA + genes.bodyB + genes.bodyC) || 1, w = [genes.bodyA / wsum, genes.bodyB / wsum, genes.bodyC / wsum];
   const P = new Float32Array(n * 3), sc = genes.bodySize, k = genes.bodyBoost;
   for (let v = 0; v < n * 3; v++) { let d = 0; for (let t = 0; t < 3; t++) if (w[t]) d += w[t] * B.D[t][v]; P[v] = B.P[v] + d * k; }
   // anchor on the body: near its front, in the upper part of the chest
-  let xmax = -Infinity, ylo = Infinity, yhi = -Infinity;
-  for (let v = 0; v < n; v++) { xmax = Math.max(xmax, P[v*3]); ylo = Math.min(ylo, P[v*3+1]); yhi = Math.max(yhi, P[v*3+1]); }
+  let xmax = -Infinity, xmin0 = Infinity, ylo = Infinity, yhi = -Infinity, zw0 = 0;
+  for (let v = 0; v < n; v++) { xmax = Math.max(xmax, P[v*3]); xmin0 = Math.min(xmin0, P[v*3]); ylo = Math.min(ylo, P[v*3+1]); yhi = Math.max(yhi, P[v*3+1]); zw0 = Math.max(zw0, Math.abs(P[v*3+2])); }
   const ax = xmax - 0.2, ay = ylo + 0.6 * (yhi - ylo);                  // well inside the chest: the neck's end is buried
   // place: scale, then turn the body so its forward axis lines up with the neck's end direction (reversed), then
   // move the anchor onto the neck's end, pushed a little into the body
@@ -1143,10 +1187,16 @@ function placeBody() {
     const x = (P[v*3] - ax) * sc, y = (P[v*3+1] - ay) * sc * genes.bodyHeight;
     P[v*3] = tx + x * c - y * s2; P[v*3+1] = ty + x * s2 + y * c; P[v*3+2] *= sc * genes.bodyWidth;
   }
-  const J = joinNeckBody(P, B.I), nv = J.P.length / 3;
+  const J1 = joinParts(P, B.I, neckData, neckEnd.r);
+  // tail: from deep in the hips, backward along the body's axis
+  const bx = -c, by = -s2, tx0 = xmin0 + 0.2 * (xmax - xmin0), ty0 = ylo + 0.55 * (yhi - ylo);
+  const rx0 = ((tx0 - ax) * sc), ry0b = ((ty0 - ay) * sc * genes.bodyHeight);
+  const tStart = [tx + rx0 * c - ry0b * s2, ty + rx0 * s2 + ry0b * c];
+  const tail = sweepTail(tStart, [bx, by], 0.42 * (yhi - ylo) * sc * genes.bodyHeight * genes.tailThick, 0.55 * zw0 * sc * genes.bodyWidth * genes.tailThick);
+  const J = joinParts(J1.P, J1.I, tail, tail.r), nv = J.P.length / 3; window.__tailStart = tStart;
   const N = vertexNormals(J.P, J.I), m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
   setSurface(m, J.P, N, new Float32Array(nv), new Float32Array(nv * 3));
-  body.ent.render.meshInstances = [new pc.MeshInstance(m, mat)];
+  { const mi = new pc.MeshInstance(m, mat); mi.cull = false; body.ent.render.meshInstances = [mi]; }
   if (body.mesh) body.mesh.destroy(); body.mesh = m;
   neck.ent.enabled = !J.joined; window.__join = { joined: J.joined, verts: nv };
 }
@@ -1469,7 +1519,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) rebuild(); else applySkin(normWeights()); });
 }
