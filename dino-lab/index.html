@@ -839,9 +839,11 @@ function gumLine(pos, jw, reg, lower) {
   for (const [, vs] of [...B.entries()].sort((a, b) => b[0] - a[0])) {
     if (vs.length < 3) continue;
     let wz = 0; for (const v of vs) wz = Math.max(wz, pos[v*3+2]);
-    const tz = GUM * wz; let sx = 0, sy = 0, sw = 0;
-    for (const v of vs) { const d = Math.abs(pos[v*3+2] - tz), w = Math.max(0, 1 - d / (0.15 * wz + 1e-4)); sx += pos[v*3] * w; sy += pos[v*3+1] * w; sw += w; }
-    if (sw > 0) L.push([sx / sw, sy / sw, tz, wz]);
+    // the gum surface at that width: the first pink surface seen from inside the mouth (lowest for the upper jaw,
+    // highest for the lower), so the tooth comes straight out of the gum the mouth shows
+    const tz = GUM * wz; let sx = 0, sw = 0, gy = lower ? -Infinity : Infinity;
+    for (const v of vs) { const d = Math.abs(pos[v*3+2] - tz); if (d > 0.15 * wz + 1e-4) continue; sx += pos[v*3]; sw++; gy = lower ? Math.max(gy, pos[v*3+1]) : Math.min(gy, pos[v*3+1]); }
+    if (sw > 0) L.push([sx / sw, gy, tz, wz]);
   }
   L = L.map((p, i) => [0, 1, 2, 3].map(a => { let s = 0, c = 0; for (let d = -1; d <= 1; d++) { const q = L[i + d]; if (q) { s += q[a]; c++; } } return s / c; }));
   return L;
@@ -852,6 +854,7 @@ function placeTeeth(w, jw, reg) {
   const base = D.teeth.base, TI = base.idx, tn = base.pos.length / 3, TP = new Float32Array(tn * 3);
   w.forEach((x, i) => { if (x <= 0) return; const T = D.teeth.targets[SPECIES_TOOTH[i]].pos; for (let k = 0; k < TP.length; k++) TP[k] += x * T[k]; });
   const g = w.reduce((s, x, i) => s + x * D.gapes[i], 0) * Math.PI / 180, N = genes.toothCount;
+  const SINK = 0.08 + 0.27 * carn;   // sunk into the gum (gum widths): fangs deep, short molar crowns barely
   let zExt = 0; for (let v = 0; v < tn; v++) if (TP[v*3+1] > 0) zExt = Math.max(zExt, Math.abs(TP[v*3+2]), Math.abs(TP[v*3]) * 0.15);   // crown half-width
   let total = 0;
   for (const jaw of ['upper', 'lower']) {
@@ -877,7 +880,7 @@ function placeTeeth(w, jw, reg) {
       const bk = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]], bl = Math.hypot(...bk) || 1; bk[0] /= bl; bk[1] /= bl; bk[2] /= bl;   // toward the hinge
       for (const sg of [1, -1]) {
         for (let v = 0; v < tn; v++) {
-          const lx = TP[v*3] * sc, ly = TP[v*3+1] * sc * (TP[v*3+1] < 0 ? 0.3 : 1), lz = TP[v*3+2] * sc;   // gum line at y = 0; roots kept short so they stay inside thin snouts
+          const lx = TP[v*3] * sc, ly = (TP[v*3+1] - SINK) * sc, lz = TP[v*3+2] * sc;   // gum line sunk SINK into the gum
           const x = p[0] + bk[0] * lx + up[0] * ly, y = p[1] + bk[1] * lx + up[1] * ly, z = (p[2] + bk[2] * lx + lz) * sg;
           const q = (o + v) * 3;
           if (lower) { P[q] = x - D.pivot[0]; P[q+1] = y - D.pivot[1]; P[q+2] = z - D.pivot[2]; } else { P[q] = x; P[q+1] = y; P[q+2] = z; }
