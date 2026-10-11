@@ -17,11 +17,11 @@ def f(x):
     return x
 for t in F: a=f(t[0]); par[f(t[1])]=a; par[f(t[2])]=a
 root=np.array([f(x) for x in range(len(V))])
-# the sheet is a 3x3 grid; the front row (z > 0.18) is the three legs without a back toe: slim, medium, heavy left to right.
-# They face +z: turn them to face +x (x' = z, z' = -x) like the rest of the pipeline
-left=[r for r in np.unique(root) if V[root==r][:,2].mean()>0.18]
+# the sheet is a 3x3 grid; the legs used are the bottom row (z < -0.15): slim, medium, heavy left to right.
+# They face -z: turn them to face +x (x' = -z, z' = x) like the rest of the pipeline
+left=[r for r in np.unique(root) if V[root==r][:,2].mean()<-0.15]
 left=sorted(left,key=lambda r:V[root==r][:,0].mean())
-V=V@np.array([[0,0,-1],[0,1,0],[1,0,0.]])
+V=V@np.array([[0,0,1],[0,1,0],[-1,0,0.]])
 BONES=['thigh','shin','foot','toe1','toe2','toe3']
 def centre(X,m): return np.array([(X[m,0].min()+X[m,0].max())/2,(X[m,1].min()+X[m,1].max())/2,(X[m,2].min()+X[m,2].max())/2])
 types=[]
