@@ -1118,7 +1118,7 @@ function joinParts(PB, IB, part, rCollar) {
   // fillet: smooth a collar around the seam (weighted by distance to it)
   const nv = P.length / 3, adj = Array.from({ length: nv }, () => []);
   for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const a = I[t+e], b = I[t+(e+1)%3]; adj[a].push(b); adj[b].push(a); }
-  const seam = [...new Set(bodyEdge)], R = 1.2 * rCollar, sel = [], wts = [];
+  const seam = [...new Set(bodyEdge)], R = 1.8 * rCollar, sel = [], wts = [];
   const gs = new Map(), ck = (x, y, z) => Math.floor(x / R) + ',' + Math.floor(y / R) + ',' + Math.floor(z / R);
   for (const u of seam) { const k = ck(P[u*3], P[u*3+1], P[u*3+2]); if (!gs.has(k)) gs.set(k, []); gs.get(k).push(u); }
   for (let v = 0; v < nv; v++) {
@@ -1127,7 +1127,7 @@ function joinParts(PB, IB, part, rCollar) {
     for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const l = gs.get((cx+dx) + ',' + (cy+dy) + ',' + (cz+dz)); if (l) for (const u of l) bd = Math.min(bd, d2(v, u)); }
     const d = Math.sqrt(bd); if (d < R) { sel.push(v); wts.push(0.5 + 0.5 * Math.cos(Math.PI * d / R)); }
   }
-  for (let it = 0; it < 12; it++) {
+  for (let it = 0; it < 24; it++) {
     const Q = P.slice(), k0 = it % 2 ? -0.53 : 0.5;
     sel.forEach((v, i) => { const a = adj[v]; let x = 0, y = 0, z = 0; for (const u of a) { x += Q[u*3]; y += Q[u*3+1]; z += Q[u*3+2]; } const k = k0 * wts[i];
       P[v*3] += k * (x / a.length - Q[v*3]); P[v*3+1] += k * (y / a.length - Q[v*3+1]); P[v*3+2] += k * (z / a.length - Q[v*3+2]); });
@@ -1177,7 +1177,7 @@ function placeBody() {
   // anchor on the body: near its front, in the upper part of the chest
   let xmax = -Infinity, xmin0 = Infinity, ylo = Infinity, yhi = -Infinity, zw0 = 0;
   for (let v = 0; v < n; v++) { xmax = Math.max(xmax, P[v*3]); xmin0 = Math.min(xmin0, P[v*3]); ylo = Math.min(ylo, P[v*3+1]); yhi = Math.max(yhi, P[v*3+1]); zw0 = Math.max(zw0, Math.abs(P[v*3+2])); }
-  const ax = xmax - 0.2, ay = ylo + 0.6 * (yhi - ylo);                  // well inside the chest: the neck's end is buried
+  const P0b = P.slice(), ax = xmax - 0.2, ay = ylo + 0.6 * (yhi - ylo);                  // well inside the chest: the neck's end is buried
   // place: scale, then turn the body so its forward axis lines up with the neck's end direction (reversed), then
   // move the anchor onto the neck's end, pushed a little into the body
   const dx = -neckEnd.d[0], dy = -neckEnd.d[1], ang = Math.atan2(dy, dx) * 0.35;   // follows the neck partly, stays mostly level
@@ -1189,10 +1189,13 @@ function placeBody() {
   }
   const J1 = joinParts(P, B.I, neckData, neckEnd.r);
   // tail: from deep in the hips, backward along the body's axis
-  const bx = -c, by = -s2, tx0 = xmin0 + 0.2 * (xmax - xmin0), ty0 = ylo + 0.55 * (yhi - ylo);
+  // the body's own cross-section near its rear sets the tail's start: centred in it, 85% of its size
+  const bl = xmax - xmin0, xe = xmin0 + 0.25 * bl; let sylo = Infinity, syhi = -Infinity, szw = 0;
+  for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xe) < 0.015) { sylo = Math.min(sylo, P0b[v*3+1]); syhi = Math.max(syhi, P0b[v*3+1]); szw = Math.max(szw, Math.abs(P0b[v*3+2])); }
+  const bx = -c, by = -s2, tx0 = xmin0 + 0.32 * bl, ty0 = 0.5 * (sylo + syhi);
   const rx0 = ((tx0 - ax) * sc), ry0b = ((ty0 - ay) * sc * genes.bodyHeight);
   const tStart = [tx + rx0 * c - ry0b * s2, ty + rx0 * s2 + ry0b * c];
-  const tail = sweepTail(tStart, [bx, by], 0.42 * (yhi - ylo) * sc * genes.bodyHeight * genes.tailThick, 0.55 * zw0 * sc * genes.bodyWidth * genes.tailThick);
+  const tail = sweepTail(tStart, [bx, by], 0.8 * 0.5 * (syhi - sylo) * sc * genes.bodyHeight * genes.tailThick, 0.8 * szw * sc * genes.bodyWidth * genes.tailThick);
   const J = joinParts(J1.P, J1.I, tail, tail.r), nv = J.P.length / 3; window.__tailStart = tStart;
   const N = vertexNormals(J.P, J.I), m = new pc.Mesh(app.graphicsDevice); m.setIndices(nv > 65535 ? Uint32Array.from(J.I) : Uint16Array.from(J.I));
   setSurface(m, J.P, N, new Float32Array(nv), new Float32Array(nv * 3));
