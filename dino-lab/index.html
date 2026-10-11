@@ -1452,6 +1452,13 @@ function computeBody() {
   const B = D.body, n = B.P.length / 3, wsum = (genes.bodyA + genes.bodyB + genes.bodyC) || 1, w = [genes.bodyA / wsum, genes.bodyB / wsum, genes.bodyC / wsum];
   const P = new Float32Array(n * 3), sc = genes.bodySize, k = genes.bodyBoost;
   for (let v = 0; v < n * 3; v++) { let d = 0; for (let t = 0; t < 3; t++) if (w[t]) d += w[t] * B.D[t][v]; P[v] = B.P[v] + d * k; }
+  // the three body sculpts differ in overall size: scale every blend uniformly so its length x depth matches body B's (proportions kept)
+  { let x0 = Infinity, x1 = -Infinity, r0 = Infinity, r1 = -Infinity, y0 = Infinity, y1 = -Infinity, s0 = Infinity, s1 = -Infinity;
+    for (let v = 0; v < n; v++) { const x = P[v*3], xr = B.P[v*3] + B.D[1][v*3] * k, y = P[v*3+1], yr = B.P[v*3+1] + B.D[1][v*3+1] * k;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); r0 = Math.min(r0, xr); r1 = Math.max(r1, xr); y0 = Math.min(y0, y); y1 = Math.max(y1, y); s0 = Math.min(s0, yr); s1 = Math.max(s1, yr); }
+    const q = Math.sqrt(((r1 - r0) * (s1 - s0)) / (((x1 - x0) * (y1 - y0)) || 1)), cx = (x0 + x1) / 2, cr = (r0 + r1) / 2;
+    let cy = 0; for (let v = 0; v < n; v++) cy += P[v*3+1]; cy /= n;
+    for (let v = 0; v < n; v++) { P[v*3] = cr + (P[v*3] - cx) * q; P[v*3+1] = cy + (P[v*3+1] - cy) * q; P[v*3+2] *= q; } }
   // anchor on the body: near its front, in the upper part of the chest
   let xmax = -Infinity, xmin0 = Infinity, ylo = Infinity, yhi = -Infinity, zw0 = 0;
   for (let v = 0; v < n; v++) { xmax = Math.max(xmax, P[v*3]); xmin0 = Math.min(xmin0, P[v*3]); ylo = Math.min(ylo, P[v*3+1]); yhi = Math.max(yhi, P[v*3+1]); zw0 = Math.max(zw0, Math.abs(P[v*3+2])); }
