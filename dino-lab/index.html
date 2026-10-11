@@ -1247,7 +1247,7 @@ function buildArm(sh, f, u, bodySc) {
   const nf = Math.min(3, genes.fingers), fs = s * genes.fingerSize, H = K.hand;
   const fingerAt = (yLocal, xLocal, ang, scale) => {
     const o = [0, 1, 2].map(i => wr[i] + dx[i] * xLocal * s * hs + dy[i] * yLocal * s * hs * th), b = a3 + ang;
-    const [fx, fy, fz] = frame(b); return withInside(placePiece(K.finger, o, fx, fy, fz, scale, 1));
+    const [fx, fy, fz] = frame(b); return withInside(placePiece(K.finger, o, fx, fy.map(v => -v), fz.map(v => -v), scale, 1));   // turned over: the finger curls down like a claw
   };
   for (let k = 0; k < nf; k++) {
     const t = nf === 1 ? 0.5 : k / (nf - 1), y = (H.ymin + (H.ymax - H.ymin) * (0.2 + 0.6 * t)), ang = (t - 0.5) * 0.35 * (nf - 1);
@@ -1286,9 +1286,11 @@ function placeBody() {
   const tail = sweepTail(tStart, [bx, by], 0.8 * 0.5 * (syhi - sylo) * sc * genes.bodyHeight * genes.tailThick, 0.8 * szw * sc * genes.bodyWidth * genes.tailThick);
   let J = joinParts(J1.P, J1.I, tail, tail.r);
   // arms: shoulder on the side of the chest, the arm built and merged on its own, mirrored for the other side
-  { const xs = xmin0 + 0.72 * bl, ys = ylo + 0.38 * (yhi - ylo); let zs = 0;
+  { // shoulder: on the side wall of the chest at mid height, the shoulder ball half sunk into the skin
+    const xs = xmin0 + 0.74 * bl, ys = ylo + 0.5 * (yhi - ylo); let zs = 0;
     for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xs) < 0.02 && Math.abs(P0b[v*3+1] - ys) < 0.03) zs = Math.max(zs, Math.abs(P0b[v*3+2]));
-    const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, 0.55 * zs * sc * genes.bodyWidth];
+    const ball = D.arm ? D.arm.upper.rad * genes.armSize * sc * genes.armThick : 0;
+    const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zs * sc * genes.bodyWidth - 0.5 * ball];
     const A = buildArm(sh, [c, s2], [-s2, c], sc);
     if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A); J = joinParts(J.P, J.I, part, A.r); } }
   const nv = J.P.length / 3; window.__tailStart = tStart;
