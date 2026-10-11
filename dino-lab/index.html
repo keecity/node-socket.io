@@ -105,6 +105,17 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       <div class="slider"><label for="armSplay">Splay</label><output id="armSplayOut"></output><input id="armSplay" type="range" min="0" max="45" step="1" value="12"></div>
     </section>
     <section>
+      <h2>Legs</h2>
+      <div class="slider"><label for="legSize">Leg size</label><output id="legSizeOut"></output><input id="legSize" type="range" min="0.4" max="1.8" step="0.01" value="1"></div>
+      <div class="slider"><label for="legThick">Leg thickness</label><output id="legThickOut"></output><input id="legThick" type="range" min="0.5" max="1.8" step="0.01" value="1"></div>
+      <div class="slider"><label for="toeSize">Toe size</label><output id="toeSizeOut"></output><input id="toeSize" type="range" min="0.2" max="1.2" step="0.01" value="0.55"></div>
+      <div class="slider"><label for="toeSpread">Toe spread</label><output id="toeSpreadOut"></output><input id="toeSpread" type="range" min="0" max="45" step="1" value="20"></div>
+      <div class="slider"><label for="legHip">Hip</label><output id="legHipOut"></output><input id="legHip" type="range" min="-60" max="60" step="1" value="0"></div>
+      <div class="slider"><label for="legKnee">Knee</label><output id="legKneeOut"></output><input id="legKnee" type="range" min="-60" max="60" step="1" value="0"></div>
+      <div class="slider"><label for="legAnkle">Ankle</label><output id="legAnkleOut"></output><input id="legAnkle" type="range" min="-60" max="60" step="1" value="0"></div>
+      <div class="slider"><label for="legSplay">Splay</label><output id="legSplayOut"></output><input id="legSplay" type="range" min="0" max="30" step="1" value="4"></div>
+    </section>
+    <section>
       <h2>Tail</h2>
       <div class="slider"><label for="tailLen">Length</label><output id="tailLenOut"></output><input id="tailLen" type="range" min="0.3" max="3" step="0.01" value="1.39"></div>
       <div class="slider"><label for="tailAngle">Angle</label><output id="tailAngleOut"></output><input id="tailAngle" type="range" min="-40" max="40" step="1" value="-6"></div>
@@ -439,7 +450,7 @@ const CAMO_NAMES = ['Forest', 'Ember stripes', 'Ocean', 'Blood spots', 'Desert s
 
 
 let D = null, mesh = null, head = null, bones = {};
-const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12 };
+const genes = { mix: [1, 0, 0], snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1, gape: 12, eyeSX: 0.79, eyeSY: 0.5, eyeFwd: 0.011, eyeUp: -0.005, eyeDepth: 0.008, irisHue: 0, irisSize: 0.64, pupilSize: 0.93, pupilSlit: 0.72, gazeFwd: 15, gazeDown: 6, recess: 0.007, recessWidth: 2, lidUp: 32, lidLow: 28, eyeSink: 0.002, wrinkle: 1.5, crest: 1, toothCount: 13, toothSize: 0.6, tongueLen: 0.75, tongueWidth: 0.6, neckLen: 0.3, neckAngle: -15, neckCurve: -38, neckThick: 1.22, neckFlare: 1.5, neckRings: 1.5, bodyA: 0, bodyB: 1, bodyC: 0, bodySize: 1.55, bodyBoost: 1, bodyWidth: 0.58, bodyHeight: 0.89, tailLen: 1.39, tailAngle: -6, tailCurve: -30, tailThick: 1, tailTaper: 1.3, tailFolds: 1.5, breathDepth: 0.012, breathRate: 14, breathRadius: 0.32, breathFwd: 0.62, breathUp: 0.3, fingers: 2, armSize: 0.16, armThick: 1, fingerSize: 1.05, handSize: 0.5, armShoulder: -75, armElbow: 95, armWrist: 0, armSplay: 12, legSize: 1, legThick: 1, toeSize: 0.55, toeSpread: 20, legHip: 0, legKnee: 0, legAnkle: 0, legSplay: 4 };
 const view = { bones: false, weights: false, regions: false, idle: true };
 
 function build(data) {
@@ -765,7 +776,7 @@ function initGeometryWorker() {
     let D=null,genes={},neckData=null,neckEnd=null,armMemo=null,reuseJoins=false;
     const joinCache=new Map();let bodyStash=null;
   `;
-  const functions=[vertexNormals,meshRayInside,meshInside,boundaryLoops,zipLoops,capCutLoop,nearestIndex,fuseHeadData,smoothCollar,joinParts,computeNeck,placePiece,mirrorZ,buildArm,sweepTail,computeBody];
+  const functions=[vertexNormals,meshRayInside,meshInside,boundaryLoops,zipLoops,capCutLoop,nearestIndex,fuseHeadData,smoothCollar,joinParts,computeNeck,jointCentre,placePiece,mirrorZ,buildArm,buildLeg,sweepTail,computeBody];
   const source=math+'const BODY_KEYS='+JSON.stringify([...NECK_GENES,...BODY_GENES])+';const smooth='+smooth.toString()+';const HAND_POSE='+JSON.stringify(HAND_POSE)+';const withInside='+withInside.toString()+';'+functions.map(f=>f.toString()).join('\n')+`
     function transfers(value,out=new Set()) {if(ArrayBuffer.isView(value))out.add(value.buffer);else if(value && typeof value==='object')for(const v of Object.values(value))transfers(v,out);return out;}
     onmessage=e=>{
@@ -800,7 +811,7 @@ function initGeometryWorker() {
     pumpGeometryWorker();
   };
   geometryWorker.onerror=e=>{workerStats.error=e.message;workerBusy=false;queuedGeometry=null;geometryWorker.terminate();geometryWorker=null;$('fuseOut').textContent='Live welded seams active; background refinement unavailable.';};
-  geometryWorker.postMessage({type:'init',D:{P:D.P,I:D.I,body:D.body,neckSeg:D.neckSeg,arm:D.arm,crest:D.crest,eyes:D.eyes}});
+  geometryWorker.postMessage({type:'init',D:{P:D.P,I:D.I,body:D.body,neckSeg:D.neckSeg,arm:D.arm,leg:D.leg,crest:D.crest,eyes:D.eyes}});
   URL.revokeObjectURL(url);
 }
 function scheduleGeometryRefinement() {
@@ -1006,7 +1017,7 @@ function computeNeck(pos) {
   return { data, end };
 }
 const NECK_GENES = ['cranium','height','jawDepth','width','boost','neckLen','neckAngle','neckCurve','neckThick','neckFlare','neckRings'];
-const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay'];
+const BODY_GENES = ['bodyA','bodyB','bodyC','bodySize','bodyBoost','bodyWidth','bodyHeight','tailLen','tailAngle','tailCurve','tailThick','tailTaper','tailFolds','fingers','armSize','armThick','fingerSize','handSize','armShoulder','armElbow','armWrist','armSplay','legSize','legThick','toeSize','toeSpread','legHip','legKnee','legAnkle','legSplay'];
 const geometryKey = ids => ids.map(id => genes[id]).join(',');
 let neckKey = '', bodyKey = '';
 function placeNeck() {
@@ -1241,8 +1252,9 @@ function buildSkeleton(skel) {
 // weights: head vertices keep skull/jaw; every other vertex goes to its two nearest bones of its own part, blended so joints
 // bend smoothly. On the body the distance is in units of each bone's radius, so chest skin stays on the spine next to the arm
 // each part only sees its own bones plus the ones it meets at its seam (so a fingertip never reaches for the spine)
-const RIG_ALLOW = { body: n => /^(pelvis|chest|neck1|tail1|upperArm_.)$/.test(n), neck: n => /^(chest|neck\d+)$/.test(n), tail: n => /^(pelvis|tail\d+)$/.test(n),
-  _L: n => n.endsWith('_L'), _R: n => n.endsWith('_R') };
+const RIG_ALLOW = { body: n => /^(pelvis|chest|neck1|tail1|upperArm_.|thigh_.)$/.test(n), neck: n => /^(chest|neck\d+)$/.test(n), tail: n => /^(pelvis|tail\d+)$/.test(n),
+  arm_L: n => /^(upperArm|foreArm|hand|finger\d)_L$/.test(n), arm_R: n => /^(upperArm|foreArm|hand|finger\d)_R$/.test(n),
+  leg_L: n => /^(thigh|shin|foot|toe\d)_L$/.test(n), leg_R: n => /^(thigh|shin|foot|toe\d)_R$/.test(n) };
 function rigWeights(P, nh, jw, skel, groups) {
   const nv = P.length / 3, bi = new Uint8Array(nv * 4), bw = new Float32Array(nv * 4);
   for (let v = 0; v < nh; v++) { bi[v*4+1] = 1; bw[v*4] = 1 - jw[v]; bw[v*4+1] = jw[v]; }
@@ -1289,6 +1301,13 @@ function mergeCreature(hP, hI, jw, reg) {
   creatureData = { skel: bodyJ.skel, P: J.P, I: J.I, nh, jw: jw2, reg: reg2, head0: Float32Array.from(hP), frame: bodyJ.breathFrame };
 }
 // ---------- arms: upper arm, forearm, hand and 2-4 fingers chained from the shoulder, each sunk into the one before ----------
+// centre (y, z) of a piece's cross-section at fraction f of its length, in the piece frame (memoised on the piece)
+function jointCentre(K, f) {
+  const key = 'jc' + f; if (K[key]) return K[key];
+  const Q = K.pos, x0 = f * K.len, w = 0.04 * K.len; let ylo = Infinity, yhi = -Infinity, zlo = Infinity, zhi = -Infinity;
+  for (let v = 0; v < Q.length / 3; v++) if (Math.abs(Q[v*3] - x0) < w) { ylo = Math.min(ylo, Q[v*3+1]); yhi = Math.max(yhi, Q[v*3+1]); zlo = Math.min(zlo, Q[v*3+2]); zhi = Math.max(zhi, Q[v*3+2]); }
+  return K[key] = ylo < Infinity ? [(ylo + yhi) / 2, (zlo + zhi) / 2] : [0, 0];
+}
 function placePiece(pc0, o, dx, dy, dz, s, thick) {   // piece points (local x along the limb) -> world
   const Q = pc0.pos, n = Q.length / 3, P = new Float32Array(n * 3);
   for (let v = 0; v < n; v++) { const x = Q[v*3] * s, y = Q[v*3+1] * s * thick, z = Q[v*3+2] * s * thick;
@@ -1315,8 +1334,11 @@ function buildArm(sh, f, u, bodySc) {
   const a1 = genes.armShoulder * rad, a2 = a1 + genes.armElbow * rad, a3 = a2 + genes.armWrist * rad, OV = 0.86;
   let [dx, dy, dz] = frame(a1);
   const up = placePiece(K.upper, sh, dx, dy, dz, s, th);
-  const el = [0, 1, 2].map(i => sh[i] + dx[i] * K.upper.len * s * OV);
+  // the elbow sits on the upper arm's real cross-section centre there (the sculpt's end hangs below its axis), and the
+  // forearm is shifted so its own end centre lands on it: the two pieces line up instead of meeting off-centre
+  const cu = jointCentre(K.upper, OV), ce = [0, 1, 2].map(i => sh[i] + (dx[i] * K.upper.len * OV + (dy[i] * cu[0] + dz[i] * cu[1]) * th) * s);
   [dx, dy, dz] = frame(a2);
+  const cf = jointCentre(K.fore, 0.04), el = [0, 1, 2].map(i => ce[i] - (dy[i] * cf[0] + dz[i] * cf[1]) * s);
   const fo = placePiece(K.fore, el, dx, dy, dz, s, 1);
   const wr = [0, 1, 2].map(i => el[i] + dx[i] * K.fore.len * s * OV);
   // hand and fingers: the pose made in the Hand Pose Rig, in the forearm's frame (forearm at its origin, unrotated);
@@ -1346,6 +1368,36 @@ function buildArm(sh, f, u, bodySc) {
   for (const kf of keys) { const fp = posed(kf, K.finger, fsz); armBones.push({ name: kf, parent: 'hand', ...fp.bone }); const J = joinParts(A.PP, A.I, fp, K.finger.rad * s * HAND_POSE[kf].s * fsz, 'arm-' + kf); A = withInside({ PP: J.P, I: J.I }); }
   A.r = K.upper.rad * s * th; A.bones = armBones;
   armMemo = { key: cacheKey, value: A }; return A;
+}
+// ---------- legs: thigh, shin, foot and three toes from the leg kit, chained from the hip in the sculpted pose ----------
+// each piece keeps its sculpted angle (leg.json 'ang'); the hip/knee/ankle genes turn the chain from there
+function buildLeg(hip, f, u, depth) {
+  const K = D.leg; if (!K) return null;
+  const s = genes.legSize * depth * 1.1 / 0.75, th = genes.legThick, rad = Math.PI / 180, OV = 0.86;   // the sheet leg stands 0.75 tall: hip height ~1.1 body depths
+  const cross = (a, b) => [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
+  const frame = (a, spl) => { const c = Math.cos(spl), dx = [(Math.cos(a) * f[0] + Math.sin(a) * u[0]) * c, (Math.cos(a) * f[1] + Math.sin(a) * u[1]) * c, Math.sin(spl)], dy = [-Math.sin(a) * f[0] + Math.cos(a) * u[0], -Math.sin(a) * f[1] + Math.cos(a) * u[1], 0]; return [dx, dy, cross(dx, dy)]; };
+  const sp = genes.legSplay * rad, a1 = (K.thigh.ang + genes.legHip) * rad, a2 = a1 + (K.shin.ang - K.thigh.ang + genes.legKnee) * rad, a3 = a2 + (K.foot.ang - K.shin.ang + genes.legAnkle) * rad;
+  const end = (o, d, L) => [0, 1, 2].map(i => o[i] + d[i] * L);
+  // each joint: the far piece's end centre (its real cross-section centre, not its axis) meets the next piece's end centre
+  const joint = (o, Fa, Pa, Fb, Pb) => { const ca = jointCentre(Pa, OV), cb = jointCentre(Pb, 0.04);
+    return [0, 1, 2].map(i => o[i] + (Fa[0][i] * Pa.len * OV + (Fa[1][i] * ca[0] + Fa[2][i] * ca[1]) * th - (Fb[1][i] * cb[0] + Fb[2][i] * cb[1]) * th) * s); };
+  const F1 = frame(a1, sp), F2 = frame(a2, sp), F3 = frame(a3, sp * 0.5);
+  const thigh = placePiece(K.thigh, hip, ...F1, s, th), knee = joint(hip, F1, K.thigh, F2, K.shin);
+  const shin = placePiece(K.shin, knee, ...F2, s, th), ankle = joint(knee, F2, K.shin, F3, K.foot);
+  const foot = placePiece(K.foot, ankle, ...F3, s, th), ball = end(ankle, F3[0], K.foot.len * s * 0.8);
+  const bones = [{ name: 'thigh', parent: 'pelvis', a: hip, b: knee, ra: K.thigh.rad * s * th, rb: K.shin.rad * s * th }, { name: 'shin', parent: 'thigh', a: knee, b: ankle, ra: K.shin.rad * s * th, rb: K.shin.rad * s * th },
+    { name: 'foot', parent: 'shin', a: ankle, b: ball, ra: K.foot.rad * s * th, rb: K.foot.rad * s * th }];
+  let A = withInside(thigh);
+  for (const [i, p] of [shin, foot].entries()) { const J = joinParts(A.PP, A.I, withInside(p), K.shin.rad * s * th, 'leg-joint-' + i); A = withInside({ PP: J.P, I: J.I }); }
+  // toes: three, fanned about the ball of the foot, rooted a little inside the foot
+  const a4 = a3 + (K.toe.ang - K.foot.ang) * rad, ts = s * genes.toeSize, side = F3[2];
+  [-1, 0, 1].forEach((k, i) => {
+    const o = [0, 1, 2].map(j => ball[j] + side[j] * k * K.foot.rad * s * th * 0.55), Ft = frame(a4, sp * 0.5 + k * genes.toeSpread * rad);
+    const toe = placePiece(K.toe, o, ...Ft, ts, 1), J = joinParts(A.PP, A.I, withInside(toe), K.toe.rad * ts, 'leg-toe' + i); A = withInside({ PP: J.P, I: J.I });
+    bones.push({ name: 'toe' + (i + 1), parent: 'foot', a: o, b: end(o, Ft[0], K.toe.len * ts), ra: K.toe.rad * ts, rb: K.toe.rad * ts * 0.5 });
+  });
+  A.r = K.thigh.rad * s * th; A.bones = bones;
+  return A;
 }
 function computeBody() {
   if (!D.body || !neckEnd) return;
@@ -1387,8 +1439,16 @@ function computeBody() {
     const ball = D.arm ? D.arm.upper.rad * genes.armSize * sc * genes.armThick : 0;
     const rx = (xs - ax) * sc, ry = (ys - ay) * sc * genes.bodyHeight, sh = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zs * sc * genes.bodyWidth - 0.5 * ball];
     const A = buildArm(sh, [c, s2], [-s2, c], sc);
-    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? '_L' : '_R' }); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side);
+    if (A) for (const side of [1, -1]) { const part = side > 0 ? A : mirrorZ(A), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? 'arm_L' : 'arm_R' }); J = joinParts(J.P, J.I, part, A.r, 'body-arm-' + side);
       for (const b of part.bones) skel.push({ ...b, name: b.name + (side > 0 ? '_L' : '_R'), parent: b.parent === 'chest' ? 'chest' : b.parent + (side > 0 ? '_L' : '_R') }); } }
+  { // hips: low on the side of the body just ahead of the tail, the thigh sunk well into the flank
+    const xh = xmin0 + 0.4 * bl, yh = ylo + 0.4 * (yhi - ylo); let zh = 0;
+    for (let v = 0; v < n; v++) if (Math.abs(P0b[v*3] - xh) < 0.02 && Math.abs(P0b[v*3+1] - yh) < 0.03) zh = Math.max(zh, Math.abs(P0b[v*3+2]));
+    const rx = (xh - ax) * sc, ry = (yh - ay) * sc * genes.bodyHeight, depth = (yhi - ylo) * sc * genes.bodyHeight;
+    const hip = [tx + rx * c - ry * s2, ty + rx * s2 + ry * c, zh * sc * genes.bodyWidth * 0.7];
+    const L = buildLeg(hip, [c, s2], [-s2, c], depth);
+    if (L) for (const side of [1, -1]) { const part = side > 0 ? L : mirrorZ(L), s0 = J.P.length / 3; groups.push({ s: s0, e: s0 + part.PP.length / 3, part: side > 0 ? 'leg_L' : 'leg_R' }); J = joinParts(J.P, J.I, part, L.r, 'body-leg-' + side);
+      for (const b of part.bones) skel.push({ ...b, name: b.name + (side > 0 ? '_L' : '_R'), parent: b.parent === 'pelvis' ? 'pelvis' : b.parent + (side > 0 ? '_L' : '_R') }); } }
   J.skel = skel; J.groups = groups;
   J.breathFrame = { tx, ty, c, s: s2, ax, ay, sc, h: genes.bodyHeight, xmin0, bl, ylo, yhi };   // body frame -> animal, for the breathing sphere
   return J;
@@ -1825,7 +1885,7 @@ $('kerCol').addEventListener('input', e => { skinUi.keratin = hex2(e.target.valu
 $('showRegions').onchange = e => { view.regions = e.target.checked; applySkin(normWeights()); };
 $('autoCol').onclick = () => { skinUi.back = skinUi.belly = null; applySkin(normWeights()); };
 for (const [id, fmt, geo] of [['eyeSX', v => '×' + v.toFixed(2), true], ['eyeSY', v => '×' + v.toFixed(2), true], ['eyeFwd', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeUp', v => (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' cm', true], ['eyeDepth', v => (v * 1000).toFixed(1) + ' mm', true],
-    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : '3 (theropod)', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['breathDepth', v => (v * 100).toFixed(1) + ' cm', false], ['breathRate', v => v + ' /min', false], ['breathRadius', v => Math.round(v * 100) + '% of the body', false], ['breathFwd', v => Math.round(v * 100) + '%', false], ['breathUp', v => Math.round(v * 100) + '%', false], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
+    ['irisHue', v => (v > 0 ? '+' : '') + v + '°', false], ['gazeFwd', v => v + '°', true], ['eyeSink', v => (v * 1000).toFixed(1) + ' mm', true], ['crest', v => '×' + v.toFixed(2), true], ['toothCount', v => String(v), true], ['neckLen', v => Math.round(v * 100) + ' cm', true], ['bodyA', v => Math.round(v * 100) + '%', true], ['bodyB', v => Math.round(v * 100) + '%', true], ['bodyC', v => Math.round(v * 100) + '%', true], ['bodySize', v => '×' + v.toFixed(2), true], ['tailLen', v => Math.round(v * 100) + ' cm', true], ['fingers', v => v === 2 ? '2 (T. rex)' : '3 (theropod)', true], ['armSize', v => '×' + v.toFixed(2), true], ['armThick', v => '×' + v.toFixed(2), true], ['fingerSize', v => '×' + v.toFixed(2), true], ['handSize', v => '×' + v.toFixed(2), true], ['armShoulder', v => v + '°', true], ['armElbow', v => v + '°', true], ['armWrist', v => v + '°', true], ['armSplay', v => v + '°', true], ['legSize', v => '×' + v.toFixed(2), true], ['legThick', v => '×' + v.toFixed(2), true], ['toeSize', v => '×' + v.toFixed(2), true], ['toeSpread', v => v + '°', true], ['legHip', v => (v > 0 ? '+' : '') + v + '°', true], ['legKnee', v => (v > 0 ? '+' : '') + v + '°', true], ['legAnkle', v => (v > 0 ? '+' : '') + v + '°', true], ['legSplay', v => v + '°', true], ['tailAngle', v => v + '°', true], ['tailCurve', v => v + '°', true], ['tailThick', v => '×' + v.toFixed(2), true], ['tailTaper', v => '×' + v.toFixed(2), true], ['tailFolds', v => '×' + v.toFixed(2), true], ['breathDepth', v => (v * 100).toFixed(1) + ' cm', false], ['breathRate', v => v + ' /min', false], ['breathRadius', v => Math.round(v * 100) + '% of the body', false], ['breathFwd', v => Math.round(v * 100) + '%', false], ['breathUp', v => Math.round(v * 100) + '%', false], ['bodyWidth', v => '×' + v.toFixed(2), true], ['bodyHeight', v => '×' + v.toFixed(2), true], ['bodyBoost', v => '×' + v.toFixed(2), true], ['neckAngle', v => v + '°', true], ['neckCurve', v => v + '°', true], ['neckThick', v => '×' + v.toFixed(2), true], ['neckFlare', v => '×' + v.toFixed(2), true], ['neckRings', v => '×' + v.toFixed(2), true], ['tongueLen', v => Math.round(v * 100) + '% of the jaw', true], ['tongueWidth', v => Math.round(v * 100) + '% of the mouth', true], ['toothSize', v => '×' + v.toFixed(2), true], ['wrinkle', v => '×' + v.toFixed(2), false], ['lidUp', v => v + '°', true], ['lidLow', v => v + '°', true], ['recess', v => (v * 1000).toFixed(1) + ' mm', true], ['recessWidth', v => '×' + v.toFixed(2) + ' socket', true], ['gazeDown', v => v + '°', true], ['irisSize', v => Math.round(v * 100) + '% of the eye', true], ['pupilSize', v => '×' + v.toFixed(2), false], ['pupilSlit', v => v < 0.15 ? 'round' : v > 0.85 ? 'slit' : 'oval ' + Math.round(v * 100) + '%', false]]) {
   const el = $(id), out = $(id + 'Out'); const sync = () => { genes[id] = +el.value; out.textContent = fmt(genes[id]); };
   sync(); el.addEventListener('input', () => { sync(); if (!D) return; if (geo) requestRebuild(); else applySkin(normWeights()); });
 }
@@ -1844,8 +1904,8 @@ $('random').onclick = () => {
 $('reset').onclick = () => { Object.assign(genes, { mix: D.names.map((_, i) => i === 0 ? 1 : 0), snout: 0, cranium: 0, height: 0, jawDepth: 0, width: 0, boost: 1 }); setUi(); requestRebuild(); };
 
 resize(); app.start();
-Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm]) => {
-  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
+Promise.all([loadGlb('dino_head_base_rigged.glb'), fetch('scales.png').then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })), fetch('camo.png').then(r => r.blob()).then(b => createImageBitmap(b)), loadMap('eye_depth.png', { blur: 5 }), loadMap('eye_wrinkles.png'), fetch('eye_iris.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('crest.json').then(r => r.json()), fetch('teeth.json').then(r => r.json()), fetch('tongue.jpg').then(r => r.blob()).then(b => createImageBitmap(b)), fetch('tongue_n.jpg').then(r => r.blob()).then(b => createImageBitmap(b, { colorSpaceConversion: 'none' })), fetch('neck_segment.json').then(r => r.json()), loadBodyGlb('dino_body_base.glb'), fetch('arm.json').then(r => r.json()), fetch('leg.json').then(r => r.json())]).then(([data, scales, camo, eyeDepth, eyeWr, iris, crest, teeth, tongueTex, tongueNrm, neckSeg, body, arm, leg]) => {
+  data.scales = scales; data.camo = camo; data.eyeDepth = eyeDepth; data.eyeWr = eyeWr; data.iris = iris; data.crest = crest; data.teeth = teeth; data.tongueTex = tongueTex; data.neckSeg = neckSeg; data.body = body; data.arm = arm.parts; data.leg = leg.parts; data.tongueNrm = tongueNrm; genes.mix = data.names.map((_, i) => i === 0 ? 1 : 0); build(data); renderMix();
 }).catch(err => { $('err').hidden = false; $('err').textContent = 'Could not load the head model: ' + err.message; console.error(err); });
 window.__dino = { bones, setBlink: c => { lidClose = c; blinkSlider(c); }, get app() { return app; }, get mat() { return mat; }, eyeballs, get crestP() { return crestP; }, get crestEnt() { return crestPart && crestPart.ent; }, get pos() { return pos; }, get eye() { return eye; }, genes, orbit, view, rebuild, skinUi, applySkin: () => applySkin(normWeights()), get D() { return D; }, get performanceStats() { return { worker:workerStats, uploads:window.__uploads, normals:window.__localNormals, seams:Array.from(joinCache,([key,C])=>({key,vertices:C.sel?C.sel.length:0})) }; }, get creature() { return creatureData; } };
 })();
