@@ -44,7 +44,7 @@ app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * 
 resize(); app.start();
 
 // the shared mesh (fullbody_base.glb): base positions + one morph target (offsets) per body; blended on the CPU
-fetch('fullbody_base.glb').then(r => r.arrayBuffer()).then(buf => {
+fetch('fullbody_base.b64.txt').then(r => r.text()).then(t => Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0)).buffer).then(buf => {
   const dv = new DataView(buf), jl = dv.getUint32(12, true), J = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl))), bin = 20 + jl + 8;
   const acc = i => { const a = J.accessors[i], v = J.bufferViews[a.bufferView], n = { SCALAR: 1, VEC3: 3 }[a.type], T = { 5126: Float32Array, 5125: Uint32Array }[a.componentType];
     return new T(buf.slice(bin + (v.byteOffset || 0) + (a.byteOffset || 0), bin + (v.byteOffset || 0) + (a.byteOffset || 0) + a.count * n * T.BYTES_PER_ELEMENT)); };
@@ -67,6 +67,6 @@ fetch('fullbody_base.glb').then(r => r.arrayBuffer()).then(buf => {
   };
   for (const k of [0, 1, 2]) $('w' + k).addEventListener('input', blend);
   blend();
-}).catch(e => { $('stat').textContent = 'Could not load fullbody_base.glb: ' + e.message; });
+}).catch(e => { $('stat').textContent = 'Could not load the body mesh: ' + e.message; });
 })();
 </script></body></html>
