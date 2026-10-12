@@ -15,7 +15,7 @@ h1 { font-size: 18px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 16
 @media (max-width: 700px) { #wrap { flex-direction: column; } aside { width: 100%; height: 45%; } }
 </style></head>
 <body><div id="wrap"><div id="stage"><canvas id="c"></canvas></div>
-<aside><h1>Carnosaur region blend</h1><p>Three carnosaurs wrapped onto one shared mesh. Each region blends on its own (borders fade smoothly). Drag to orbit, scroll to zoom.</p>
+<aside><h1>Carnosaur region blend</h1><p>A–C carnosaurs, D T. rex, E Triceratops, wrapped onto one shared mesh. Each region blends on its own (borders fade smoothly). Drag to orbit, scroll to zoom.</p>
 <div id="regions"></div><p id="stat"></p></aside></div>
 <script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
 <script>
@@ -50,17 +50,17 @@ Promise.all([fetch('carnos_base.b64.txt').then(r => r.text()).then(t => Uint8Arr
   const mesh = new pc.Mesh(app.graphicsDevice), P = new Float32Array(P0.length);
   // paint: each animal's texture, all baked into the same layout (carnos_tex_A/B/C.jpg); the shader mixes them per vertex by the
   // same region weights as the shape (passed as a vertex colour), with simple key + fill lighting
-  const mat = new pc.ShaderMaterial({ uniqueName: 'carnoBlend', attributes: { aPosition: pc.SEMANTIC_POSITION, aNormal: pc.SEMANTIC_NORMAL, aUv0: pc.SEMANTIC_TEXCOORD0, aMix: pc.SEMANTIC_COLOR },
-    vertexGLSL: `attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv0; attribute vec3 aMix;
-      uniform mat4 matrix_model; uniform mat4 matrix_viewProjection; varying vec3 vN; varying vec2 vUv; varying vec3 vMix;
-      void main() { vN = mat3(matrix_model) * aNormal; vUv = aUv0; vMix = aMix; gl_Position = matrix_viewProjection * matrix_model * vec4(aPosition, 1.0); }`,
-    fragmentGLSL: `precision highp float; varying vec3 vN; varying vec2 vUv; varying vec3 vMix; uniform sampler2D texA; uniform sampler2D texB; uniform sampler2D texC;
-      void main() { vec3 c = texture2D(texA, vUv).rgb * vMix.x + texture2D(texB, vUv).rgb * vMix.y + texture2D(texC, vUv).rgb * vMix.z;
+  const mat = new pc.ShaderMaterial({ uniqueName: 'carnoBlend', attributes: { aPosition: pc.SEMANTIC_POSITION, aNormal: pc.SEMANTIC_NORMAL, aUv0: pc.SEMANTIC_TEXCOORD0, aMix: pc.SEMANTIC_COLOR, aMix2: pc.SEMANTIC_TEXCOORD1 },
+    vertexGLSL: `attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv0; attribute vec4 aMix; attribute vec2 aMix2;
+      uniform mat4 matrix_model; uniform mat4 matrix_viewProjection; varying vec3 vN; varying vec2 vUv; varying vec4 vMix; varying float vMix2;
+      void main() { vN = mat3(matrix_model) * aNormal; vUv = aUv0; vMix = aMix; vMix2 = aMix2.x; gl_Position = matrix_viewProjection * matrix_model * vec4(aPosition, 1.0); }`,
+    fragmentGLSL: `precision highp float; varying vec3 vN; varying vec2 vUv; varying vec4 vMix; varying float vMix2; uniform sampler2D texA; uniform sampler2D texB; uniform sampler2D texC; uniform sampler2D texD; uniform sampler2D texE;
+      void main() { vec3 c = texture2D(texA, vUv).rgb * vMix.x + texture2D(texB, vUv).rgb * vMix.y + texture2D(texC, vUv).rgb * vMix.z + texture2D(texD, vUv).rgb * vMix.w + texture2D(texE, vUv).rgb * vMix2;
         c = pow(c, vec3(2.2)); vec3 n = normalize(vN); float k = max(dot(n, normalize(vec3(0.45, 0.8, 0.4))), 0.0), f = max(dot(n, normalize(vec3(-0.5, 0.3, -0.6))), 0.0);
         vec3 lit = c * (0.32 + 1.0 * k + 0.35 * f); gl_FragColor = vec4(pow(lit, vec3(1.0 / 2.2)), 1.0); }` });
   mat.cull = pc.CULLFACE_NONE;
   const loadTex = name => new Promise(res => { const img = new Image(); img.onload = () => { const t = new pc.Texture(app.graphicsDevice, { mipmaps: true, minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE }); t.setSource(img); res(t); }; img.src = name; });
-  Promise.all(['A', 'B', 'C'].map(k => loadTex('carnos_tex_' + k + '.jpg'))).then(([a, b, c]) => { mat.setParameter('texA', a); mat.setParameter('texB', b); mat.setParameter('texC', c); mat.update(); });
+  Promise.all(['A', 'B', 'C', 'D', 'E'].map(k => loadTex('carnos_tex_' + k + '.jpg'))).then(T => { ['A', 'B', 'C', 'D', 'E'].forEach((k, i) => mat.setParameter('tex' + k, T[i])); mat.update(); });
   const mi = new pc.MeshInstance(mesh, mat); mi.cull = false;
   const ent = new pc.Entity(); ent.addComponent('render', { meshInstances: [mi] }); app.root.addChild(ent);
   const normals = () => { const N = new Float32Array(P.length);
@@ -68,23 +68,23 @@ Promise.all([fetch('carnos_base.b64.txt').then(r => r.text()).then(t => Uint8Arr
       const x = ey*fz-ez*fy, y = ez*fx-ex*fz, z = ex*fy-ey*fx; for (const v of [a, b, c]) { N[v] += x; N[v+1] += y; N[v+2] += z; } }
     for (let v = 0; v < N.length; v += 3) { const l = Math.hypot(N[v], N[v+1], N[v+2]) || 1; N[v] /= l; N[v+1] /= l; N[v+2] /= l; } return N; };
   // sliders: an "all regions" row that sets every region, then one row of A/B/C per region
-  const names = ['All regions', ...RG.regions.map(r => r[0].toUpperCase() + r.slice(1))], nr = RG.regions.length, M = RG.mask, ani = ['A', 'B', 'C'];
+  const names = ['All regions', ...RG.regions.map(r => r[0].toUpperCase() + r.slice(1))], nr = RG.regions.length, M = RG.mask, ani = ['A', 'B', 'C', 'D', 'E'], NA = ani.length;
   $('regions').innerHTML = names.map((nm, r) => `<details ${r === 0 ? 'open' : ''}><summary>${nm}</summary><div class="s3">${ani.map((a, k) =>
     `<span>${a}</span><input type="range" id="w${r}_${k}" min="0" max="1" step="0.01" value="${k === 0 ? 1 : 0}"><output id="o${r}_${k}"></output>`).join('')}</div></details>`).join('');
-  let first = true; const Mix = new Float32Array(n * 3);
+  let first = true; const Mix = new Float32Array(n * 4), Mix2 = new Float32Array(n * 2);
   const blend = () => {
-    const W = []; for (let r = 1; r <= nr; r++) { const w = [0, 1, 2].map(k => +$(`w${r}_${k}`).value), s = w[0] + w[1] + w[2] || 1; W.push(w.map(x => x / s)); w.forEach((x, k) => $(`o${r}_${k}`).textContent = Math.round(x / s * 100) + '%'); }
+    const W = []; for (let r = 1; r <= nr; r++) { const w = ani.map((_, k) => +$(`w${r}_${k}`).value), s = w.reduce((a, b) => a + b, 0) || 1; W.push(w.map(x => x / s)); w.forEach((x, k) => $(`o${r}_${k}`).textContent = Math.round(x / s * 100) + '%'); }
     for (let v = 0; v < n; v++) {
-      const c = [0, 0, 0]; for (let r = 0; r < nr; r++) { const m = M[v * nr + r]; if (m) for (let k = 0; k < 3; k++) c[k] += m * W[r][k]; }
-      Mix[v*3] = c[0]; Mix[v*3+1] = c[1]; Mix[v*3+2] = c[2];
-      for (let a = 0; a < 3; a++) { const i = v * 3 + a; P[i] = P0[i] + c[0] * D[0][i] + c[1] * D[1][i] + c[2] * D[2][i]; } }
-    mesh.setPositions(P); mesh.setNormals(normals()); mesh.setUvs(0, UV); mesh.setVertexStream(pc.SEMANTIC_COLOR, Mix, 3); if (first) { mesh.setIndices(I); first = false; } mesh.update();
+      const c = [0, 0, 0, 0, 0]; for (let r = 0; r < nr; r++) { const m = M[v * nr + r]; if (m) for (let k = 0; k < NA; k++) c[k] += m * W[r][k]; }
+      Mix[v*4] = c[0]; Mix[v*4+1] = c[1]; Mix[v*4+2] = c[2]; Mix[v*4+3] = c[3]; Mix2[v*2] = c[4];
+      for (let a = 0; a < 3; a++) { const i = v * 3 + a; let d = 0; for (let k = 0; k < NA; k++) if (c[k]) d += c[k] * D[k][i]; P[i] = P0[i] + d; } }
+    mesh.setPositions(P); mesh.setNormals(normals()); mesh.setUvs(0, UV); mesh.setVertexStream(pc.SEMANTIC_COLOR, Mix, 4); mesh.setVertexStream(pc.SEMANTIC_TEXCOORD1, Mix2, 2); if (first) { mesh.setIndices(I); first = false; } mesh.update();
     $('stat').textContent = n.toLocaleString() + ' shared vertices';
   };
-  for (let r = 0; r <= nr; r++) for (const k of [0, 1, 2]) $(`w${r}_${k}`).addEventListener('input', e => {
+  for (let r = 0; r <= nr; r++) for (let k = 0; k < NA; k++) $(`w${r}_${k}`).addEventListener('input', e => {
     if (r === 0) for (let q = 1; q <= nr; q++) $(`w${q}_${k}`).value = e.target.value;   // "all regions" drives every region
     blend(); });
-  [0, 1, 2].forEach(k => $(`o0_${k}`).textContent = '');
+  ani.forEach((_, k) => $(`o0_${k}`).textContent = '');
   blend();
 }).catch(e => { $('stat').textContent = 'Could not load the carnosaur mesh: ' + e.message; });
 })();
