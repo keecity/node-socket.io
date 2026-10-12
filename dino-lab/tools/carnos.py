@@ -69,6 +69,7 @@ def find_regions(v):
     hipX,shX=np.sort(c2); split=0.5*(hipX+shX)
     reg=np.zeros(len(v),int)                                             # 0 torso 1 legs 2 arms 3 tail 4 neck 5 head
     reg[limb&(v[:,0]<split)]=1; reg[limb&(v[:,0]>=split)]=2
+    reg[(reg==2)&(v[:,1]<0.33*np.ptp(v[:,1]))]=1                          # arms never reach the ground: a forward leg under the chest is leg
     legx=v[reg==1,0].min(); reg[(~limb)&(v[:,0]<legx-0.02)]=3
     hgt=np.array([np.ptp(v[xb==i,1]) if (xb==i).any() else 9 for i in range(nb)])
     front=[i for i in range(nb) if edges[i]>shX+0.03 and edges[i]<v[:,0].max()-0.06]; ni=min(front,key=lambda i:hgt[i]); neckX=edges[ni]
