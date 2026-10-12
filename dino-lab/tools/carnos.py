@@ -54,7 +54,10 @@ def load_sheet(path, names, minverts):
     return out
 # carnosaurs A, B, C (bottom, middle, top of the first sheet); T. rex and Triceratops (top, bottom of the second)
 H=load_sheet('../carnos_sculpts.glb',['carno A','carno B','carno C'],2000)
-H+=load_sheet('../tricarno_sculpts.glb',['triceratops','t. rex'],2500)[::-1]
+T2=load_sheet('../tricarno_sculpts.glb',['triceratops','t. rex'],2500)
+# the Triceratops is the base: it has the frill, horns and full front legs, which shrink well into carnosaur heads and
+# arms (growing them out of a carnosaur did not). Order: Triceratops, carno A, B, C, T. rex
+H=[T2[0]]+H+[T2[1]]
 # regions (rest shape): anything hanging below the belly's centre line is a limb (legs at the back, arms at the front,
 # split by 2-means on where they hang from); in front of the narrowest point ahead of the chest is neck then head;
 # behind the legs is tail; the rest is torso
@@ -90,7 +93,7 @@ def fix_limbs(v,fb,regb,X,h):
         for k,tr in trees.items(): m=kb==k; _,ii=tr.query(X[m]); T[m]=S[kt==k][ii]
         X=np.where(lm[:,None],X+0.5*(T-X),X); D=X-v; D2=0.7*D+0.3*(Lap@D); X=np.where(lm[:,None],v+D2,X)
     return X,len(limbk)
-v=H[0]['Q'].copy(); fb=H[0]['I'].copy(); print('base: carno A',len(v),'verts',flush=True)
+v=H[0]['Q'].copy(); fb=H[0]['I'].copy(); print('base:',H[0]['name'],len(v),'verts',flush=True)
 reg,(hipX,shX,neckX)=find_regions(v)
 M=np.eye(6)[reg]; Lap=laplacian(len(v),fb)
 for _ in range(8): M=Lap@M
