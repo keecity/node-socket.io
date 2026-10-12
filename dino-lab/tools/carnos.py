@@ -20,11 +20,15 @@ def wrap_species(V,F,H):   # as in refine.py: best of a direct and a prefit wrap
     return best[1],best[0]   # no mirror fix: the stride pose is not symmetric
 b=open('../carnos_sculpts.glb','rb').read(); l=struct.unpack('<I',b[12:16])[0]; j=json.loads(b[20:20+l]); B=b[20+l+8:]
 def acc(i):
-    a=j['accessors'][i]; bv=j['bufferViews'][a['bufferView']]; n={'SCALAR':1,'VEC3':3}[a['type']]; dt={5126:np.float32,5125:np.uint32,5123:np.uint16}[a['componentType']]
+    a=j['accessors'][i]; bv=j['bufferViews'][a['bufferView']]; n={'SCALAR':1,'VEC2':2,'VEC3':3}[a['type']]; dt={5126:np.float32,5125:np.uint32,5123:np.uint16}[a['componentType']]
     return np.frombuffer(B,dt,a['count']*n,bv.get('byteOffset',0)+a.get('byteOffset',0)).reshape(-1,n)
 p=j['meshes'][0]['primitives'][0]; V=acc(p['attributes']['POSITION']).astype(float); F=acc(p['indices']).reshape(-1,3).astype(int)
+UVall=acc(p['attributes']['TEXCOORD_0']).astype(float); FU=F.copy()                       # texture coords per triangle corner
 U,inv=np.unique(np.round(V,5),axis=0,return_inverse=True); inv=inv.ravel(); F=inv[F]; V=U
-F=F[(F[:,0]!=F[:,1])&(F[:,1]!=F[:,2])&(F[:,0]!=F[:,2])]
+ok=(F[:,0]!=F[:,1])&(F[:,1]!=F[:,2])&(F[:,0]!=F[:,2]); F=F[ok]; FU=FU[ok]
+from PIL import Image
+im=j['images'][0]; bv=j['bufferViews'][im['bufferView']]; import io
+TEX=np.asarray(Image.open(io.BytesIO(B[bv.get('byteOffset',0):bv.get('byteOffset',0)+bv['byteLength']])).convert('RGB')).astype(np.float32)
 par=np.arange(len(V))
 def f(x):
     while par[x]!=x: par[x]=par[par[x]]; x=par[x]
@@ -35,15 +39,15 @@ mains=sorted([r for r,n in zip(comps,cnt) if n>2000],key=lambda r:V[root==r][:,1
 from collections import Counter
 H=[]
 for name,r in zip(['carno A','carno B','carno C'],mains):
-    m=root==r; vs=np.where(m)[0]; rm=-np.ones(len(V),int); rm[vs]=np.arange(len(vs)); I=rm[F[m[F[:,0]]]]; Q=V[vs].copy()
+    m=root==r; vs=np.where(m)[0]; rm=-np.ones(len(V),int); rm[vs]=np.arange(len(vs)); tm=m[F[:,0]]; I=rm[F[tm]]; IU=FU[tm]; Q=V[vs].copy()
     Q-=[0,Q[:,1].min(),0.5*(Q[:,2].min()+Q[:,2].max())]
-    keepT=Q[I].mean(1)[:,2]>0; I=I[keepT]; used=np.unique(I); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); Q=Q[used]; I=rm[I]
+    keepT=Q[I].mean(1)[:,2]>0; I=I[keepT]; IU=IU[keepT]; used=np.unique(I); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); Q=Q[used]; I=rm[I]
     e=Counter(tuple(sorted(x)) for t in I for x in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0]))); bnd=np.unique([v for k,c in e.items() if c==1 for v in k])
     seam=bnd[Q[bnd,2]<0.012]; Q[seam,2]=0
     mir=np.arange(len(Q))+len(Q); mir[seam]=seam
-    I=np.vstack([I,mir[I][:,[0,2,1]]]); Q=np.vstack([Q,Q*[1,1,-1]])
+    I=np.vstack([I,mir[I][:,[0,2,1]]]); IU=np.vstack([IU,IU[:,[0,2,1]]]); Q=np.vstack([Q,Q*[1,1,-1]])   # the mirrored side reuses the same paint
     used=np.unique(I); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); Q=Q[used]; I=rm[I]
-    H.append(dict(name=name,Q=Q,I=I)); print(name,'verts',len(Q),'size',np.ptp(Q,0).round(3))
+    H.append(dict(name=name,Q=Q,I=I,IU=IU)); print(name,'verts',len(Q),'size',np.ptp(Q,0).round(3))
 v=H[0]['Q'].copy(); fb=H[0]['I'].copy(); print('base: carno A',len(v),'verts',flush=True)
 W=[v.copy()]
 for h in H[1:]:
@@ -69,10 +73,48 @@ M=np.eye(6)[reg]; Lap=laplacian(len(v),fb)
 for _ in range(8): M=Lap@M
 M/=M.sum(1,keepdims=True)
 print('regions:',{n:int((reg==k).sum()) for k,n in enumerate(['torso','legs','arms','tail','neck','head'])},'hip %.2f shoulder %.2f neck %.2f'%(hipX,shX,neckX))
+# bake each animal's paint into A's texture layout: rasterise A's triangles in texture space; each texel is a point on the
+# shared mesh, the same point on animal k (its wrap), the nearest point of animal k's sculpt, its texture coords, its colour
+TS=2048; TEXS=[np.zeros((TS,TS,3),np.float32) for _ in range(3)]; WGT=np.zeros((TS,TS,len(H[0]['Q']) and 1),np.float32)
+def surf_uv(h,n=400000):   # dense surface samples of a sculpt with their texture coords
+    P=h['Q'][h['I']]; T=UVall[h['IU']]; ar=np.linalg.norm(np.cross(P[:,1]-P[:,0],P[:,2]-P[:,0]),axis=1); tri=np.random.default_rng(0).choice(len(P),n,p=ar/ar.sum())
+    a,bb=np.random.default_rng(1).random((2,n)); fl=a+bb>1; a[fl]=1-a[fl]; bb[fl]=1-bb[fl]; w=np.c_[1-a-bb,a,bb]
+    return (P[tri]*w[:,:,None]).sum(1),(T[tri]*w[:,:,None]).sum(1)
+look=[None]+[surf_uv(h) for h in H[1:]]; trees=[None]+[cKDTree(q[0]) for q in look[1:]]
+UVA=UVall[H[0]['IU']]                                                     # A's texture coords per triangle corner
+ys,xs=np.mgrid[0:TS,0:TS]; pix=np.c_[(xs.ravel()+0.5)/TS,(ys.ravel()+0.5)/TS]
+owner=-np.ones(TS*TS,int); bary=np.zeros((TS*TS,3))
+for t in range(len(fb)):
+    a,b_,c=UVA[t]; lo=np.floor(np.minimum.reduce([a,b_,c])*TS).astype(int); hi=np.ceil(np.maximum.reduce([a,b_,c])*TS).astype(int)
+    xx,yy=np.meshgrid(np.arange(max(lo[0],0),min(hi[0],TS)),np.arange(max(lo[1],0),min(hi[1],TS))); k=(yy*TS+xx).ravel()
+    if not len(k): continue
+    q=pix[k]; d=(b_[1]-c[1])*(a[0]-c[0])+(c[0]-b_[0])*(a[1]-c[1])
+    if abs(d)<1e-12: continue
+    l1=((b_[1]-c[1])*(q[:,0]-c[0])+(c[0]-b_[0])*(q[:,1]-c[1]))/d; l2=((c[1]-a[1])*(q[:,0]-c[0])+(a[0]-c[0])*(q[:,1]-c[1]))/d; l3=1-l1-l2
+    inside=(l1>=-0.02)&(l2>=-0.02)&(l3>=-0.02); owner[k[inside]]=t; bary[k[inside]]=np.c_[l1,l2,l3][inside]
+hit=owner>=0; print('texels covered %.0f%%'%(100*hit.mean()),flush=True)
+def sample(uv):   # bilinear-free nearest sample of the sheet's texture (v flipped as in glTF)
+    x=np.clip((uv[:,0]%1)*TEX.shape[1],0,TEX.shape[1]-1).astype(int); y=np.clip((uv[:,1]%1)*TEX.shape[0],0,TEX.shape[0]-1).astype(int); return TEX[y,x]
+for k in range(3):
+    out=np.zeros((TS*TS,3),np.float32)
+    if k==0: out[hit]=sample(pix[hit])
+    else:
+        tri=fb[owner[hit]]; P3=(W[k][tri]*bary[hit][:,:,None]).sum(1); _,ii=trees[k].query(P3,workers=-1); out[hit]=sample(look[k][1][ii])
+    img=out.reshape(TS,TS,3)
+    # bleed colour a few texels past each patch so filtering never picks up black
+    from scipy import ndimage as ndi
+    _,idx=ndi.distance_transform_edt(~hit.reshape(TS,TS),return_indices=True); img=img[idx[0],idx[1]]
+    Image.fromarray(np.clip(img,0,255).astype(np.uint8)).save(f'../carnos_tex_{"ABC"[k]}.jpg',quality=88); print('baked',H[k]['name'],flush=True)
 np.save('/tmp/carnos_wrap.npy',dict(v=v,f=fb,W=W,H=H,reg=reg),allow_pickle=True)
 json.dump(dict(regions=['torso','legs','arms','tail','neck','head'],mask=np.round(M,3).ravel().tolist()),open('../carnos_regions.json','w'))
 # GLB: base + morph targets
-V0=v.astype(np.float32); FF=fb.astype(np.uint32); bufs=[];views=[];accs=[]
+# split vertices where the texture layout has a seam: one vertex per (position, texture coords) pair
+keyuv=np.round(UVA.reshape(-1,2),5); pairs=np.c_[fb.reshape(-1),keyuv]; up,inv2=np.unique(pairs,axis=0,return_inverse=True); inv2=inv2.ravel()
+src=up[:,0].astype(int); UVout=up[:,1:].astype(np.float32); FF=inv2.reshape(-1,3).astype(np.uint32)
+V0=v[src].astype(np.float32); W=[w[src] for w in W]; Msplit=M[src]
+json.dump(dict(regions=['torso','legs','arms','tail','neck','head'],mask=np.round(Msplit,3).ravel().tolist()),open('../carnos_regions.json','w'))
+print('split for texture seams:',len(v),'->',len(V0),'vertices',flush=True)
+bufs=[];views=[];accs=[]
 def add(arr,target,comp,typ,minmax=False):
     off=sum(len(x) for x in bufs); pad=(4-off%4)%4
     if pad: bufs.append(b'\0'*pad); off+=pad
@@ -80,10 +122,10 @@ def add(arr,target,comp,typ,minmax=False):
     a={'bufferView':len(views)-1,'componentType':comp,'count':len(arr) if typ!='SCALAR' else arr.size,'type':typ}
     if minmax: a['min']=arr.min(0).tolist(); a['max']=arr.max(0).tolist()
     accs.append(a); return len(accs)-1
-aP=add(V0,34962,5126,'VEC3',True); aI=add(FF.ravel(),34963,5125,'SCALAR')
+aP=add(V0,34962,5126,'VEC3',True); aT=add(UVout,34962,5126,'VEC2'); aI=add(FF.ravel(),34963,5125,'SCALAR')
 targets=[{'POSITION':add(w.astype(np.float32)-V0,34962,5126,'VEC3',True)} for w in W]
 gl={'asset':{'version':'2.0','generator':'dino-lab carnos.py'},'scene':0,'scenes':[{'nodes':[0]}],'nodes':[{'name':'Carnos','mesh':0}],
- 'meshes':[{'name':'CarnosBase','primitives':[{'attributes':{'POSITION':aP},'indices':aI,'targets':targets}],'weights':[0,0,0],'extras':{'targetNames':[h['name'] for h in H]}}],
+ 'meshes':[{'name':'CarnosBase','primitives':[{'attributes':{'POSITION':aP,'TEXCOORD_0':aT},'indices':aI,'targets':targets}],'weights':[0,0,0],'extras':{'targetNames':[h['name'] for h in H]}}],
  'accessors':accs,'bufferViews':views,'buffers':[{'byteLength':sum(len(x) for x in bufs)}]}
 js=json.dumps(gl).encode(); js+=b' '*((4-len(js)%4)%4); bn=b''.join(bufs); bn+=b'\0'*((4-len(bn)%4)%4)
 open('../carnos_base.glb','wb').write(struct.pack('<III',0x46546C67,2,12+8+len(js)+8+len(bn))+struct.pack('<II',len(js),0x4E4F534A)+js+struct.pack('<II',len(bn),0x004E4942)+bn)
