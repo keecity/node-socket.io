@@ -55,31 +55,49 @@ def load_sheet(path, names, minverts):
 # carnosaurs A, B, C (bottom, middle, top of the first sheet); T. rex and Triceratops (top, bottom of the second)
 H=load_sheet('../carnos_sculpts.glb',['carno A','carno B','carno C'],2000)
 H+=load_sheet('../tricarno_sculpts.glb',['triceratops','t. rex'],2500)[::-1]
+# regions (rest shape): anything hanging below the belly's centre line is a limb (legs at the back, arms at the front,
+# split by 2-means on where they hang from); in front of the narrowest point ahead of the chest is neck then head;
+# behind the legs is tail; the rest is torso
+def find_regions(v):
+    L=np.ptp(v[:,0]); x0=v[:,0].min(); nb=60; edges=np.linspace(x0,v[:,0].max(),nb+1); xb=np.clip(((v[:,0]-x0)/L*nb).astype(int),0,nb-1)
+    halfw=np.array([np.abs(v[xb==i,2]).max() if (xb==i).any() else 0 for i in range(nb)])
+    belly=np.array([v[(xb==i)&(np.abs(v[:,2])<0.25*halfw[i]+1e-9),1].min() if ((xb==i)&(np.abs(v[:,2])<0.25*halfw[i]+1e-9)).any() else 0 for i in range(nb)])
+    belly=np.array([np.median(belly[max(0,i-2):i+3]) for i in range(nb)])
+    limb=v[:,1]<belly[xb]-0.01
+    att=v[limb&(v[:,1]>belly[xb]-0.04),0]; c2=np.quantile(att,[0.25,0.75])
+    for _ in range(30): lab=np.argmin(np.abs(att[:,None]-c2[None]),1); c2=np.array([att[lab==k].mean() for k in range(2)])
+    hipX,shX=np.sort(c2); split=0.5*(hipX+shX)
+    reg=np.zeros(len(v),int)                                             # 0 torso 1 legs 2 arms 3 tail 4 neck 5 head
+    reg[limb&(v[:,0]<split)]=1; reg[limb&(v[:,0]>=split)]=2
+    legx=v[reg==1,0].min(); reg[(~limb)&(v[:,0]<legx-0.02)]=3
+    hgt=np.array([np.ptp(v[xb==i,1]) if (xb==i).any() else 9 for i in range(nb)])
+    front=[i for i in range(nb) if edges[i]>shX+0.03 and edges[i]<v[:,0].max()-0.06]; ni=min(front,key=lambda i:hgt[i]); neckX=edges[ni]
+    reg[(~limb)&(v[:,0]>neckX-0.05)]=4; reg[(~limb)&(v[:,0]>neckX+0.03)]=5
+    return reg,(hipX,shX,neckX)
+def side_key(reg,v):   # limbs are matched side by side (left leg to left leg), the rest by region alone
+    return np.where((reg==1)|(reg==2),reg+10*(v[:,2]>0),reg)
+# limb correction after the ordinary wrap: where neighbouring limbs sit close, the wrap can snap an arm onto a leg (or one
+# leg onto the other), leaving strands. Limb vertices are re-fitted to the same limb on the same side of the animal
+# (when the animal's limbs are found), with their offsets lightly smoothed; everything else keeps its wrap
+def fix_limbs(v,fb,regb,X,h):
+    regt,_=find_regions(h['Q']); S,_=sample(h['Q'],h['I'],0.002); _,nv_=cKDTree(h['Q']).query(S); kt=side_key(regt,h['Q'])[nv_]; kb=side_key(regb,v)
+    limbk=[k for k in np.unique(kb) if k%10 in (1,2) and (kt==k).sum()>200]
+    if not limbk: return X,0
+    trees={k:cKDTree(S[kt==k]) for k in limbk}; Lap=laplacian(len(v),fb); lm=np.isin(kb,limbk)
+    for it in range(30):
+        T=X.copy()
+        for k,tr in trees.items(): m=kb==k; _,ii=tr.query(X[m]); T[m]=S[kt==k][ii]
+        X=np.where(lm[:,None],X+0.5*(T-X),X); D=X-v; D2=0.7*D+0.3*(Lap@D); X=np.where(lm[:,None],v+D2,X)
+    return X,len(limbk)
 v=H[0]['Q'].copy(); fb=H[0]['I'].copy(); print('base: carno A',len(v),'verts',flush=True)
-W=[v.copy()]
-for h in H[1:]:
-    Y,e=wrap_species(v,fb,h); W.append(Y); print('wrap',h['name'],'error %.2f mm'%(e*1000),flush=True)
-# regions on the base (rest shape): anything hanging below the belly's centre line is a limb (legs at the back,
-# arms at the front, split by 2-means on where they hang from); in front of the narrowest point ahead of the
-# chest is neck then head; behind the legs is tail; the rest is torso. One-hot labels, softened over the mesh
-L=np.ptp(v[:,0]); x0=v[:,0].min(); nb=60; edges=np.linspace(x0,v[:,0].max(),nb+1); xb=np.clip(((v[:,0]-x0)/L*nb).astype(int),0,nb-1)
-halfw=np.array([np.abs(v[xb==i,2]).max() if (xb==i).any() else 0 for i in range(nb)])
-belly=np.array([v[(xb==i)&(np.abs(v[:,2])<0.25*halfw[i]+1e-9),1].min() if ((xb==i)&(np.abs(v[:,2])<0.25*halfw[i]+1e-9)).any() else 0 for i in range(nb)])
-belly=np.maximum.accumulate(np.ones(1))*0+np.array([np.median(belly[max(0,i-2):i+3]) for i in range(nb)])
-limb=v[:,1]<belly[xb]-0.01
-att=v[limb&(v[:,1]>belly[xb]-0.04),0]; c2=np.quantile(att,[0.25,0.75])
-for _ in range(30): lab=np.argmin(np.abs(att[:,None]-c2[None]),1); c2=np.array([att[lab==k].mean() for k in range(2)])
-hipX,shX=np.sort(c2); split=0.5*(hipX+shX)
-reg=np.zeros(len(v),int)                                                 # 0 torso 1 legs 2 arms 3 tail 4 neck 5 head
-reg[limb&(v[:,0]<split)]=1; reg[limb&(v[:,0]>=split)]=2
-legx=v[reg==1,0].min(); reg[(~limb)&(v[:,0]<legx-0.02)]=3
-hgt=np.array([np.ptp(v[xb==i,1]) if (xb==i).any() else 9 for i in range(nb)])
-front=[i for i in range(nb) if edges[i]>shX+0.03 and edges[i]<v[:,0].max()-0.06]; ni=min(front,key=lambda i:hgt[i]); neckX=edges[ni]
-reg[(~limb)&(v[:,0]>neckX-0.05)]=4; reg[(~limb)&(v[:,0]>neckX+0.03)]=5
+reg,(hipX,shX,neckX)=find_regions(v)
 M=np.eye(6)[reg]; Lap=laplacian(len(v),fb)
 for _ in range(8): M=Lap@M
 M/=M.sum(1,keepdims=True)
 print('regions:',{n:int((reg==k).sum()) for k,n in enumerate(['torso','legs','arms','tail','neck','head'])},'hip %.2f shoulder %.2f neck %.2f'%(hipX,shX,neckX))
+W=[v.copy()]
+for h in H[1:]:
+    Y,e=wrap_species(v,fb,h); Y,nl=fix_limbs(v,fb,reg,Y,h); W.append(Y); print('wrap',h['name'],'error %.2f mm'%(e*1000),'limbs re-fitted',nl,flush=True)
 # bake each animal's paint into A's texture layout: rasterise A's triangles in texture space; each texel is a point on the
 # shared mesh, the same point on animal k (its wrap), the nearest point of animal k's sculpt, its texture coords, its colour
 TS=2048
