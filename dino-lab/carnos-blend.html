@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carnosaur Region Blend</title>
+<style>
+:root { --bg: #eef0ec; --panel: #fbfaf6; --ink: #22271f; --muted: #6a6f63; --accent: #2e7d5b; --stage: #4a5450; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1b1e1b; --panel: #232723; --ink: #e8eae2; --muted: #9aa094; --accent: #5fbf8f; --stage: #2a302d; } }
+:root[data-theme="dark"] { --bg: #1b1e1b; --panel: #232723; --ink: #e8eae2; --muted: #9aa094; --accent: #5fbf8f; --stage: #2a302d; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+#wrap { display: flex; height: 100%; }
+#stage { flex: 1; position: relative; min-width: 0; }
+canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+aside { width: 300px; padding: 16px; background: var(--panel); overflow: auto; box-sizing: border-box; }
+h1 { font-size: 18px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
+.s { margin-bottom: 10px; } details { border-top: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); padding: 8px 0; } summary { font-weight: 600; cursor: pointer; } .s3 { display: grid; grid-template-columns: 22px 1fr 40px; gap: 4px 8px; align-items: center; margin-top: 6px; font-size: 13px; } .s3 input { accent-color: var(--accent); } .s label { display: flex; justify-content: space-between; font-weight: 600; } .s input { width: 100%; accent-color: var(--accent); }
+@media (max-width: 700px) { #wrap { flex-direction: column; } aside { width: 100%; height: 45%; } }
+</style></head>
+<body><div id="wrap"><div id="stage"><canvas id="c"></canvas></div>
+<aside><h1>Carnosaur region blend</h1><p>Three carnosaurs wrapped onto one shared mesh. Each region blends on its own (borders fade smoothly). Drag to orbit, scroll to zoom.</p>
+<div id="regions"></div><p id="stat"></p></aside></div>
+<script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id), css = n => { const c = getComputedStyle(document.documentElement).getPropertyValue(n).trim(); const h = c.replace('#', ''); return new pc.Color(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255); };
+const canvas = $('c'), app = new pc.Application(canvas, { mouse: new pc.Mouse(canvas) });
+app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
+const resize = () => { const r = canvas.parentElement.getBoundingClientRect(); app.resizeCanvas(r.width, r.height); }; window.addEventListener('resize', resize);
+const cam = new pc.Entity(); cam.addComponent('camera', { clearColor: css('--stage'), fov: 35, nearClip: 0.01, farClip: 50 }); app.root.addChild(cam);
+const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.3, castShadows: true, shadowDistance: 4, shadowResolution: 2048, shadowBias: 0.3, normalOffsetBias: 0.06 }); key.setEulerAngles(45, 35, 0); app.root.addChild(key);
+const fill = new pc.Entity(); fill.addComponent('light', { type: 'directional', intensity: 0.5, color: new pc.Color(0.75, 0.85, 1) }); fill.setEulerAngles(-20, -150, 0); app.root.addChild(fill);
+app.scene.ambientLight = new pc.Color(0.35, 0.36, 0.34);
+const ground = new pc.Entity(); ground.addComponent('render', { type: 'plane' }); ground.setLocalScale(4, 1, 4);
+const gm = new pc.StandardMaterial(); gm.diffuse = new pc.Color(0.42, 0.5, 0.36); gm.gloss = 0.1; gm.update(); ground.render.meshInstances[0].material = gm; app.root.addChild(ground);
+const orbit = { yaw: 30, pitch: -12, dist: 1.8, target: new pc.Vec3(0, 0.12, 0) };
+let drag = null;
+canvas.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e => { if (!drag) return; orbit.yaw -= (e.clientX - drag[0]) * 0.4; orbit.pitch = Math.max(-85, Math.min(10, orbit.pitch - (e.clientY - drag[1]) * 0.3)); drag = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.3, Math.min(5, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
+  cam.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.target); });
+resize(); app.start();
+
+// the shared mesh (carnos_base.glb): base positions + one morph target (offsets) per animal; region masks (carnos_regions.json)
+// give every vertex a soft share of each region, and each region has its own blend of the three animals
+Promise.all([fetch('carnos_base.b64.txt').then(r => r.text()).then(t => Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0)).buffer), fetch('carnos_regions.json').then(r => r.json())]).then(([buf, RG]) => {
+  const dv = new DataView(buf), jl = dv.getUint32(12, true), J = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl))), bin = 20 + jl + 8;
+  const acc = i => { const a = J.accessors[i], v = J.bufferViews[a.bufferView], n = { SCALAR: 1, VEC3: 3 }[a.type], T = { 5126: Float32Array, 5125: Uint32Array }[a.componentType];
+    return new T(buf.slice(bin + (v.byteOffset || 0) + (a.byteOffset || 0), bin + (v.byteOffset || 0) + (a.byteOffset || 0) + a.count * n * T.BYTES_PER_ELEMENT)); };
+  const pr = J.meshes[0].primitives[0], P0 = acc(pr.attributes.POSITION), I = acc(pr.indices), D = pr.targets.map(t => acc(t.POSITION)), n = P0.length / 3;
+  const mesh = new pc.Mesh(app.graphicsDevice), P = new Float32Array(P0.length);
+  const mat = new pc.StandardMaterial(); mat.diffuse = new pc.Color(0.5, 0.36, 0.55); mat.gloss = 0.35; mat.update();
+  const mi = new pc.MeshInstance(mesh, mat); mi.cull = false;
+  const ent = new pc.Entity(); ent.addComponent('render', { meshInstances: [mi] }); app.root.addChild(ent);
+  const normals = () => { const N = new Float32Array(P.length);
+    for (let t = 0; t < I.length; t += 3) { const a = I[t] * 3, b = I[t+1] * 3, c = I[t+2] * 3, ex = P[b]-P[a], ey = P[b+1]-P[a+1], ez = P[b+2]-P[a+2], fx = P[c]-P[a], fy = P[c+1]-P[a+1], fz = P[c+2]-P[a+2];
+      const x = ey*fz-ez*fy, y = ez*fx-ex*fz, z = ex*fy-ey*fx; for (const v of [a, b, c]) { N[v] += x; N[v+1] += y; N[v+2] += z; } }
+    for (let v = 0; v < N.length; v += 3) { const l = Math.hypot(N[v], N[v+1], N[v+2]) || 1; N[v] /= l; N[v+1] /= l; N[v+2] /= l; } return N; };
+  // sliders: an "all regions" row that sets every region, then one row of A/B/C per region
+  const names = ['All regions', ...RG.regions.map(r => r[0].toUpperCase() + r.slice(1))], nr = RG.regions.length, M = RG.mask, ani = ['A', 'B', 'C'];
+  $('regions').innerHTML = names.map((nm, r) => `<details ${r === 0 ? 'open' : ''}><summary>${nm}</summary><div class="s3">${ani.map((a, k) =>
+    `<span>${a}</span><input type="range" id="w${r}_${k}" min="0" max="1" step="0.01" value="${k === 0 ? 1 : 0}"><output id="o${r}_${k}"></output>`).join('')}</div></details>`).join('');
+  let first = true;
+  const blend = () => {
+    const W = []; for (let r = 1; r <= nr; r++) { const w = [0, 1, 2].map(k => +$(`w${r}_${k}`).value), s = w[0] + w[1] + w[2] || 1; W.push(w.map(x => x / s)); w.forEach((x, k) => $(`o${r}_${k}`).textContent = Math.round(x / s * 100) + '%'); }
+    for (let v = 0; v < n; v++) {
+      const c = [0, 0, 0]; for (let r = 0; r < nr; r++) { const m = M[v * nr + r]; if (m) for (let k = 0; k < 3; k++) c[k] += m * W[r][k]; }
+      for (let a = 0; a < 3; a++) { const i = v * 3 + a; P[i] = P0[i] + c[0] * D[0][i] + c[1] * D[1][i] + c[2] * D[2][i]; } }
+    mesh.setPositions(P); mesh.setNormals(normals()); if (first) { mesh.setIndices(I); first = false; } mesh.update();
+    $('stat').textContent = n.toLocaleString() + ' shared vertices';
+  };
+  for (let r = 0; r <= nr; r++) for (const k of [0, 1, 2]) $(`w${r}_${k}`).addEventListener('input', e => {
+    if (r === 0) for (let q = 1; q <= nr; q++) $(`w${q}_${k}`).value = e.target.value;   // "all regions" drives every region
+    blend(); });
+  [0, 1, 2].forEach(k => $(`o0_${k}`).textContent = '');
+  blend();
+}).catch(e => { $('stat').textContent = 'Could not load the carnosaur mesh: ' + e.message; });
+})();
+</script></body></html>
