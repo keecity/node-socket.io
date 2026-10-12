@@ -61,7 +61,7 @@ H=[T2[0]]+H+[T2[1]]
 # regions (rest shape): anything hanging below the belly's centre line is a limb (legs at the back, arms at the front,
 # split by 2-means on where they hang from); in front of the narrowest point ahead of the chest is neck then head;
 # behind the legs is tail; the rest is torso
-def find_regions(v):
+def find_regions(v,biped=True):
     L=np.ptp(v[:,0]); x0=v[:,0].min(); nb=60; edges=np.linspace(x0,v[:,0].max(),nb+1); xb=np.clip(((v[:,0]-x0)/L*nb).astype(int),0,nb-1)
     halfw=np.array([np.abs(v[xb==i,2]).max() if (xb==i).any() else 0 for i in range(nb)])
     belly=np.array([v[(xb==i)&(np.abs(v[:,2])<0.25*halfw[i]+1e-9),1].min() if ((xb==i)&(np.abs(v[:,2])<0.25*halfw[i]+1e-9)).any() else 0 for i in range(nb)])
@@ -72,7 +72,7 @@ def find_regions(v):
     hipX,shX=np.sort(c2); split=0.5*(hipX+shX)
     reg=np.zeros(len(v),int)                                             # 0 torso 1 legs 2 arms 3 tail 4 neck 5 head
     reg[limb&(v[:,0]<split)]=1; reg[limb&(v[:,0]>=split)]=2
-    reg[(reg==2)&(v[:,1]<0.33*np.ptp(v[:,1]))]=1                          # arms never reach the ground: a forward leg under the chest is leg
+    if biped: reg[(reg==2)&(v[:,1]<0.33*np.ptp(v[:,1]))]=1                # a biped's arms never reach the ground: a forward leg under the chest is leg
     legx=v[reg==1,0].min(); reg[(~limb)&(v[:,0]<legx-0.02)]=3
     hgt=np.array([np.ptp(v[xb==i,1]) if (xb==i).any() else 9 for i in range(nb)])
     front=[i for i in range(nb) if edges[i]>shX+0.03 and edges[i]<v[:,0].max()-0.06]; ni=min(front,key=lambda i:hgt[i]); neckX=edges[ni]
@@ -84,7 +84,7 @@ def side_key(reg,v):   # limbs are matched side by side (left leg to left leg), 
 # leg onto the other), leaving strands. Limb vertices are re-fitted to the same limb on the same side of the animal
 # (when the animal's limbs are found), with their offsets lightly smoothed; everything else keeps its wrap
 def fix_limbs(v,fb,regb,X,h):
-    regt,_=find_regions(h['Q']); S,_=sample(h['Q'],h['I'],0.002); _,nv_=cKDTree(h['Q']).query(S); kt=side_key(regt,h['Q'])[nv_]; kb=side_key(regb,v)
+    regt,_=find_regions(h['Q'],biped=h['name']!='triceratops'); S,_=sample(h['Q'],h['I'],0.002); _,nv_=cKDTree(h['Q']).query(S); kt=side_key(regt,h['Q'])[nv_]; kb=side_key(regb,v)
     limbk=[k for k in np.unique(kb) if k%10 in (1,2) and (kt==k).sum()>200]
     if not limbk: return X,0
     trees={k:cKDTree(S[kt==k]) for k in limbk}; Lap=laplacian(len(v),fb); lm=np.isin(kb,limbk)
@@ -94,7 +94,7 @@ def fix_limbs(v,fb,regb,X,h):
         X=np.where(lm[:,None],X+0.5*(T-X),X); D=X-v; D2=0.7*D+0.3*(Lap@D); X=np.where(lm[:,None],v+D2,X)
     return X,len(limbk)
 v=H[0]['Q'].copy(); fb=H[0]['I'].copy(); print('base:',H[0]['name'],len(v),'verts',flush=True)
-reg,(hipX,shX,neckX)=find_regions(v)
+reg,(hipX,shX,neckX)=find_regions(v,biped=False)   # the base walks on four legs: its front limbs reach the ground
 M=np.eye(6)[reg]; Lap=laplacian(len(v),fb)
 for _ in range(8): M=Lap@M
 M/=M.sum(1,keepdims=True)
