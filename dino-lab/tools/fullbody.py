@@ -1,8 +1,8 @@
 """Full bodies (body + legs + arms in one sculpt) from fullbody_sculpts.glb: three bodies stacked on the sheet (heavy at
 the bottom, then medium, then slim), each a main mesh plus its loose claws. The medium body also carries an extra
 pair of loose toes (the two 352-vertex pieces), which are dropped. Each body is centred (z = 0 mirror plane, feet at
-y = 0, neck end toward +x), a median-SDF base body is built, and the base is wrapped onto each sculpt so all three
-share one topology. Outputs fullbody_base.glb (base + one morph target per body)."""
+y = 0, neck end toward +x) and mirrored (one side copied across z = 0, so the legs stand side by side); the medium
+sculpt is the base and is wrapped onto the other two so all three share one topology. Outputs fullbody_base.glb (base + one morph target per body)."""
 import sys; sys.path.insert(0,'.')
 import numpy as np, json, struct
 from scipy.spatial import cKDTree
@@ -39,6 +39,15 @@ for name,r in zip(['heavy','medium','slim'],mains):
     keep=[r]+[q for q,n in zip(comps,cnt) if n<4000 and n!=352 and y0-0.02<V[root==q][:,1].min()<y0+0.1]   # its claws, not the extra toes
     m=np.isin(root,keep); vs=np.where(m)[0]; rm=-np.ones(len(V),int); rm[vs]=np.arange(len(vs)); I=rm[F[m[F[:,0]]]]; Q=V[vs].copy()
     Q-=[0.5*(Q[:,0].min()+Q[:,0].max()),Q[:,1].min(),0.5*(Q[:,2].min()+Q[:,2].max())]
+    # mirror: keep the +z side (its leg, arm and claws) and copy it across z = 0, so the legs stand side by side.
+    # Triangles are kept by their centre; the cut edge is snapped onto the plane and welded to its mirror
+    keepT=Q[I].mean(1)[:,2]>0; I=I[keepT]; used=np.unique(I); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); Q=Q[used]; I=rm[I]
+    from collections import Counter
+    e=Counter(tuple(sorted(x)) for t in I for x in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0]))); bnd=np.unique([v for k,c in e.items() if c==1 for v in k])
+    seam=bnd[Q[bnd,2]<0.012]; Q[seam,2]=0
+    mir=np.arange(len(Q))+len(Q); mir[seam]=seam                     # seam vertices are shared by both halves
+    QM=Q*[1,1,-1]; I=np.vstack([I,mir[I][:,[0,2,1]]]); Q=np.vstack([Q,QM])
+    used=np.unique(I); rm=-np.ones(len(Q),int); rm[used]=np.arange(len(used)); Q=Q[used]; I=rm[I]
     H.append(dict(name=name,Q=Q,I=I)); print(name,'verts',len(Q),'pieces',len(keep),'size',np.ptp(Q,0).round(3))
 # the base is the medium sculpt itself (a median of the three would wash out the thin legs and arms)
 v=H[1]['Q'].copy(); fb=H[1]['I'].copy()   # not mirrored: the bodies stand mid-stride, one leg forward, one back
