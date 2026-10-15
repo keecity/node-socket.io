@@ -336,6 +336,26 @@ class Particles {
 const T_SMOKE = texLoader.load('assets/smoke.png'), T_FIRE = texLoader.load('assets/fire.png');
 const particlesA = new Particles(8000, true), particlesN = new Particles(6000, false, T_SMOKE), particlesF = new Particles(3000, true, T_FIRE);
 const PARTS = [particlesA, particlesN, particlesF];
+// ------------------------------------------------------------------ sound
+// Web Audio: every effect is a short clip from assets/sfx (missing files are simply silent). Positional sounds fade with
+// distance from the view centre and pan left/right; each sound is rate-limited so a battle never stacks hundreds of copies.
+const SFX = (() => { let ctx = null, master = null; const buf = {}, last = {}, LOOPS = {};
+  const GAP = { heli_gun: 0.09, rifle: 0.06, mech_step: 0.12, beam: 0.05, explosion: 0.08, explosion_small: 0.05, ui_click: 0.03 };
+  function init() { if (ctx) return; try { ctx = new (window.AudioContext || window.webkitAudioContext)(); master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination); } catch (e) { ctx = null; } }
+  function load(name) { if (buf[name] !== undefined || !ctx) return; buf[name] = null;
+    fetch('assets/sfx/' + name + '.mp3').then(r => r.ok ? r.arrayBuffer() : Promise.reject()).then(a => ctx.decodeAudioData(a)).then(b => { buf[name] = b; }).catch(() => { buf[name] = false; }); }
+  function play(name, at, vol = 1, rate = 1) { if (!ctx) return; if (buf[name] === undefined) return load(name); const b = buf[name]; if (!b) return;
+    const now = ctx.currentTime; if (now - (last[name] || 0) < (GAP[name] || 0.02)) return; last[name] = now;
+    let g = vol, pan = 0; if (at) { const c = camD(), dx = wd(at.x - c.x), dz = wd(at.z - c.z), d = Math.hypot(dx, dz) * S, zoom = Math.max(60, cam.dist);
+      g *= 1 / (1 + Math.pow(d / (zoom * 0.9), 2)); if (g < 0.02) return; const yaw = cam.yaw; pan = clamp((dx * Math.cos(yaw) - dz * Math.sin(yaw)) * S / (zoom * 0.8), -0.9, 0.9); }
+    const src = ctx.createBufferSource(); src.buffer = b; src.playbackRate.value = rate * (0.94 + Math.random() * 0.12); const gn = ctx.createGain(); gn.gain.value = g;
+    let node = src.connect(gn); if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; gn.connect(p); p.connect(master); } else gn.connect(master); src.start(); }
+  function loop(name, vol) { if (!ctx) return; if (buf[name] === undefined) load(name); let L = LOOPS[name];
+    if (!L && buf[name]) { const src = ctx.createBufferSource(); src.buffer = buf[name]; src.loop = true; const g = ctx.createGain(); g.gain.value = 0; src.connect(g); g.connect(master); src.start(); L = LOOPS[name] = { src, g }; }
+    if (L) L.g.gain.setTargetAtTime(vol, ctx.currentTime, 0.8); }
+  const unlock = () => { init(); if (ctx && ctx.state === 'suspended') ctx.resume(); for (const n of ['ui_click', 'explosion', 'explosion_small', 'beam', 'mech_step', 'ambience_day', 'ambience_night']) load(n); };
+  addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
+  return { play, loop, get on() { return !!ctx; }, setVolume: v => { if (master) master.gain.value = v; } }; })();
 const FX = {
   sparks(p, n, col = [1, 0.8, 0.5], speed = 1.6) { for (let i = 0; i < n; i++) { const a = rand(0, 6.28), e = rand(-0.2, 1.1), s = speed * rand(0.3, 1);
     particlesA.emit(p.x, p.y, p.z, Math.cos(a) * s, e * s, Math.sin(a) * s, rand(0.15, 0.45), 0.018, 0.004, [...col, 1], [col[0], col[1] * 0.5, col[2] * 0.3, 0], 3.2, 0.8); } },
@@ -346,7 +366,7 @@ const FX = {
     particlesN.emit(p.x, p.y + 0.01, p.z, Math.cos(ang) * s, rand(0.2, 1) * up, Math.sin(ang) * s, rand(...life), size[0], size[1] * rand(0.7, 1.2), [0.62, 0.55, 0.44, a], [0.7, 0.64, 0.54, 0], 0.02, 1.8); } },
   fire(p, n, sz = 0.07) { for (let i = 0; i < n; i++) particlesF.emit(p.x + rand(-.03, .03), p.y + sz * 0.6, p.z + rand(-.03, .03), rand(-.03, .03), rand(0.15, 0.35), rand(-.03, .03), rand(0.35, 0.7), sz * 2.2, sz * 1.1, [1, 0.95, 0.85, 1], [1, 0.6, 0.3, 0], -0.1, 0.4); },
   flash(p, size = 0.35, col = [1, 0.85, 0.6]) { particlesA.emit(p.x, p.y, p.z, 0, 0, 0, 0.12, size, size * 1.6, [...col, 1], [...col, 0]); },
-  explosion(p, power = 1) { FX.flash(p, 0.7 * power); for (let i = 0; i < 40 * power; i++) { const a = rand(0, 6.28), e = rand(0, 1), s = rand(0.3, 1.2) * power;
+  explosion(p, power = 1) { SFX.play(power >= 0.8 ? 'explosion' : 'explosion_small', p, Math.min(1.2, 0.5 + power * 0.5), power >= 0.8 ? 1 : 1.1); FX.flash(p, 0.7 * power); for (let i = 0; i < 40 * power; i++) { const a = rand(0, 6.28), e = rand(0, 1), s = rand(0.3, 1.2) * power;
       particlesA.emit(p.x, p.y + 0.03, p.z, Math.cos(a) * s, e * s * 1.2, Math.sin(a) * s, rand(0.3, 0.7), rand(0.05, 0.12) * power, 0.02, [1, 0.7, 0.3, 1], [0.8, 0.15, 0.05, 0], 0.4, 2.2); }
     FX.sparks(p, 40 * power, [1, 0.75, 0.4], 2.6 * power); FX.smoke(p, 18 * power, { size: [0.15, 0.8 * power], life: [1.8, 3.5], col: [0.2, 0.18, 0.18], a: 0.7, vel: 0.35, up: 0.35 }); addShake(0.45 * power, p); },
   glass(p, n) { for (let i = 0; i < n; i++) particlesA.emit(p.x, p.y, p.z, rand(-.6, .6), rand(0, .9), rand(-.6, .6), rand(0.3, 0.7), 0.012, 0.006, [0.7, 0.85, 1, 0.9], [0.5, 0.7, 1, 0], 3.5, 0.4); },
@@ -603,7 +623,7 @@ function detach(id, v, spin = 8) {
   debris.push({ ch, grp, i: ch.i, p: _P.clone(), q: _Q.clone(), s: _S.clone(), v: v.clone(), w: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(spin * rand(0.3, 1)), sleep: 0, age: 0 });
   if (debris.length > 2500) debris.shift();
 }
-function propDestroyed(p) { if (!p.alive) return; p.alive = false; p.town.destroyed++; if (p.kind === 'house') p.town.warHeat = Math.min(6, (p.town.warHeat || 0) + 0.6);
+function propDestroyed(p) { if (!p.alive) return; if (p.kind === 'house' || p.kind === 'tower') SFX.play('collapse', p, 0.8); p.alive = false; p.town.destroyed++; if (p.kind === 'house') p.town.warHeat = Math.min(6, (p.town.warHeat || 0) + 0.6);
   const c = new THREE.Vector3(p.x, p.y0 + p.h * 0.3, p.z);
   if (p.kind === 'house' || p.kind === 'tower') { FX.dust(c, 26, { size: [0.15, 0.7], life: [1.6, 3.2], vel: 0.55, up: 0.2, a: 0.55 }); FX.smoke(c, 8, { size: [0.2, 0.9], col: [0.5, 0.46, 0.42], a: 0.5 }); addShake(0.28, c); if (p.fire) fires.push({ x: p.x, z: p.z, t: rand(6, 11) }); }
   if (p.kind === 'car') { FX.explosion(new THREE.Vector3(p.x, p.y0 + 0.03, p.z), 0.8); fires.push({ x: p.x, z: p.z, t: rand(5, 9) }); scorchMarks.add(p.x, p.z, 0, 0.35, 0.35); impact(new THREE.Vector3(p.x, p.y0 + 0.03, p.z), 0.22, null, 1.4, 'blast'); }
@@ -952,7 +972,7 @@ function scPiece(proto) { let m = null; proto.updateMatrixWorld(true); proto.tra
   const mesh = new THREE.Mesh(m.geometry, m.material); mesh.applyMatrix4(m.matrixWorld); mesh.castShadow = mesh.receiveShadow = true; const g = new THREE.Group(); g.add(mesh); return g; }
 // b: the building ({x, z, y, rot, obj}); rect: [x0, x1, z0, z1] footprint in demo units around its origin (before rotation); h: its height
 function startSite(b, rect, h, time, onDone) {
-  b.obj.visible = false; b.done = false;
+  b.obj.visible = false; b.done = false; if (b.team === 0) SFX.play('construction', b, 0.6);
   if (!scWallProto || !scTopProto) { b.obj.visible = true; b.done = true; onDone(); return; }   // no scaffold models: build instantly
   const k = 0.22, P = SC_W * k, rows = Math.max(1, Math.ceil(h * 1.05 / (SC_H * k))), top = rows * SC_H * k,   // fixed panel size, stacked in rows to the full height
      [x0, x1, z0, z1] = rect.map((v, i) => v + (i % 2 ? 1 : -1) * 0.06);
@@ -977,7 +997,7 @@ function updateSites(dt) { const c = camD();
       s.walls.forEach((w, j) => { const u = (s.t - j * s.step) / 0.25; if (u <= 0) return; const e = easeOut(Math.min(1, u)); if (!w.o.visible) { w.o.visible = true; if (!w.y) sitePuff(s, w.o.position.x, w.o.position.z); }
         if (w.y) w.o.position.y = w.y + (1 - e) * w.drop; else w.m.rotation.x = (1 - e) * Math.PI / 2; });   // ground row tips up, upper rows are lowered on top
       s.covers.forEach((cv, j) => { const u = (s.t - (s.walls.length + j) * s.step) / 0.22; if (u <= 0) return; cv.o.visible = true; cv.o.position.y = cv.y + (1 - easeOut(Math.min(1, u))) * 0.5 * s.k * SC_H; });
-      if (s.t >= s.time) { s.phase = 'down'; s.downT = 0; b.obj.visible = true; b.done = true; s.onDone(); } }
+      if (s.t >= s.time) { s.phase = 'down'; s.downT = 0; b.obj.visible = true; b.done = true; if (b.team === 0) SFX.play('build_done', null, 0.6); s.onDone(); } }
     else {
       // covers lift off, then the walls tip back down and vanish, in reverse order
       s.downT += dt; const st = Math.min(0.035, s.step * 0.6), nc = s.covers.length;
@@ -1757,7 +1777,7 @@ function soldierHit(s, amount, by) { if (!s.alive) return; s.hp -= amount; if (s
   else if (by && !s.target && (!s.order || s.order.type !== 'move')) s.target = by; return 'hit'; }
 function soldierImpact(pt, radius, power, kind) { for (const s of soldiers) { if (!s.alive || s.inHeli) continue; const d = wdist2(s.pos.x, s.pos.z, pt.x, pt.z); if (d > radius + 0.06 || pt.y > s.pos.y + SOLD_H * 1.2) continue;
   soldierHit(s, kind === 'step' || kind === 'land' ? 999 : kind === 'bullet' ? 6 : 90 * power, null); } }
-function soldierFire(s, T) { const m = new THREE.Vector3(); s.muzzle.getWorldPosition(m); m.divideScalar(S); m.x = s.pos.x + (m.x - s.root.position.x); m.z = s.pos.z + (m.z - s.root.position.z);
+function soldierFire(s, T) { SFX.play('rifle', s.pos, 0.35); const m = new THREE.Vector3(); s.muzzle.getWorldPosition(m); m.divideScalar(S); m.x = s.pos.x + (m.x - s.root.position.x); m.z = s.pos.z + (m.z - s.root.position.z);
   const tp = tgtPos(T, new THREE.Vector3()); near(tp, s.pos, tp); FX.flash(m, 0.035, [1, 0.85, 0.5]); s.recoil = 1; s.shots++;
   const miss = Math.random() < 0.25; if (!miss) { if (T.kind === 'soldier') soldierHit(T, 9, s); else damage(s, T, 2, null, false, tp.clone().sub(s.pos).setY(0).normalize(), tp.clone()); }
   else tp.add(new THREE.Vector3(rand(-0.15, 0.15), rand(-0.05, 0.1), rand(-0.15, 0.15)));
@@ -1910,7 +1930,7 @@ function updateHangars(dt) { const c = camD();
     if (!h.bay && h.buildQ.length && !h.queue.some(f => f.svc && f.svc.head && wdist2(f.pos.x, f.pos.z, ...Object.values(hgWorld(h, HG_DOOR[0], HG_DOOR[1]))) < 1.5)) { h.building = true; h.buildT += dt * pe(h.team);
       if (chance(dt * 8)) { const sp = hgWorld(h, rand(-4, 4), rand(-3, 3)); FX.sparks(new THREE.Vector3(sp.x, h.y + rand(0.2, 1.6), sp.z), 4, [1, 0.85, 0.5], 1); }
       if (h.buildT >= MECH_BUILD) { h.buildT = 0; h.building = false; const role = h.buildQ.shift(), b = hgWorld(h, HG_BAY[0], HG_BAY[1]), f = makeRobot(h.team, role, b.x, b.z); f.yaw = h.rot; applyMechLevels(f, { weapons: MECH_UP[h.team].weapons, armor: MECH_UP[h.team].armor, boost: MECH_UP[h.team].boost }); f.hp = f.maxHp;
-        h.bay = f; f.docked = h; h.job = null; undock(h); log(h.team, `<b>${TEAM_NAME[h.team]}</b> new ${role} rolls out of the hangar`); } }
+        h.bay = f; f.docked = h; h.job = null; undock(h); SFX.play('hangar_door', h, 0.9); log(h.team, `<b>${TEAM_NAME[h.team]}</b> new ${role} rolls out of the hangar`); } }
     else h.building = false;
     setDoors(h, !!(h.bay && !h.job) || h.outT > 0 || !!(h.queue[0] && h.queue[0].svc && h.queue[0].svc.head && wdist2(h.queue[0].pos.x, h.queue[0].pos.z, h.x, h.z) < 3.2)); }
   for (const team of [0, 1]) { const r = mechResearch[team]; if (!r) continue; if (!hangars.some(h => h.alive && h.done && h.team === team)) { mechResearch[team] = null; continue; }
@@ -2311,7 +2331,7 @@ function gunFX(f, dt) {
     addShake(dt * 0.4 * u * u, _mz);
   } else { f.chargeU = 0; f.glow.visible = false; }
 }
-function fireBeam(f) {
+function fireBeam(f) { SFX.play('beam', f.pos, 0.8);
   const B = f.beamFx; muzzle(f, B.a); B.dir.subVectors(f.aimPt, B.a).normalize();
   const p = new THREE.Vector3(); let len = 9, hit = null, groundHit = false;
   for (let s = 0.05; s < 9; s += 0.05) { p.copy(B.a).addScaledVector(B.dir, s);
@@ -2770,7 +2790,7 @@ function footfalls(f) {
     if (h > up) f.footUp = Object.assign(f.footUp || {}, { [s]: true });
     if (f.y < 0.02 && f.footUp && f.footUp[s] && h <= down && ['walk', 'turn', 'idle', 'land', 'attack', 'hit'].includes(f.state)) { f.footUp[s] = false;
       printLayer.add(_fp.x, _fp.z, f.yaw, 0.11 * RS, 0.165 * RS); carStomp(_fp.x, _fp.z, 0.05 * RS); FX.dust(_fp, 4, { size: [0.04, 0.2], life: [0.5, 1.0], vel: 0.3, up: 0.05, a: 0.45 });
-      addShake(f.walkMode === 'run' ? 0.05 : 0.03, _fp); impact(new THREE.Vector3(_fp.x, Hd(_fp.x, _fp.z) + 0.02, _fp.z), 0.07, null, 0.6, 'step'); }
+      addShake(f.walkMode === 'run' ? 0.05 : 0.03, _fp); SFX.play('mech_step', _fp, f.walkMode === 'run' ? 0.8 : 0.55, 0.9 + Math.random() * 0.15); impact(new THREE.Vector3(_fp.x, Hd(_fp.x, _fp.z) + 0.02, _fp.z), 0.07, null, 0.6, 'step'); }
   }
 }
 function faceTo(f, target, dt, rate = 0.0002) { let dy = target - f.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); f.yaw += dy * (1 - Math.pow(rate, dt)); return dy; }
@@ -2870,7 +2890,7 @@ function updateRobot(f, dt) {
       if (f.order && f.order.type !== 'move' && f.order.type !== 'amove') { f.flyPhase = 'down'; }
       break; }
     case 'land': skid(f, dt); if (f.st > 0.7) toIdle(f, 0.15, 0.02); break;
-    case 'draw': skid(f, dt); if (clipT(f) > 0.22) f.saberOut = true; if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
+    case 'draw': skid(f, dt); if (clipT(f) > 0.22 && !f.saberOut) { f.saberOut = true; SFX.play('saber', f.pos, 0.7); } if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
     case 'sheathe': skid(f, dt); if (clipT(f) > 0.54) f.saberOut = false; if (clipDone(f)) toIdle(f, 0.12, 0.03); break;
     case 'attack': faceTo(f, targetYaw, dt, clipT(f) < 0.2 || f.clip === 'Saber_Boost_Slash' && clipT(f) < 0.6 ? 0.00005 : 0.3); doAttack(f, d, dir, fwd, dt);
       boosting = f.clip === 'Saber_Boost_Slash' && clipT(f) > 0.1 && clipT(f) < 0.8; break;
@@ -3034,12 +3054,12 @@ const hRounds = []; const hRoundMats = [0, 1].map(i => new THREE.MeshBasicMateri
 for (let i = 0; i < 160; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.008, 0.08), hRoundMats[0]); m.visible = false; m.scale.set(3.5, 3.5, 2); m.frustumCulled = false; battleRoot.add(m); hRounds.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
 const msGeo = new THREE.CylinderGeometry(0.009, 0.009, 0.075, 8).rotateX(Math.PI / 2), msMat = new THREE.MeshStandardMaterial({ color: 0xd6d2cc, metalness: 0.4, roughness: 0.5 });
 const missiles = []; for (let i = 0; i < 40; i++) { const m = new THREE.Mesh(msGeo, msMat); m.visible = false; m.scale.setScalar(1.5); battleRoot.add(m); missiles.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0, tgt: null }); }
-function heliFireRound(h) {
+function heliFireRound(h) { SFX.play('heli_gun', h.pos, 0.5);
   toDemo(h.gunPt, tmpA); near(tmpA, h.pos, tmpA); tgtPos(h.target, tmpB); near(tmpB, h.pos, tmpB); tmpB.addScaledVector(h.target.vel, 0.15); tmpB.x += rand(-0.1, 0.1); tmpB.y += rand(-0.1, 0.08); tmpB.z += rand(-0.1, 0.1);
   const b = hRounds.find(b => !b.alive); if (!b) return; b.alive = true; b.owner = h; b.life = 1.6; b.m.material = hRoundMats[h.team]; b.m.visible = true; b.p.copy(tmpA); b.v.subVectors(tmpB, tmpA).normalize().multiplyScalar(9);
   FX.flash(tmpA, 0.07, [1, 0.85, 0.55]);
 }
-function heliFireMissile(h) {
+function heliFireMissile(h) { SFX.play('missile', h.pos, 0.7);
   const pod = h.pods[h.podI ^= 1]; toDemo(pod, tmpA); near(tmpA, h.pos, tmpA); const m = missiles.find(m => !m.alive); if (!m) return;
   const fwd = new THREE.Vector3(Math.sin(h.yaw), -0.15, Math.cos(h.yaw)).normalize();
   m.alive = true; m.owner = h; m.life = 3.2; m.tgt = h.target; m.age = 0; m.m.visible = true; m.p.copy(tmpA); m.v.copy(fwd).multiplyScalar(1.2).add(h.vel);
@@ -3183,7 +3203,7 @@ function tankHit(t, amount, by) { if (!t.alive) return; if (by && by.kind === 's
   return 'hit'; }
 function tankImpact(pt, radius, power, kind) { for (const t of tanks) { if (!t.alive || kind === 'step' || kind === 'body') continue; const d = wdist2(t.pos.x, t.pos.z, pt.x, pt.z); if (d > radius + 0.34 || pt.y > t.pos.y + 0.38 + radius) continue;
   tankHit(t, kind === 'bullet' ? 4 : kind === 'shell' ? 0 : 120 * power, null); } }
-function tankFire(t, e) { const a = t.yaw + t.tur, mz = (1.18 + 3.13) * TANK_K, m = new THREE.Vector3(wm(t.pos.x + Math.sin(a) * mz), t.pos.y + 2.33 * TANK_K, wm(t.pos.z + Math.cos(a) * mz));
+function tankFire(t, e) { SFX.play('tank_cannon', t.pos, 0.9); const a = t.yaw + t.tur, mz = (1.18 + 3.13) * TANK_K, m = new THREE.Vector3(wm(t.pos.x + Math.sin(a) * mz), t.pos.y + 2.33 * TANK_K, wm(t.pos.z + Math.cos(a) * mz));
   const to = new THREE.Vector3(e.pos.x, (e.kind === 'robot' ? groundY(e) + 0.4 * RS : e.pos.y + (e.kind === 'soldier' ? SOLD_H * 0.5 : 0.08)), e.pos.z), miss = chance(0.15) ? rand(0.15, 0.35) : 0;
   if (miss) { to.x = wm(to.x + rand(-1, 1) * miss); to.z = wm(to.z + rand(-1, 1) * miss); to.y = Hd(to.x, to.z); }
   const L = Math.hypot(wd(to.x - m.x), wd(to.z - m.z), to.y - m.y), mesh = new THREE.Mesh(shellGeo, shellMat); battleRoot.add(mesh);
@@ -3699,6 +3719,7 @@ const Battle = {
   setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
   waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT, citizen, get focusPed() { return focusPed; }, set focusPed(v) { focusPed = v; },
   producerAt2D: (xw, zw) => producerAt2D(wm(xw / S), wm(zw / S)), setPickFlag, clearPickFlag: p => { p.pickFlag = null; p.obstructed = false; p.obstructT = 0; showFlag(p); }, FLAG_R,
+  SFX,
   POWER, POWER_USE, PLANT_CAP, PLANT_UP, upgradePlant, plantAt2D: (xw, zw) => plantAt2D(wm(xw / S), wm(zw / S)),
   CR, CR_RATE, PRICE, canAfford, spend, researchPrice,
   root: battleRoot, peds, outposts, OUTPOST_COST, airbases, AB_COST, HELI_COST, HELI_BUILD, AB_CAP, UPGRADES, HELI_UP, research, canPlaceAirbase, queueHeli, startResearch,
