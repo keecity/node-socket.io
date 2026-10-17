@@ -2161,8 +2161,8 @@ function bmRender() { const grid = $('bmGrid'), tabs = $('bmTabs');
     const pw = Battle.POWER_USE && Battle.POWER_USE[k] ? `<span class="pw">⚡ ${Battle.POWER_USE[k]} MW</span>` : '';
     return `<button class="bmCard${poor ? ' poor' : ''}" data-k="${k}" title="${poor || ''}"><div class="top"><img src="${icon}" alt=""><b>${B.name.toUpperCase()}</b></div><div class="desc">${desc.charAt(0).toUpperCase() + desc.slice(1)}</div><div class="cost">${costTxt(B.cost())}</div>${pw}</button>`; }).join('');
   grid.querySelectorAll('.bmCard').forEach(c => c.onclick = () => { const k = c.dataset.k, poor = Battle.canAfford(0, BUILDS[k].cost()); if (poor) return feedMsg(poor); closeBuildMenu(); startPlacing(k); }); }
-function openBuildMenu() { if (placing) stopPlacing(); $('buildMenu').classList.remove('uihidden'); bmRender(); }
-function closeBuildMenu() { $('buildMenu').classList.add('uihidden'); }
+function openBuildMenu() { REC.event('build menu open'); if (placing) stopPlacing(); $('buildMenu').classList.remove('uihidden'); bmRender(); }
+function closeBuildMenu() { REC.event('build menu close'); $('buildMenu').classList.add('uihidden'); }
 $('bmClose').addEventListener('click', closeBuildMenu);
 $('buildMenu').addEventListener('mousedown', e => { if (e.target.id === 'buildMenu') closeBuildMenu(); });
 addEventListener('keydown', e => { if ((e.key === 'b' || e.key === 'B') && e.target === document.body) { $('buildMenu').classList.contains('uihidden') ? openBuildMenu() : closeBuildMenu(); } if (e.key === 'Escape') closeBuildMenu(); });
@@ -2290,7 +2290,29 @@ const AQ_STEPS = [
 function autoQuality(now) { const A = AQ; if (A.last) { const ft = now - A.last; if (ft < 20000) { A.n++; A.t0 += ft; } } A.last = now;
   if (A.n < 2 || A.t0 < 2500 || now < A.wait) return; const avg = A.t0 / A.n; A.n = 0; A.t0 = 0;   // judged every ~3 s of play, however few frames that is
   if (avg > 40 && A.level < AQ_STEPS.length) { if (avg > 250) { while (A.level < AQ_STEPS.length - 1) AQ_STEPS[A.level++][1](); }   // very slow: go straight to the lightest settings
-    const [name, fn] = AQ_STEPS[A.level++]; fn(); A.wait = now + 1500; feedMsg('Performance mode: ' + name + ' (' + Math.round(1000 / avg) + ' fps)'); } }
+    const [name, fn] = AQ_STEPS[A.level++]; fn(); A.wait = now + 1500; REC.event('performance mode: ' + name); feedMsg('Performance mode: ' + name + ' (' + Math.round(1000 / avg) + ' fps)'); } }
+// ---- flight recorder: every frame's timings go into a ring buffer; when the frame rate collapses, a snapshot of the last
+// few seconds plus the device, scene and game state is saved to this artifact's database (collection "perf") for Claude to read.
+const REC = (() => { const N = 240, F = [], ev = [], sid = Math.random().toString(36).slice(2, 8); let db = null, sent = 0, lastSent = 0, last = 0, beat = 0, slowRun = 0;
+  if (window.claude && claude.use) claude.use('db').then(d => { db = d; }).catch(() => {});
+  const gpu = (() => { try { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch (e) { return '?'; } })();
+  function event(t) { ev.push([Math.round(performance.now()), t]); if (ev.length > 60) ev.shift(); }
+  function state() { const B = Battle, cnt = L => L ? L.filter(x => x.alive !== false).length : 0, mi = renderer.info.memory;
+    return { cam: { x: Math.round(cam.x), z: Math.round(cam.z), dist: Math.round(cam.dist), yaw: +cam.yaw.toFixed(2), pitch: +cam.pitch.toFixed(2) }, tod: +(TOD.t * 24).toFixed(1), aq: AQ.level, ssao: SSAO.on, nearR: NEARU.r.value,
+      pr: renderer.getPixelRatio(), canvas: [renderer.domElement.width, renderer.domElement.height], programs: renderer.info.programs.length, geos: mi.geometries, tex: mi.textures, sceneChildren: scene.children.length,
+      units: B.selectables().length, mechs: B.selectables().filter(u => u.kind === 'robot').length, enemies: B.enemiesVisible ? B.enemiesVisible().length : 0, peds: B.peds ? B.peds.filter(p => p.shown).length : 0,
+      buildings: [B.outposts, B.airbases, B.pumpjacks, B.camps, B.mines, B.farms, B.warehouses, B.hangars, B.waterTowers].reduce((a, L) => a + cnt(L), 0), heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null }; }
+  function send(kind, why) { if (!db || sent >= 25) return; sent++; lastSent = performance.now();
+    const doc = { kind, why, sid, at: new Date().toISOString(), ua: navigator.userAgent, gpu, dpr: devicePixelRatio, screen: [innerWidth, innerHeight], mobile: isMob(),
+      frames: F.slice(-150).map(f => f.map(v => Math.round(v * 10) / 10)), frameCols: 'dt,logic,stream,draw,ui,calls,trisK,programs,modal', events: ev.slice(-40), state: state() };
+    db.collection('perf').add(doc).catch(e => console.warn('perf report failed', e)); }
+  function frame(now, a, b, c, d, modal) { const dt = last ? now - last : 16; last = now; const ri = renderer.info.render, nprog = renderer.info.programs.length;
+    if (F.length && nprog > F[F.length - 1][7]) event('shader compiled (' + nprog + ' programs)');
+    F.push([dt, a, b, c, d, ri.calls, ri.triangles / 1000, nprog, modal ? 1 : 0]); if (F.length > N) F.shift();
+    slowRun = dt > 200 ? slowRun + 1 : 0; const t = performance.now();
+    if (t - lastSent > 15000 && (dt > 700 || slowRun >= 5)) send('slow', dt > 700 ? 'single frame ' + Math.round(dt) + ' ms' : '5 frames in a row over 200 ms');
+    if (t - beat > 90000) { beat = t; if (F.length > 60) send('heartbeat', 'periodic'); } }
+  return { frame, event }; })();
 // ---- performance overlay (cheat PERF): frame time split into game logic, terrain streaming, drawing and UI
 renderer.info.autoReset = false;
 const PERF = { on: false, n: 0, acc: [0, 0, 0, 0], worst: 0, last: 0, t0: 0 };
@@ -2326,7 +2348,7 @@ $('logo').addEventListener('click', openCheat);
 addEventListener('keydown', e => { if ((e.key === '`' || e.key === '~') && e.target.id !== 'chIn') { e.preventDefault(); $('cheat').classList.contains('uihidden') ? openCheat() : closeCheat(); } });
 $('chIn').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') return closeCheat(); if (e.key !== 'Enter') return;
   const c = CHEATS[$('chIn').value.trim().toLowerCase().replace(/\s+/g, '')]; $('chMsg').style.color = c ? '#7ee08a' : '#ff7a6a';
-  if (c) { c[1](); $('chMsg').textContent = 'Cheat activated: ' + c[0]; feedMsg('Cheat activated: ' + c[0]); } else $('chMsg').textContent = 'Unknown code'; $('chIn').value = ''; });
+  if (c) { REC.event('cheat ' + $('chIn').value.trim()); c[1](); $('chMsg').textContent = 'Cheat activated: ' + c[0]; feedMsg('Cheat activated: ' + c[0]); } else $('chMsg').textContent = 'Unknown code'; $('chIn').value = ''; });
 // ---- citizen panel: click a person to meet them
 let czSel = null;
 function pickCitizen(x, y) { let best = null, bd = 22; for (const p of Battle.peds) { if (!p.shown) continue; const t = Battle.towns[p.ti]; if (t && t.idx !== 0 && !t.found && Battle.fogOn) continue;
@@ -2505,9 +2527,9 @@ window.fellTree = t => { const T = t.ch.trees; if (!T || T.inst[t.k * 4 + 3] <= 
 window.clearTreesIn = test => { for (const ch of chunks) { const T = ch.trees; if (!T) continue; let hit = false;
   for (let k = 0; k < T.n; k++) if (T.inst[k * 4 + 3] > 0 && test(T.inst[k * 4], T.inst[k * 4 + 2])) { T.inst[k * 4 + 3] = 0; hit = true; }
   if (hit) T.geo.attributes.aInst.needsUpdate = true; } lastNearKey = ''; };
-function afterChunks(nearList, nearKey) {
+function afterChunks(nearList, nearKey) { if (frameNo % 2 === 0 && nearList.length) {}
   { const q = 15, fx = Math.round(cam.x / q) * q, fz = Math.round(cam.z / q) * q; NEARU.c.value.set(fx, fz); nearKey += fx + ',' + fz + ',' + NEARU.r.value; }   // detail follows the view centre in 15 m steps
-  if (nearKey !== lastNearKey) { lastNearKey = nearKey; rebuildNear(nearList); }
+  if (nearKey !== lastNearKey) { lastNearKey = nearKey; const t = performance.now(); rebuildNear(nearList); const ms = performance.now() - t; if (ms > 8) REC.event('near trees rebuilt ' + ms.toFixed(0) + ' ms'); }
   const sz = renderer.getDrawingBufferSize(new THREE.Vector2());
   for (const lib of treeLib) if (lib.leaves) lib.leaves.material.uniforms.uScale.value = sz.y / 2;
 }
@@ -2621,12 +2643,12 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   let last = performance.now();
   renderer.setAnimationLoop(now => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    renderer.info.reset(); const P = PERF.on, t0 = P && performance.now();
+    renderer.info.reset(); const P = true, t0 = performance.now();
     update(dt); if (!PAUSED) updateDayNight(dt); const t1 = P && performance.now(); const modal = MODAL();
     if (!modal) { placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now); }
     waterMat.uniforms.uTime.value = now / 1000; const t2 = P && performance.now();
     if (!modal) renderFrame(); const t3 = P && performance.now(); if (!modal) autoQuality(now);   // a full-screen menu freezes the 3D view so it opens instantly
-    drawMini(); updateUI(dt); if (P) perfTick(now, t1 - t0, t2 - t1, t3 - t2, performance.now() - t3);
+    drawMini(); updateUI(dt); const t4 = performance.now(); if (PERF.on) perfTick(now, t1 - t0, t2 - t1, t3 - t2, t4 - t3); REC.frame(now, t1 - t0, t2 - t1, t3 - t2, t4 - t3, modal);
   });
 }, 30));
 </script>
