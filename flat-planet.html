@@ -1417,16 +1417,18 @@ function buildTreeLibrary() {
 
   impostorMat = new THREE.ShaderMaterial({
     uniforms: { uAtlas: { value: rt.texture }, uVar: { value: treeLib.map(t => new THREE.Vector4(t.C.x, t.C.y, t.C.z, t.R)) },
-                uH: { value: HORIZON }, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on, uDayK: DAYK },
+                uH: { value: HORIZON }, uNearC: NEARU.c, uNearR: NEARU.r, uNear: { value: FOG_NEAR }, uFar: { value: FOG_FAR }, uWarFog: WARFOG.tex, uWarOn: WARFOG.on, uDayK: DAYK },
     vertexShader: `
       attribute vec4 aInst; attribute vec2 aInst2; varying vec2 vWarXZ;
-      uniform vec4 uVar[${NV}];
+      uniform vec4 uVar[${NV}]; uniform vec2 uNearC; uniform float uNearR;
       varying vec2 vUv; varying float vShade, vDist;
       void main(){
         int vi = int(aInst2.x + .5);
         vec4 V = uVar[0];
         for (int i = 0; i < ${NV}; i++) if (i == vi) V = uVar[i];
         vec3 cen = (modelMatrix * vec4(aInst.xyz + V.xyz * aInst.w, 1.)).xyz;
+        vec3 base = (modelMatrix * vec4(aInst.xyz, 1.)).xyz;
+        if (distance(base.xz, uNearC) < uNearR) { gl_Position = vec4(2., 2., 2., 1.); return; }   // drawn in full detail instead
         vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
         vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
         vec3 wp = cen + (right * position.x + up * position.y) * V.w * aInst.w;
@@ -1498,7 +1500,7 @@ function makeLeafMaterial(tex, size) {
 }
 // gather trees of all chunks near the camera into the per-design instanced meshes
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color(), _up = new THREE.Vector3(0, 1, 0);
-let lastNearKey = '';
+let lastNearKey = ''; const NEARU = { c: { value: new THREE.Vector2() }, r: { value: 70 } };   // full-detail trees only within r metres of the view centre; impostors elsewhere
 function rebuildNear(list) {
   const counts = new Array(NV).fill(0);
   for (const [ch, ox, oz] of list) {
@@ -1508,6 +1510,7 @@ function rebuildNear(list) {
       if (i >= NEAR_CAP) continue;
       counts[v]++;
       const x = T.inst[k * 4] + ox * SIZE, y = T.inst[k * 4 + 1], z = T.inst[k * 4 + 2] + oz * SIZE, sc = T.inst[k * 4 + 3];
+      if ((x - NEARU.c.value.x) ** 2 + (z - NEARU.c.value.y) ** 2 > NEARU.r.value ** 2) { counts[v]--; continue; }
       const sh = T.inst2[k * 2 + 1], r = T.rot[k];
       _m4.compose(_p.set(x, y, z), _q.setFromAxisAngle(_up, r), _s.set(sc, sc, sc));
       lib.trunk.setMatrixAt(i, _m4); lib.trunk.setColorAt(i, _c.setRGB(sh, sh, sh));
@@ -2274,6 +2277,20 @@ for (const k in MK) { const box = $(MK[k].el).closest('.res'); box.style.cursor 
 let flagFor = null;
 addEventListener('keydown', e => { if (!flagFor) return; if (e.key === 'Escape') { flagFor = null; hint(''); } if (e.key === 'x' || e.key === 'X') { Battle.clearPickFlag(flagFor); feedMsg('Pickup flag removed: trucks pick the nearest clear spot'); flagFor = null; } });
 el.addEventListener('mousedown', e => { if (e.button === 2 && flagFor) { flagFor = null; hint(''); } });
+// ---- full-screen menus pause 3D drawing; automatic performance mode steps graphics down when frames are slow
+const MODAL = () => !$('buildMenu').classList.contains('uihidden') || !$('cheat').classList.contains('uihidden');
+const AQ = { level: 0, t0: 0, n: 0, last: 0, wait: 0 }, BASE_PR = renderer.getPixelRatio();
+const AQ_STEPS = [
+  ['fewer detailed trees', () => { NEARU.r.value = 35; }],
+  ['ambient occlusion off', () => { SSAO.on = false; }],
+  ['lower resolution', () => { renderer.setPixelRatio(Math.min(1, BASE_PR)); renderer.setSize(innerWidth, innerHeight); }],
+  ['smaller shadows', () => { const L = window.sunL; if (L) { L.shadow.mapSize.set(1024, 1024); if (L.shadow.map) { L.shadow.map.dispose(); L.shadow.map = null; } } }],
+  ['low resolution', () => { renderer.setPixelRatio(0.7); renderer.setSize(innerWidth, innerHeight); }],
+  ['shadows off', () => { if (window.sunL) sunL.castShadow = false; }]];
+function autoQuality(now) { const A = AQ; if (A.last) { const ft = now - A.last; if (ft < 20000) { A.n++; A.t0 += ft; } } A.last = now;
+  if (A.n < 2 || A.t0 < 2500 || now < A.wait) return; const avg = A.t0 / A.n; A.n = 0; A.t0 = 0;   // judged every ~3 s of play, however few frames that is
+  if (avg > 40 && A.level < AQ_STEPS.length) { if (avg > 250) { while (A.level < AQ_STEPS.length - 1) AQ_STEPS[A.level++][1](); }   // very slow: go straight to the lightest settings
+    const [name, fn] = AQ_STEPS[A.level++]; fn(); A.wait = now + 1500; feedMsg('Performance mode: ' + name + ' (' + Math.round(1000 / avg) + ' fps)'); } }
 // ---- performance overlay (cheat PERF): frame time split into game logic, terrain streaming, drawing and UI
 renderer.info.autoReset = false;
 const PERF = { on: false, n: 0, acc: [0, 0, 0, 0], worst: 0, last: 0, t0: 0 };
@@ -2297,6 +2314,7 @@ const CHEATS = {
   daytime: ['Jump to noon', () => { TOD.t = 0.5; }],
   nighttime: ['Jump to midnight', () => { TOD.t = 0; }],
   peace: ['Calm every town: no war fear, homes full of happy people', () => { for (const t of Battle.towns) { t.warHeat = 0; t.happy = 100; } }],
+  hiquality: ['Full graphics again (turns automatic performance mode back)', () => { AQ.level = 0; SSAO.on = true; NEARU.r.value = 70; renderer.setPixelRatio(BASE_PR); renderer.setSize(innerWidth, innerHeight); if (window.sunL) { sunL.castShadow = true; sunL.shadow.mapSize.set(2048, 2048); if (sunL.shadow.map) { sunL.shadow.map.dispose(); sunL.shadow.map = null; } } AQ.wait = performance.now() + 60000; }],
   perf: ['Show / hide the performance overlay', () => { PERF.on = !PERF.on; PERF.t0 = performance.now(); const el = $('perfBox'); if (el) el.style.display = PERF.on ? '' : 'none'; }],
   populate: ['Fill your town to every home', () => { const t = Battle.towns[0]; if (t && t.cap) t.pop = t.cap; }] };
 CHEATS.unlimted = CHEATS.unlimited;
@@ -2488,6 +2506,7 @@ window.clearTreesIn = test => { for (const ch of chunks) { const T = ch.trees; i
   for (let k = 0; k < T.n; k++) if (T.inst[k * 4 + 3] > 0 && test(T.inst[k * 4], T.inst[k * 4 + 2])) { T.inst[k * 4 + 3] = 0; hit = true; }
   if (hit) T.geo.attributes.aInst.needsUpdate = true; } lastNearKey = ''; };
 function afterChunks(nearList, nearKey) {
+  { const q = 15, fx = Math.round(cam.x / q) * q, fz = Math.round(cam.z / q) * q; NEARU.c.value.set(fx, fz); nearKey += fx + ',' + fz + ',' + NEARU.r.value; }   // detail follows the view centre in 15 m steps
   if (nearKey !== lastNearKey) { lastNearKey = nearKey; rebuildNear(nearList); }
   const sz = renderer.getDrawingBufferSize(new THREE.Vector2());
   for (const lib of treeLib) if (lib.leaves) lib.leaves.material.uniforms.uScale.value = sz.y / 2;
@@ -2529,7 +2548,7 @@ function showChunks() {
       m.position.set(ox * SIZE, 0, oz * SIZE); m.visible = true;
       if (d < TREE_DIST) {
         if (ch.trees === undefined && builds < 1) { ch.trees = makeTrees(ch); builds++; }
-        if (ch.trees && dn >= NEAR_TREES) {
+        if (ch.trees) {
           const t = take(ch, 't', () => new THREE.Mesh(ch.trees.geo, impostorMat));
           t.position.set(ox * SIZE, 0, oz * SIZE); t.visible = true;
         }
@@ -2603,9 +2622,10 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   renderer.setAnimationLoop(now => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     renderer.info.reset(); const P = PERF.on, t0 = P && performance.now();
-    update(dt); if (!PAUSED) updateDayNight(dt); const t1 = P && performance.now(); placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now);
+    update(dt); if (!PAUSED) updateDayNight(dt); const t1 = P && performance.now(); const modal = MODAL();
+    if (!modal) { placeCamera(); Battle.shakeCamera(); showChunks(); updateShadows(now); }
     waterMat.uniforms.uTime.value = now / 1000; const t2 = P && performance.now();
-    renderFrame(); const t3 = P && performance.now();
+    if (!modal) renderFrame(); const t3 = P && performance.now(); if (!modal) autoQuality(now);   // a full-screen menu freezes the 3D view so it opens instantly
     drawMini(); updateUI(dt); if (P) perfTick(now, t1 - t0, t2 - t1, t3 - t2, performance.now() - t3);
   });
 }, 30));
@@ -2628,7 +2648,7 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   wrap('setPickFlag', r => { if (!r) P('place_building', null, 0.6); });
   for (const n of ['openAB', 'openHG', 'openDP', 'openPW', 'openTN', 'openCZ', 'openMarket', 'openBuildMenu', 'openCheat', 'openDemo']) { const f = window[n]; if (typeof f === 'function') window[n] = function (...a) { P('ui_open', null, 0.6); return f.apply(this, a); }; }
   // gunship rotors: a loop whose volume follows the nearest flying gunship
-  setInterval(() => { if (!B.SFX.on) return; let v = 0; for (const h of B.helis || []) { if (!h.alive || h.mode === 'landed') continue; const d = Math.hypot(h.pos.x * 12 - cam.x, h.pos.z * 12 - cam.z); v = Math.max(v, 0.3 / (1 + Math.pow(d / (cam.dist * 0.9), 2))); } B.SFX.loop('heli_rotor', v); }, 250);
+  setInterval(() => { if (!B.SFX.on) return; let v = 0; for (const h of B.helis || []) { if (!h.alive || h.mode === 'landed') continue; v = Math.max(v, 0.3 * B.SFX.att(h.pos.x, h.pos.z)); } B.SFX.loop('heli_rotor', v < 0.02 ? 0 : v); }, 250);
 })();
 </script>
 

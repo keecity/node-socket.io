@@ -339,6 +339,9 @@ const PARTS = [particlesA, particlesN, particlesF];
 // ------------------------------------------------------------------ sound
 // Web Audio: every effect is a short clip from assets/sfx (missing files are simply silent). Positional sounds fade with
 // distance from the view centre and pan left/right; each sound is rate-limited so a battle never stacks hundreds of copies.
+// how loud a sound at (x, z) (demo units) is where you are: the listener sits at the view centre, raised by part of the zoom height.
+// Real distance in metres: full within ~25 m, half at ~90 m, silent past ~500 m — far-off work and battles are not heard.
+function att(x, z) { const c = camD(), d = Math.hypot(Math.hypot(wd(x - c.x), wd(z - c.z)) * S, cam.dist * 0.3); return d < 25 ? 1 : 1 / (1 + Math.pow((d - 25) / 70, 2)); }
 const SFX = (() => { let ctx = null, master = null; const buf = {}, last = {}, LOOPS = {};
   // per-file loudness correction (dB), measured from each clip's loudest 400 ms so every category sits at a set level
   const LEVEL = {"alert":-0.5,"ambience_day":5.6,"ambience_night":10.6,"beam":3.9,"build_done":11.2,"cash":13.4,"collapse":3,"construction":-1.8,"demolish":4.8,"explosion":-5.6,"explosion_small":-3.1,"hangar_door":-0.5,"heli_gun":0.8,"heli_rotor":-1.2,"mech_boost":-9.9,"mech_move":-2.4,"mech_step":-2.8,"missile":-4.8,"order_attack":-3.5,"order_move":-3.5,"place_building":16.2,"rifle":26.3,"saber":-4.4,"select_heli":-5.1,"select_mech":-7,"select_soldier":-0.8,"select_tank":-0.2,"tank_cannon":-5.9,"tank_move":4.5,"truck":-5,"ui_click":8.4,"ui_open":2.2,"unit_destroyed":3.5,"upgrade":4.9}, lvl = n => Math.pow(10, (LEVEL[n] || 0) / 20);
@@ -351,7 +354,7 @@ const SFX = (() => { let ctx = null, master = null; const buf = {}, last = {}, L
     if (!b) { if (b === undefined) load(name); if (b !== false) pending[name] = { at, vol, rate, t: ctx.currentTime }; return; }   // still loading: play it as soon as it arrives
     const now = ctx.currentTime; if (now - (last[name] || 0) < (GAP[name] || 0.02)) return; last[name] = now;
     let g = vol, pan = 0; if (at) { const c = camD(), dx = wd(at.x - c.x), dz = wd(at.z - c.z), d = Math.hypot(dx, dz) * S, zoom = Math.max(60, cam.dist);
-      g *= 1 / (1 + Math.pow(d / (zoom * 2), 2)); if (g < 0.015) return; /* gentle falloff: anything on screen is clearly audible */ const yaw = cam.yaw; pan = clamp((dx * Math.cos(yaw) - dz * Math.sin(yaw)) * S / (zoom * 0.8), -0.9, 0.9); }
+      g *= att(at.x, at.z); if (g < 0.02) return; const yaw = cam.yaw; pan = clamp((dx * Math.cos(yaw) - dz * Math.sin(yaw)) * S / 120, -0.9, 0.9); }
     const src = ctx.createBufferSource(); src.buffer = b; src.playbackRate.value = rate * (0.94 + Math.random() * 0.12); const gn = ctx.createGain(); gn.gain.value = g * lvl(name);
     let node = src.connect(gn); if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; gn.connect(p); p.connect(master); } else gn.connect(master); src.start(); }
   function loop(name, vol) { if (!ctx) return; if (buf[name] === undefined) load(name); let L = LOOPS[name];
@@ -361,7 +364,7 @@ const SFX = (() => { let ctx = null, master = null; const buf = {}, last = {}, L
   const ALL = ['ui_click', 'ui_open', 'explosion', 'explosion_small', 'beam', 'mech_step', 'ambience_day', 'ambience_night', 'select_mech', 'select_tank', 'select_heli', 'select_soldier', 'order_move', 'order_attack', 'mech_move', 'tank_move',
     'place_building', 'construction', 'build_done', 'demolish', 'upgrade', 'cash', 'truck', 'alert', 'unit_destroyed', 'mech_boost', 'heli_rotor', 'tank_cannon', 'heli_gun', 'missile', 'rifle', 'saber', 'hangar_door', 'collapse'];
   addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
-  return { play, loop, get on() { return !!ctx; }, setVolume: v => { if (master) master.gain.value = v; } }; })();
+  return { play, loop, att, get on() { return !!ctx; }, setVolume: v => { if (master) master.gain.value = v; } }; })();
 const FX = {
   sparks(p, n, col = [1, 0.8, 0.5], speed = 1.6) { for (let i = 0; i < n; i++) { const a = rand(0, 6.28), e = rand(-0.2, 1.1), s = speed * rand(0.3, 1);
     particlesA.emit(p.x, p.y, p.z, Math.cos(a) * s, e * s, Math.sin(a) * s, rand(0.15, 0.45), 0.018, 0.004, [...col, 1], [col[0], col[1] * 0.5, col[2] * 0.3, 0], 3.2, 0.8); } },
@@ -996,7 +999,7 @@ function startSite(b, rect, h, time, onDone) {
 const easeOut = t => 1 - (1 - t) * (1 - t) * (1 - t);
 function sitePuff(s, lx, lz) { const c = Math.cos(s.b.rot), sn = Math.sin(s.b.rot), x = s.b.x + lx * c + lz * sn, z = s.b.z - lx * sn + lz * c; FX.dust(new THREE.Vector3(x, s.b.y + 0.02, z), 3, { size: [0.05, 0.25], life: [0.5, 1], vel: 0.3, up: 0.08, a: 0.35 }); }
 function updateSites(dt) { const c = camD();
-  { let v = 0; for (const s of sites) if (s.b.team === 0 && s.b.alive && s.phase === 'up') { const d = Math.hypot(wd(s.b.x - c.x), wd(s.b.z - c.z)) * S; v = Math.max(v, 0.55 / (1 + Math.pow(d / (cam.dist * 1.2), 2))); } SFX.loop('construction', v); }   // construction work is heard for as long as something is being built
+  { let v = 0; for (const s of sites) if (s.b.team === 0 && s.b.alive && s.phase === 'up') v = Math.max(v, 0.55 * att(s.b.x, s.b.z)); SFX.loop('construction', v < 0.02 ? 0 : v); }   // construction work is heard for as long as something is being built
   for (let i = sites.length - 1; i >= 0; i--) { const s = sites[i], b = s.b; s.g.position.set(disp(b.x, c.x), b.y, disp(b.z, c.z)); s.t += dt;
     if (!b.alive) { battleRoot.remove(s.g); sites.splice(i, 1); continue; }
     if (s.phase === 'up') {
@@ -1004,7 +1007,7 @@ function updateSites(dt) { const c = camD();
       s.walls.forEach((w, j) => { const u = (s.t - j * s.step) / 0.25; if (u <= 0) return; const e = easeOut(Math.min(1, u)); if (!w.o.visible) { w.o.visible = true; if (!w.y) sitePuff(s, w.o.position.x, w.o.position.z); }
         if (w.y) w.o.position.y = w.y + (1 - e) * w.drop; else w.m.rotation.x = (1 - e) * Math.PI / 2; });   // ground row tips up, upper rows are lowered on top
       s.covers.forEach((cv, j) => { const u = (s.t - (s.walls.length + j) * s.step) / 0.22; if (u <= 0) return; cv.o.visible = true; cv.o.position.y = cv.y + (1 - easeOut(Math.min(1, u))) * 0.5 * s.k * SC_H; });
-      if (s.t >= s.time) { s.phase = 'down'; s.downT = 0; b.obj.visible = true; b.done = true; if (b.team === 0) SFX.play('build_done', null, 0.6); s.onDone(); } }
+      if (s.t >= s.time) { s.phase = 'down'; s.downT = 0; b.obj.visible = true; b.done = true; if (b.team === 0) SFX.play('build_done', b, 0.8); s.onDone(); } }
     else {
       // covers lift off, then the walls tip back down and vanish, in reverse order
       s.downT += dt; const st = Math.min(0.035, s.step * 0.6), nc = s.covers.length;
