@@ -24,8 +24,9 @@ SFX = {
   'cash':           ('stack of paper banknotes counted and handed over, coins dropped on a counter' + R, 1.0),
   'truck':          ('semi truck diesel engine pulling away, air brake release hiss' + R, 2.0),
   # interface
-  'ui_click':       ('heavy toggle switch on a military control panel flicked' + R, 0.5),
+  'ui_click':       ('loud crisp close-microphone metal toggle switch click on a military control panel, sharp transient' + R, 0.5),
   'ui_open':        ('metal clipboard and paper map unfolded on a table' + R, 0.6),
+  'rifle':          ('loud close-range single assault rifle gunshot, sharp crack with short outdoor echo' + R, 0.7),
   'alert':          ('distant military base air raid siren wail, short' + R, 2.0),
   # combat extras
   'unit_destroyed': ('vehicle destroyed, metal tearing, secondary ammunition cooking off' + R, 2.5),
