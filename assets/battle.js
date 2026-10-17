@@ -341,19 +341,23 @@ const PARTS = [particlesA, particlesN, particlesF];
 // distance from the view centre and pan left/right; each sound is rate-limited so a battle never stacks hundreds of copies.
 const SFX = (() => { let ctx = null, master = null; const buf = {}, last = {}, LOOPS = {};
   const GAP = { heli_gun: 0.09, rifle: 0.06, mech_step: 0.12, beam: 0.05, explosion: 0.08, explosion_small: 0.05, ui_click: 0.03 };
-  function init() { if (ctx) return; try { ctx = new (window.AudioContext || window.webkitAudioContext)(); master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination); } catch (e) { ctx = null; } }
+  function init() { if (ctx) return; try { ctx = new (window.AudioContext || window.webkitAudioContext)(); master = ctx.createGain(); master.gain.value = 2.6; const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.2; master.connect(comp); comp.connect(ctx.destination); /* loud, with a limiter so big battles don't clip */ } catch (e) { ctx = null; } }
   function load(name) { if (buf[name] !== undefined || !ctx) return; buf[name] = null;
-    fetch('assets/sfx/' + name + '.mp3').then(r => r.ok ? r.arrayBuffer() : Promise.reject()).then(a => ctx.decodeAudioData(a)).then(b => { buf[name] = b; }).catch(() => { buf[name] = false; }); }
-  function play(name, at, vol = 1, rate = 1) { if (!ctx) return; if (buf[name] === undefined) return load(name); const b = buf[name]; if (!b) return;
+    fetch('assets/sfx/' + name + '.mp3').then(r => r.ok ? r.arrayBuffer() : Promise.reject()).then(a => ctx.decodeAudioData(a)).then(b => { buf[name] = b; const q = pending[name]; delete pending[name]; if (q && ctx.currentTime - q.t < 1.5) play(name, q.at, q.vol, q.rate); }).catch(() => { buf[name] = false; }); }
+  const pending = {};
+  function play(name, at, vol = 1, rate = 1) { if (!ctx) return; const b = buf[name];
+    if (!b) { if (b === undefined) load(name); if (b !== false) pending[name] = { at, vol, rate, t: ctx.currentTime }; return; }   // still loading: play it as soon as it arrives
     const now = ctx.currentTime; if (now - (last[name] || 0) < (GAP[name] || 0.02)) return; last[name] = now;
     let g = vol, pan = 0; if (at) { const c = camD(), dx = wd(at.x - c.x), dz = wd(at.z - c.z), d = Math.hypot(dx, dz) * S, zoom = Math.max(60, cam.dist);
-      g *= 1 / (1 + Math.pow(d / (zoom * 0.9), 2)); if (g < 0.02) return; const yaw = cam.yaw; pan = clamp((dx * Math.cos(yaw) - dz * Math.sin(yaw)) * S / (zoom * 0.8), -0.9, 0.9); }
+      g *= 1 / (1 + Math.pow(d / (zoom * 2), 2)); if (g < 0.015) return; /* gentle falloff: anything on screen is clearly audible */ const yaw = cam.yaw; pan = clamp((dx * Math.cos(yaw) - dz * Math.sin(yaw)) * S / (zoom * 0.8), -0.9, 0.9); }
     const src = ctx.createBufferSource(); src.buffer = b; src.playbackRate.value = rate * (0.94 + Math.random() * 0.12); const gn = ctx.createGain(); gn.gain.value = g;
     let node = src.connect(gn); if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; gn.connect(p); p.connect(master); } else gn.connect(master); src.start(); }
   function loop(name, vol) { if (!ctx) return; if (buf[name] === undefined) load(name); let L = LOOPS[name];
     if (!L && buf[name]) { const src = ctx.createBufferSource(); src.buffer = buf[name]; src.loop = true; const g = ctx.createGain(); g.gain.value = 0; src.connect(g); g.connect(master); src.start(); L = LOOPS[name] = { src, g }; }
     if (L) L.g.gain.setTargetAtTime(vol, ctx.currentTime, 0.8); }
-  const unlock = () => { init(); if (ctx && ctx.state === 'suspended') ctx.resume(); for (const n of ['ui_click', 'explosion', 'explosion_small', 'beam', 'mech_step', 'ambience_day', 'ambience_night']) load(n); };
+  const unlock = () => { init(); if (ctx && ctx.state === 'suspended') ctx.resume(); for (const n of ALL) load(n); };
+  const ALL = ['ui_click', 'ui_open', 'explosion', 'explosion_small', 'beam', 'mech_step', 'ambience_day', 'ambience_night', 'select_mech', 'select_tank', 'select_heli', 'select_soldier', 'order_move', 'order_attack', 'mech_move', 'tank_move',
+    'place_building', 'construction', 'build_done', 'demolish', 'upgrade', 'cash', 'truck', 'alert', 'unit_destroyed', 'mech_boost', 'heli_rotor', 'tank_cannon', 'heli_gun', 'missile', 'rifle', 'saber', 'hangar_door', 'collapse'];
   addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
   return { play, loop, get on() { return !!ctx; }, setVolume: v => { if (master) master.gain.value = v; } }; })();
 const FX = {
@@ -1675,7 +1679,7 @@ function sendTruck(p, kind) { if (p.obstructT > missionClock) return false; if (
   if (offroadFail) { offroadFail = false; route = planRoute(from, dest, [w]); if (offroadFail) { obstructed(p); return false; } }   // tight squeeze: centre-line clearance only; no way at all: obstructed p.obstructed = false;
   t.job = { p, kind }; t.trailer.visible = false; t.trailer = kind === 'wood' ? t.flat : t.box; t.trailer.visible = true;
   const bay = whWorld(w, 0, WH_D / 2 + 0.9), out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6);
-  t.path = [bay, out, ...route.slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; return true; }
+  t.path = [bay, out, ...route.slice(1)]; t.pi = 0; t.state = 'out'; p.truck = t; if (t.team === 0) SFX.play('truck', w, 0.6); return true; }
 function truckHome(t) { const w = t.home, out = whWorld(w, 0, WH_D / 2 + WH_LOT + 0.6), bay = whWorld(w, 0, WH_D / 2 + 0.9), inside = whWorld(w, 0, -WH_D / 2 + 0.3);
   t.path = [...planRoute({ x: t.x, z: t.z }, out, [w], truckBlocked), bay, inside]; t.pi = 0; t.state = 'back'; }
 function updateTrucks(dt) { const c = camD();
@@ -2182,7 +2186,7 @@ function play(f, name, fade = 0.12) { const next = f.actions[name]; if (!next) r
   if (f.act && f.act !== next) f.act.crossFadeTo(next, fade, false); f.act = next; f.clip = name; f.clipT0 = f.st; }
 const clipT = f => f.act ? f.act.time : 0;
 const clipDone = f => f.act && f.act.loop === THREE.LoopOnce && f.act.time >= f.act.getClip().duration - 1e-3;
-function setState(f, s, clip, fade) { if (s !== 'idle') f.feetLock = null; if (f.act) f.act.timeScale = 1; f.lodge = null; f.flyV = 0; f.liftFx = 0; f.landFx = 0; f.state = s; f.st = 0; f.hitDone = {}; if (clip) play(f, clip, fade); }
+function setState(f, s, clip, fade) { if (s !== f.state) { if (s === 'ko') SFX.play('unit_destroyed', f.pos, 1); else if (/^(boost|burst|jump)/.test(s)) SFX.play('mech_boost', f.pos, 0.7); } if (s !== 'idle') f.feetLock = null; if (f.act) f.act.timeScale = 1; f.lodge = null; f.flyV = 0; f.liftFx = 0; f.landFx = 0; f.state = s; f.st = 0; f.hitDone = {}; if (clip) play(f, clip, fade); }
 const idleClip = f => f.saberOut ? 'Saber_Idle' : f.idleName;   // each pilot has their own stance; gunners keep the rifle lowered
 function toIdle(f, fade = 0.14, think = 0.05) { setState(f, 'idle', idleClip(f), fade); f.thinkT = think; }
 const groundY = f => Math.max(Hd(f.pos.x, f.pos.z), -3 / S);
@@ -3046,7 +3050,7 @@ function makeHeli(team, x, z) {
 function heliHit(h, amount, by, at) {
   if (!h.alive) return; h.hp -= amount; const p = at || h.pos; FX.sparks(p, amount > 30 ? 30 : 5, [1, 0.8, 0.45], 1.4); if (amount > 30) FX.flash(p, 0.3, [1, 0.8, 0.5]);
   if (by && !alive(h.target)) h.target = by;
-  if (h.hp <= 0) { for (const s of h.cargo || []) { s.inHeli = null; s.alive = false; s.hp = 0; s.state = 'dead'; s.deadT = 99; } if (h.cargo) h.cargo.length = 0; h.tr = null; h.alive = false; h.falling = true; h.sel = false; h.vel.add(new THREE.Vector3(rand(-0.6, 0.6), 0.3, rand(-0.6, 0.6))); h.spin = rand(5, 8) * (chance(.5) ? 1 : -1); FX.explosion(h.pos.clone(), 0.45);
+  if (h.hp <= 0) { SFX.play('unit_destroyed', h.pos, 1); for (const s of h.cargo || []) { s.inHeli = null; s.alive = false; s.hp = 0; s.state = 'dead'; s.deadT = 99; } if (h.cargo) h.cargo.length = 0; h.tr = null; h.alive = false; h.falling = true; h.sel = false; h.vel.add(new THREE.Vector3(rand(-0.6, 0.6), 0.3, rand(-0.6, 0.6))); h.spin = rand(5, 8) * (chance(.5) ? 1 : -1); FX.explosion(h.pos.clone(), 0.45);
     log(h.team, `${by ? `<b>${unitName(by)}</b> shoots down ` : ''}<b>${unitName(h)}</b>`); }
   return 'hit';
 }
@@ -3197,7 +3201,7 @@ function tankAcquire(t) { let best = null, bd = TANK_RANGE * 1.15; for (const e 
   return best; }
 function tankHit(t, amount, by) { if (!t.alive) return; if (by && by.kind === 'soldier') amount *= 0.25; t.hp -= amount;
   if (by && !t.target && (!t.order || t.order.type !== 'move') && by.pos) t.target = by;
-  if (t.hp <= 0) { t.alive = false; t.sel = false; t.deadT = 0; const p = new THREE.Vector3(t.pos.x, t.pos.y + 0.06, t.pos.z); FX.explosion(p, 0.9); addShake(0.3, p); scorchMarks.add(t.pos.x, t.pos.z, 0, 0.35, 0.35); fires.push({ x: t.pos.x, z: t.pos.z, t: 25 });
+  if (t.hp <= 0) { t.alive = false; t.sel = false; t.deadT = 0; SFX.play('unit_destroyed', t.pos, 1); const p = new THREE.Vector3(t.pos.x, t.pos.y + 0.06, t.pos.z); FX.explosion(p, 0.9); addShake(0.3, p); scorchMarks.add(t.pos.x, t.pos.z, 0, 0.35, 0.35); fires.push({ x: t.pos.x, z: t.pos.z, t: 25 });
     t.model.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.22); } }); t.turret.rotation.z = rand(-0.25, 0.25); t.turret.position.y += 0.3;
     if (t.bar) t.bar.g.visible = false; if (t.ring) t.ring.visible = false; log(t.team, `<b>${unitName(t)}</b> destroyed${by ? ' by <b>' + unitName(by) + '</b>' : ''}`); }
   return 'hit'; }
