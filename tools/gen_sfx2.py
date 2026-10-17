@@ -16,16 +16,16 @@ SFX = {
   'tank_move':      ('tank tracks clanking as it starts moving, engine load increasing' + R, 1.5),
   # building
   'place_building': ('a single heavy concrete foundation block set down on the ground by a crane, one deep solid thud, short' + R, 0.8),
-  'construction':   ('industrial impact wrench tightening steel bolts, then a short burst of arc welding, distant, clean recording' + R, 2.5),
+  'construction':   ('steady rhythmic hammering on wood and nails at a construction site, several workers hammering, natural' + R, 4.0),
   'build_done':     ('heavy steel blast door closing and locking with a deep mechanical latch, solid and satisfying' + R, 1.2),
   'demolish':       ('building demolition, concrete walls crumbling, debris falling, dust' + R, 3.0),
   'upgrade':        ('large electrical transformer powering up, heavy relay switch thunk and hum' + R, 1.6),
   # economy
-  'cash':           ('stack of paper banknotes counted and handed over, coins dropped on a counter' + R, 1.0),
+  'cash':           ('modern user interface purchase confirmation, soft digital two-note confirm with subtle shimmer, high quality strategy game menu sound, not retro, not arcade', 0.8),
   'truck':          ('semi truck diesel engine pulling away, air brake release hiss' + R, 2.0),
   # interface
-  'ui_click':       ('loud crisp close-microphone metal toggle switch click on a military control panel, sharp transient' + R, 0.5),
-  'ui_open':        ('metal clipboard and paper map unfolded on a table' + R, 0.6),
+  'ui_click':       ('modern sleek user interface button click, short soft digital tick, subtle, high quality game menu sound, not retro, not arcade', 0.5),
+  'ui_open':        ('modern sleek user interface panel open, short soft digital whoosh with gentle tick, high quality game menu sound, not retro, not arcade', 0.6),
   'rifle':          ('loud close-range single assault rifle gunshot, sharp crack with short outdoor echo' + R, 0.7),
   'alert':          ('distant military base air raid siren wail, short' + R, 2.0),
   # combat extras
