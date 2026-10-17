@@ -15,9 +15,9 @@ SFX = {
   'mech_move':      ('heavy hydraulic actuators engaging on a giant robot leg, deep pneumatic hiss' + R, 1.0),
   'tank_move':      ('tank tracks clanking as it starts moving, engine load increasing' + R, 1.5),
   # building
-  'place_building': ('heavy steel beams dropped on concrete, crane cable rattle' + R, 1.2),
-  'construction':   ('busy construction site, hammering, power drill, metal scaffolding clanks' + R, 3.0),
-  'build_done':     ('scaffolding poles being pulled down and stacked, final heavy metal clank' + R, 1.6),
+  'place_building': ('a single heavy concrete foundation block set down on the ground by a crane, one deep solid thud, short' + R, 0.8),
+  'construction':   ('industrial impact wrench tightening steel bolts, then a short burst of arc welding, distant, clean recording' + R, 2.5),
+  'build_done':     ('heavy steel blast door closing and locking with a deep mechanical latch, solid and satisfying' + R, 1.2),
   'demolish':       ('building demolition, concrete walls crumbling, debris falling, dust' + R, 3.0),
   'upgrade':        ('large electrical transformer powering up, heavy relay switch thunk and hum' + R, 1.6),
   # economy

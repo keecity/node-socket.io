@@ -2615,7 +2615,7 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   const wrap = (name, fn) => { const o = B[name]; if (typeof o !== 'function') return; B[name] = function (...a) { const r = o.apply(this, a); try { fn(r, a); } catch (e) {} return r; }; };
   let lastSel = '';
   wrap('select', (r, [list]) => { const key = (list || []).map(u => u.kind + (u.id || '')).join(','); if (!list || !list.length || key === lastSel) { lastSel = key; return; } lastSel = key;
-    const k = list.some(u => u.kind === 'robot') ? 'mech' : list.some(u => u.kind === 'tank') ? 'tank' : list.some(u => u.kind === 'heli') ? 'heli' : 'soldier'; P('select_' + k, null, 0.9); });
+    const k = list.some(u => u.kind === 'robot') ? 'mech' : list.some(u => u.kind === 'tank') ? 'tank' : list.some(u => u.kind === 'heli') ? 'heli' : 'soldier'; P('select_' + k, null, k === 'heli' ? 0.45 : 0.9); });
   wrap('order', (r, [sel, t, enemy]) => { if (!sel || !sel.length) return; P(enemy ? 'order_attack' : 'order_move', null, 0.8);
     if (sel.some(u => u.kind === 'robot')) P('mech_move', null, 0.7); else if (sel.some(u => u.kind === 'tank')) P('tank_move', null, 0.7); });
   wrap('board', () => P('order_move', null, 0.8));
@@ -2625,7 +2625,7 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   wrap('setPickFlag', r => { if (!r) P('place_building', null, 0.6); });
   for (const n of ['openAB', 'openHG', 'openDP', 'openPW', 'openTN', 'openCZ', 'openMarket', 'openBuildMenu', 'openCheat', 'openDemo']) { const f = window[n]; if (typeof f === 'function') window[n] = function (...a) { P('ui_open', null, 0.6); return f.apply(this, a); }; }
   // gunship rotors: a loop whose volume follows the nearest flying gunship
-  setInterval(() => { if (!B.SFX.on) return; let v = 0; for (const h of B.helis || []) { if (!h.alive || h.mode === 'landed') continue; const d = Math.hypot(h.pos.x * 12 - cam.x, h.pos.z * 12 - cam.z); v = Math.max(v, 0.55 / (1 + Math.pow(d / (cam.dist * 1.6), 2))); } B.SFX.loop('heli_rotor', v); }, 250);
+  setInterval(() => { if (!B.SFX.on) return; let v = 0; for (const h of B.helis || []) { if (!h.alive || h.mode === 'landed') continue; const d = Math.hypot(h.pos.x * 12 - cam.x, h.pos.z * 12 - cam.z); v = Math.max(v, 0.14 / (1 + Math.pow(d / (cam.dist * 0.9), 2))); } B.SFX.loop('heli_rotor', v); }, 250);
 })();
 </script>
 

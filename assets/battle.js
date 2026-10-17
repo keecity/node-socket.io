@@ -976,7 +976,7 @@ function scPiece(proto) { let m = null; proto.updateMatrixWorld(true); proto.tra
   const mesh = new THREE.Mesh(m.geometry, m.material); mesh.applyMatrix4(m.matrixWorld); mesh.castShadow = mesh.receiveShadow = true; const g = new THREE.Group(); g.add(mesh); return g; }
 // b: the building ({x, z, y, rot, obj}); rect: [x0, x1, z0, z1] footprint in demo units around its origin (before rotation); h: its height
 function startSite(b, rect, h, time, onDone) {
-  b.obj.visible = false; b.done = false; if (b.team === 0) SFX.play('construction', b, 0.6);
+  b.obj.visible = false; b.done = false; if (b.team === 0) SFX.play('construction', b, 0.45);
   if (!scWallProto || !scTopProto) { b.obj.visible = true; b.done = true; onDone(); return; }   // no scaffold models: build instantly
   const k = 0.22, P = SC_W * k, rows = Math.max(1, Math.ceil(h * 1.05 / (SC_H * k))), top = rows * SC_H * k,   // fixed panel size, stacked in rows to the full height
      [x0, x1, z0, z1] = rect.map((v, i) => v + (i % 2 ? 1 : -1) * 0.06);
@@ -3058,7 +3058,7 @@ const hRounds = []; const hRoundMats = [0, 1].map(i => new THREE.MeshBasicMateri
 for (let i = 0; i < 160; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.008, 0.08), hRoundMats[0]); m.visible = false; m.scale.set(3.5, 3.5, 2); m.frustumCulled = false; battleRoot.add(m); hRounds.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0 }); }
 const msGeo = new THREE.CylinderGeometry(0.009, 0.009, 0.075, 8).rotateX(Math.PI / 2), msMat = new THREE.MeshStandardMaterial({ color: 0xd6d2cc, metalness: 0.4, roughness: 0.5 });
 const missiles = []; for (let i = 0; i < 40; i++) { const m = new THREE.Mesh(msGeo, msMat); m.visible = false; m.scale.setScalar(1.5); battleRoot.add(m); missiles.push({ m, p: new THREE.Vector3(), alive: false, v: new THREE.Vector3(), owner: null, life: 0, tgt: null }); }
-function heliFireRound(h) { SFX.play('heli_gun', h.pos, 0.5);
+function heliFireRound(h) { SFX.play('heli_gun', h.pos, 0.3);
   toDemo(h.gunPt, tmpA); near(tmpA, h.pos, tmpA); tgtPos(h.target, tmpB); near(tmpB, h.pos, tmpB); tmpB.addScaledVector(h.target.vel, 0.15); tmpB.x += rand(-0.1, 0.1); tmpB.y += rand(-0.1, 0.08); tmpB.z += rand(-0.1, 0.1);
   const b = hRounds.find(b => !b.alive); if (!b) return; b.alive = true; b.owner = h; b.life = 1.6; b.m.material = hRoundMats[h.team]; b.m.visible = true; b.p.copy(tmpA); b.v.subVectors(tmpB, tmpA).normalize().multiplyScalar(9);
   FX.flash(tmpA, 0.07, [1, 0.85, 0.55]);
