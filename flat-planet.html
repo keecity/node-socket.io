@@ -2287,16 +2287,23 @@ const AQ_STEPS = [
   ['smaller shadows', () => { const L = window.sunL; if (L) { L.shadow.mapSize.set(1024, 1024); if (L.shadow.map) { L.shadow.map.dispose(); L.shadow.map = null; } } }],
   ['low resolution', () => { renderer.setPixelRatio(0.7); renderer.setSize(innerWidth, innerHeight); }],
   ['shadows off', () => { if (window.sunL) sunL.castShadow = false; }]];
-function autoQuality(now) { const A = AQ; if (A.last) { const ft = now - A.last; if (ft < 20000) { A.n++; A.t0 += ft; } } A.last = now;
+function autoQuality(now) { const A = AQ; if (!A.start) A.start = now; const prog = renderer.info.programs.length, compiled = prog !== A.prog; A.prog = prog;
+  if (A.last && !compiled && now - A.start > 20000) { const ft = now - A.last; if (ft < 20000) { A.n++; A.t0 += ft; } } A.last = now;   // skip the first 20 s and frames that compiled shaders
   if (A.n < 2 || A.t0 < 2500 || now < A.wait) return; const avg = A.t0 / A.n; A.n = 0; A.t0 = 0;   // judged every ~3 s of play, however few frames that is
-  if (avg > 40 && A.level < AQ_STEPS.length) { if (avg > 250) { while (A.level < AQ_STEPS.length - 1) AQ_STEPS[A.level++][1](); }   // very slow: go straight to the lightest settings
-    const [name, fn] = AQ_STEPS[A.level++]; fn(); A.wait = now + 1500; REC.event('performance mode: ' + name); feedMsg('Performance mode: ' + name + ' (' + Math.round(1000 / avg) + ' fps)'); } }
+  if (avg > 70 && A.level < AQ_STEPS.length) { if (avg > 400) { while (A.level < AQ_STEPS.length - 1) AQ_STEPS[A.level++][1](); }   // very slow: go straight to the lightest settings
+    const [name, fn] = AQ_STEPS[A.level++]; fn(); A.wait = now + 4000; REC.event('performance mode: ' + name); feedMsg('Performance mode: ' + name + ' (' + Math.round(1000 / avg) + ' fps)'); } }
 // ---- flight recorder: every frame's timings go into a ring buffer; when the frame rate collapses, a snapshot of the last
 // few seconds plus the device, scene and game state is saved to this artifact's database (collection "perf") for Claude to read.
 const REC = (() => { const N = 240, F = [], ev = [], sid = Math.random().toString(36).slice(2, 8); let db = null, sent = 0, lastSent = 0, last = 0, beat = 0, slowRun = 0;
   if (window.claude && claude.use) claude.use('db').then(d => { db = d; }).catch(() => {});
   const gpu = (() => { try { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch (e) { return '?'; } })();
   function event(t) { ev.push([Math.round(performance.now()), t]); if (ev.length > 60) ev.shift(); }
+  const loaf = []; let lastModal = false;
+  try { new PerformanceObserver(list => { for (const e of list.getEntries()) { if (e.duration < 150) continue;
+      loaf.push({ t: Math.round(e.startTime), dur: Math.round(e.duration), block: Math.round(e.blockingDuration || 0), render: e.renderStart ? Math.round(e.startTime + e.duration - e.renderStart) : 0,
+        style: e.styleAndLayoutStart ? Math.round(e.startTime + e.duration - e.styleAndLayoutStart) : 0, modal: MODAL(),
+        scripts: (e.scripts || []).filter(x => x.duration > 20).slice(0, 5).map(x => ({ dur: Math.round(x.duration), fn: x.sourceFunctionName, src: (x.sourceURL || '').split('/').pop().slice(0, 40), inv: (x.invoker || '').slice(0, 60), type: x.invokerType, layout: Math.round(x.forcedStyleAndLayoutDuration || 0) })) });
+      if (loaf.length > 30) loaf.shift(); } }).observe({ type: 'long-animation-frame', buffered: true }); } catch (e) {}
   function state() { const B = Battle, cnt = L => L ? L.filter(x => x.alive !== false).length : 0, mi = renderer.info.memory;
     return { cam: { x: Math.round(cam.x), z: Math.round(cam.z), dist: Math.round(cam.dist), yaw: +cam.yaw.toFixed(2), pitch: +cam.pitch.toFixed(2) }, tod: +(TOD.t * 24).toFixed(1), aq: AQ.level, ssao: SSAO.on, nearR: NEARU.r.value,
       pr: renderer.getPixelRatio(), canvas: [renderer.domElement.width, renderer.domElement.height], programs: renderer.info.programs.length, geos: mi.geometries, tex: mi.textures, sceneChildren: scene.children.length,
@@ -2304,11 +2311,11 @@ const REC = (() => { const N = 240, F = [], ev = [], sid = Math.random().toStrin
       buildings: [B.outposts, B.airbases, B.pumpjacks, B.camps, B.mines, B.farms, B.warehouses, B.hangars, B.waterTowers].reduce((a, L) => a + cnt(L), 0), heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null }; }
   function send(kind, why) { if (!db || sent >= 25) return; sent++; lastSent = performance.now();
     const doc = { kind, why, sid, at: new Date().toISOString(), ua: navigator.userAgent, gpu, dpr: devicePixelRatio, screen: [innerWidth, innerHeight], mobile: isMob(),
-      frames: F.slice(-150).map(f => f.map(v => Math.round(v * 10) / 10)), frameCols: 'dt,logic,stream,draw,ui,calls,trisK,programs,modal', events: ev.slice(-40), state: state() };
+      frames: F.slice(-150).map(f => f.map(v => Math.round(v * 10) / 10)), frameCols: 'dt,logic,stream,draw,ui,calls,trisK,programs,modal', events: ev.slice(-40), longFrames: loaf.slice(-20), state: state() };
     db.collection('perf').add(doc).catch(e => console.warn('perf report failed', e)); }
   function frame(now, a, b, c, d, modal) { const dt = last ? now - last : 16; last = now; const ri = renderer.info.render, nprog = renderer.info.programs.length;
     if (F.length && nprog > F[F.length - 1][7]) event('shader compiled (' + nprog + ' programs)');
-    F.push([dt, a, b, c, d, ri.calls, ri.triangles / 1000, nprog, modal ? 1 : 0]); if (F.length > N) F.shift();
+    F.push([dt, a, b, c, d, ri.calls, ri.triangles / 1000, nprog, modal ? 1 : 0]); if (F.length > N) F.shift(); if (modal !== lastModal) { lastModal = modal; event(modal ? 'full-screen menu shown' : 'full-screen menu hidden'); }
     slowRun = dt > 200 ? slowRun + 1 : 0; const t = performance.now();
     if (t - lastSent > 15000 && (dt > 700 || slowRun >= 5)) send('slow', dt > 700 ? 'single frame ' + Math.round(dt) + ' ms' : '5 frames in a row over 200 ms');
     if (t - beat > 90000) { beat = t; if (F.length > 60) send('heartbeat', 'periodic'); } }
