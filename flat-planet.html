@@ -2161,7 +2161,8 @@ function bmRender() { const grid = $('bmGrid'), tabs = $('bmTabs');
     const pw = Battle.POWER_USE && Battle.POWER_USE[k] ? `<span class="pw">⚡ ${Battle.POWER_USE[k]} MW</span>` : '';
     return `<button class="bmCard${poor ? ' poor' : ''}" data-k="${k}" title="${poor || ''}"><div class="top"><img src="${icon}" alt=""><b>${B.name.toUpperCase()}</b></div><div class="desc">${desc.charAt(0).toUpperCase() + desc.slice(1)}</div><div class="cost">${costTxt(B.cost())}</div>${pw}</button>`; }).join('');
   grid.querySelectorAll('.bmCard').forEach(c => c.onclick = () => { const k = c.dataset.k, poor = Battle.canAfford(0, BUILDS[k].cost()); if (poor) return feedMsg(poor); closeBuildMenu(); startPlacing(k); }); }
-function openBuildMenu() { REC.event('build menu open'); if (placing) stopPlacing(); $('buildMenu').classList.remove('uihidden'); bmRender(); }
+const STEP = (name, fn) => { const t = performance.now(); const r = fn(); const ms = performance.now() - t; if (ms > 15 && typeof REC !== 'undefined') REC.event('slow step: ' + name + ' ' + ms.toFixed(0) + ' ms'); return r; };
+function openBuildMenu() { REC.event('build menu open'); STEP('stopPlacing', () => { if (placing) stopPlacing(); }); STEP('show menu', () => $('buildMenu').classList.remove('uihidden')); STEP('bmRender', bmRender); }
 function closeBuildMenu() { REC.event('build menu close'); $('buildMenu').classList.add('uihidden'); }
 $('bmClose').addEventListener('click', closeBuildMenu);
 $('buildMenu').addEventListener('mousedown', e => { if (e.target.id === 'buildMenu') closeBuildMenu(); });
@@ -2278,7 +2279,8 @@ let flagFor = null;
 addEventListener('keydown', e => { if (!flagFor) return; if (e.key === 'Escape') { flagFor = null; hint(''); } if (e.key === 'x' || e.key === 'X') { Battle.clearPickFlag(flagFor); feedMsg('Pickup flag removed: trucks pick the nearest clear spot'); flagFor = null; } });
 el.addEventListener('mousedown', e => { if (e.button === 2 && flagFor) { flagFor = null; hint(''); } });
 // ---- full-screen menus pause 3D drawing; automatic performance mode steps graphics down when frames are slow
-const MODAL = () => !$('buildMenu').classList.contains('uihidden') || !$('cheat').classList.contains('uihidden');
+const MODAL = () => false;   // menus no longer pause 3D drawing: resuming caused a long GPU stall
+const MENU_OPEN = () => !$('buildMenu').classList.contains('uihidden') || !$('cheat').classList.contains('uihidden');
 const AQ = { level: 0, t0: 0, n: 0, last: 0, wait: 0 }, BASE_PR = renderer.getPixelRatio();
 const AQ_STEPS = [
   ['fewer detailed trees', () => { NEARU.r.value = 35; }],
@@ -2301,7 +2303,7 @@ const REC = (() => { const N = 240, F = [], ev = [], sid = Math.random().toStrin
   const loaf = []; let lastModal = false;
   try { new PerformanceObserver(list => { for (const e of list.getEntries()) { if (e.duration < 150) continue;
       loaf.push({ t: Math.round(e.startTime), dur: Math.round(e.duration), block: Math.round(e.blockingDuration || 0), render: e.renderStart ? Math.round(e.startTime + e.duration - e.renderStart) : 0,
-        style: e.styleAndLayoutStart ? Math.round(e.startTime + e.duration - e.styleAndLayoutStart) : 0, modal: MODAL(),
+        style: e.styleAndLayoutStart ? Math.round(e.startTime + e.duration - e.styleAndLayoutStart) : 0, modal: MENU_OPEN(),
         scripts: (e.scripts || []).filter(x => x.duration > 20).slice(0, 5).map(x => ({ dur: Math.round(x.duration), fn: x.sourceFunctionName, src: (x.sourceURL || '').split('/').pop().slice(0, 40), inv: (x.invoker || '').slice(0, 60), type: x.invokerType, layout: Math.round(x.forcedStyleAndLayoutDuration || 0) })) });
       if (loaf.length > 30) loaf.shift(); } }).observe({ type: 'long-animation-frame', buffered: true }); } catch (e) {}
   function state() { const B = Battle, cnt = L => L ? L.filter(x => x.alive !== false).length : 0, mi = renderer.info.memory;
@@ -2315,7 +2317,7 @@ const REC = (() => { const N = 240, F = [], ev = [], sid = Math.random().toStrin
     db.collection('perf').add(doc).catch(e => console.warn('perf report failed', e)); }
   function frame(now, a, b, c, d, modal) { const dt = last ? now - last : 16; last = now; const ri = renderer.info.render, nprog = renderer.info.programs.length;
     if (F.length && nprog > F[F.length - 1][7]) event('shader compiled (' + nprog + ' programs)');
-    F.push([dt, a, b, c, d, ri.calls, ri.triangles / 1000, nprog, modal ? 1 : 0]); if (F.length > N) F.shift(); if (modal !== lastModal) { lastModal = modal; event(modal ? 'full-screen menu shown' : 'full-screen menu hidden'); }
+    modal = MENU_OPEN(); F.push([dt, a, b, c, d, ri.calls, ri.triangles / 1000, nprog, modal ? 1 : 0]); if (F.length > N) F.shift(); if (modal !== lastModal) { lastModal = modal; event(modal ? 'full-screen menu shown' : 'full-screen menu hidden'); }
     slowRun = dt > 200 ? slowRun + 1 : 0; const t = performance.now();
     if (t - lastSent > 15000 && (dt > 700 || slowRun >= 5)) send('slow', dt > 700 ? 'single frame ' + Math.round(dt) + ' ms' : '5 frames in a row over 200 ms');
     if (t - beat > 90000) { beat = t; if (F.length > 60) send('heartbeat', 'periodic'); } }
@@ -2332,7 +2334,7 @@ function perfTick(now, a, b, c, d) { const P = PERF; P.n++; P.acc[0] += a; P.acc
 // ---- UI clicks and day / night ambience
 // every control the player can click sounds: buttons, tabs, cards, close icons, anything with a hand cursor (the 3D view excluded)
 const isControl = el => { for (let k = 0; el && el !== document.body && k < 5; el = el.parentElement, k++) { if (el.tagName === 'CANVAS') return false; if (el.tagName === 'BUTTON' || el.tagName === 'INPUT' || getComputedStyle(el).cursor === 'pointer') return true; } return false; };
-document.addEventListener('click', e => { if (isControl(e.target)) Battle.SFX.play('ui_click', null, 0.8); }, true);
+document.addEventListener('click', e => { STEP('click sound', () => { if (isControl(e.target)) Battle.SFX.play('ui_click', null, 0.8); }); }, true);
 setInterval(() => { if (!Battle.SFX.on) return; const n = TOD.night || 0; Battle.SFX.loop('ambience_day', 0.35 * (1 - n)); Battle.SFX.loop('ambience_night', 0.35 * n); }, 1000);
 // ---- cheat codes: press ` (backtick) or tap the logo to open
 const CHEATS = {
