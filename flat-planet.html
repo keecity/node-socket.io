@@ -349,7 +349,10 @@ Left-drag: select &middot; right-click ground: move &middot; right-click enemy: 
   EventTarget.prototype.removeEventListener = function (type, fn, opts) { const w = fn && fn.__w && fn.__w.get(this); return origRm.call(this, type, w || fn, opts); };
   // whole-click timing: first listener anywhere (window capture) to the end of the task
   let c0 = 0, h0 = 0; const heap = () => performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : 0;
-  orig.call(window, 'click', e => { c0 = performance.now(); h0 = heap(); setTimeout(() => { const ms = performance.now() - c0; if (ms > 50) log.push([Math.round(c0), 'click-total', desc(e.target), Math.round(ms), 'heap ' + h0 + '->' + heap() + ' MB']); }, 0); }, true);
+  // game UI clicks are fully handled by the game itself: stop them at <body> so they never bubble up to the hosting page's own
+  // document/window click listeners (those cost ~2 s and ~100 MB per click on the game's menus)
+  addEventListener('DOMContentLoaded', () => orig.call(document.body, 'click', e => { const t = e.target; if (t && t.closest && !t.closest('canvas')) { e.stopPropagation(); window.__lastUiStop = performance.now(); } }));
+  orig.call(window, 'click', e => { c0 = performance.now(); h0 = heap(); setTimeout(() => { const ms = performance.now() - c0; if (ms > 50) log.push([Math.round(c0), 'click-total', desc(e.target), Math.round(ms), 'heap ' + h0 + '->' + heap() + ' MB', 'stopped@' + Math.round((window.__lastUiStop || 0) - c0)]); }, 0); }, true);
 })();
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
