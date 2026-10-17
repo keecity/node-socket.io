@@ -2669,6 +2669,9 @@ Promise.all([loadImg('rock', ROCK_SRC), loadImg('grassA', GRASS_A_SRC), loadImg(
   const start = Battle.start(); cam.x = start.x; cam.z = start.z; WARFOG.tex.value = Battle.fogTex; WARFOG.on.value = 1;
   setStatus('Baking tree shadows…'); await new Promise(r => setTimeout(r, 0)); bakeTreeShadows();
   document.getElementById('loading').hidden = true;
+  // the page source carries ~3.8 MB of embedded textures and scripts; everything has run and been read by now, so drop those nodes:
+  // the live page shrinks to a few KB, so anything that walks or copies the document (like the host page's click handling) stays cheap
+  for (const sc of [...document.querySelectorAll('script')]) sc.remove();
   let last = performance.now();
   renderer.setAnimationLoop(now => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
