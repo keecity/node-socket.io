@@ -3328,7 +3328,8 @@ function updateFog(dt) { fogT -= dt; if (fogT > 0) return; fogT = 0.2; fogVis.fi
     for (let i = 0; i < N * N; i++) fogData[i * 4 + 2] = Math.min(255, D[i] / FOG_FADE * 255); }
   for (let i = 0; i < FOG_N * FOG_N; i++) { fogData[i * 4] = FOG_ON ? fogVis[i] * 255 : 255; fogData[i * 4 + 1] = FOG_ON ? fogExp[i] * 255 : 255; if (!FOG_ON) fogData[i * 4 + 2] = 0; fogData[i * 4 + 3] = 255; }
   // settlements stay hidden until something of yours has seen part of them
-  for (const t of towns) if (!t.found) { if (t.idx === 0) { t.found = true; continue; } for (let k = 0; k < 9 && !t.found; k++) { const a = k / 8 * 6.283, r = k ? TOWN * 0.8 : 0; if (fogExplored(t.x + Math.cos(a) * r, t.z + Math.sin(a) * r)) t.found = true; }
+  for (const t of towns) if (!t.found) { t.found = true; t.root.visible = true; continue;   // every town is on the map from the start (modern world: cities are known)
+    if (t.idx === 0) { t.found = true; continue; } for (let k = 0; k < 9 && !t.found; k++) { const a = k / 8 * 6.283, r = k ? TOWN * 0.8 : 0; if (fogExplored(t.x + Math.cos(a) * r, t.z + Math.sin(a) * r)) t.found = true; }
     if (t.found && t.idx !== 0) log(0, t.idx === 1 ? 'Enemy HQ discovered' : 'Settlement discovered'); }
   fogTex.needsUpdate = true; }
 // hide what the player cannot see: enemy units out of sight, enemy buildings on unexplored ground
@@ -3337,7 +3338,7 @@ function applyFog() { if (!FOG_ON) return;
   for (const h of helis) if (h.team === 1) { const v = fogVisible(h.pos.x, h.pos.z); if (!v) { h.root.visible = false; h.fogHid = true; if (h.bar) h.bar.g.visible = false; } else if (h.fogHid) { h.root.visible = true; h.fogHid = false; } }
   for (const s of soldiers) if (s.team === 1 && !s.inHeli) { const v = fogVisible(s.pos.x, s.pos.z); s.root.visible = v; if (!v && s.bar) s.bar.g.visible = false; }
   for (const k of trucks) if (k.team === 1 && !k.dead) { const v = fogVisible(k.x, k.z); k.obj.visible = v; if (!v) { if (k.trailer.visible) { k.trailer.visible = false; k.fogTr = k.trailer; } } else if (k.fogTr) { if (k.fogTr === k.trailer) k.trailer.visible = true; k.fogTr = null; } }
-  for (const t of towns) if (!t.found) t.root.visible = false;
+  for (const t of towns) { t.found = true; t.root.visible = true; }   // towns are known geography
   for (const k of tanks) if (k.team === 1) { const v = fogVisible(k.pos.x, k.pos.z); k.root.visible = v; if (!v && k.bar) k.bar.g.visible = false; }
   for (const L of [waterTowers, outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
 const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
@@ -3643,7 +3644,7 @@ const Battle = {
     return { x: towns[0].x * S, z: (towns[0].z + 2) * S };
   },
   selectables() { return [...robots.filter(r => r.team === 0 && r.state !== 'ko'), ...helis.filter(h => h.team === 0 && h.alive), ...soldiers.filter(s => s.team === 0 && s.alive && !s.inHeli), ...tanks.filter(t => t.team === 0 && t.alive)]; },
-  enemiesVisible() { return [...tanks.filter(t => t.team === 1 && t.alive && fogSeen(t)), ...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...airbases.filter(b => b.team === 1 && b.alive), ...pumpjacks.filter(p => p.team === 1 && p.alive), ...camps.filter(p => p.team === 1 && p.alive), ...mines.filter(p => p.team === 1 && p.alive)]; },
+  enemiesVisible() { return [...tanks.filter(t => t.team === 1 && t.alive && fogSeen(t)), ...robots.filter(r => r.team === 1 && r.state !== 'ko' && fogSeen(r)), ...helis.filter(h => h.team === 1 && h.alive && fogSeen(h)), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli && fogSeen(s)), ...airbases.filter(b => b.team === 1 && b.alive && (!FOG_ON || b.seen)), ...pumpjacks.filter(p => p.team === 1 && p.alive && (!FOG_ON || p.seen)), ...camps.filter(p => p.team === 1 && p.alive && (!FOG_ON || p.seen)), ...mines.filter(p => p.team === 1 && p.alive && (!FOG_ON || p.seen))]; },
   // world-space anchor used for picking/selection (display copy nearest the camera)
   screenAnchor(u, out) { const c = camD(); const y = u.kind === 'robot' ? groundY(u) + (u.y + 0.5) * RS : u.kind === 'soldier' ? u.pos.y + SOLD_H * 0.6 : u.kind === 'tank' ? u.pos.y + 0.19 : u.pos.y; return out.set(disp(u.pos.x, c.x) * S, y * S, disp(u.pos.z, c.z) * S); },
   // commands from the interface
