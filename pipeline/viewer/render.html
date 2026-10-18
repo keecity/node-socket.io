@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Creature Pose Renderer</title>
+<style>html,body{margin:0;background:#111}canvas{display:block}</style>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<script type="module">
+// Synthetic training renderer, driven by creature_pipeline/synth.py through Playwright.
+// Python owns all pose maths and labels; this page only places bones and draws pixels.
+import * as THREE from "three";
+import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const sanitize = (n) => THREE.PropertyBinding.sanitizeNodeName(n);
+let renderer, scene, model, bones = {}, restWorldQuat = {}, ground, hemi, sun;
+
+window.cp = {
+  async load(url, size) {
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setSize(size, size, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+    scene = new THREE.Scene();
+    hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+    sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    scene.add(hemi, sun);
+    ground = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({ color: 0x777777 }));
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    const loaded = url.toLowerCase().endsWith(".fbx")
+      ? await new FBXLoader().loadAsync(url)
+      : (await new GLTFLoader().loadAsync(url)).scene;
+    model = new THREE.Group();
+    model.add(loaded);
+    scene.add(model);
+    model.traverse((o) => {
+      if (o.isBone) bones[sanitize(o.name)] = o;
+      if (o.isMesh) o.frustumCulled = false;
+    });
+    model.updateMatrixWorld(true);
+    const rest = {};
+    for (const [n, b] of Object.entries(bones)) rest[n] = b.getWorldPosition(new THREE.Vector3()).toArray();
+    return rest;
+  },
+
+  // Similarity transform (column-major 4x4) taking the loader's space into pipeline space.
+  align(matrix, names) {
+    model.matrixAutoUpdate = false;
+    model.matrix.fromArray(matrix);
+    model.updateMatrixWorld(true);
+    for (const n of names) restWorldQuat[n] = bones[sanitize(n)].getWorldQuaternion(new THREE.Quaternion());
+    const out = {};
+    for (const n of names) out[n] = bones[sanitize(n)].getWorldPosition(new THREE.Vector3()).toArray();
+    return out;
+  },
+
+  // pose: {names, glob: [[x,y,z,w]...] pipeline-space global rotations, root: [x,y,z]}
+  setPose(pose) {
+    const q = new THREE.Quaternion(), pq = new THREE.Quaternion();
+    pose.names.forEach((n, i) => {
+      const b = bones[sanitize(n)];
+      const want = new THREE.Quaternion(...pose.glob[i]).multiply(restWorldQuat[n]);
+      b.parent.updateWorldMatrix(true, false);
+      b.parent.getWorldQuaternion(pq);
+      b.quaternion.copy(pq.invert().multiply(want));
+      if (i === 0) {
+        const local = b.parent.worldToLocal(new THREE.Vector3(...pose.root));
+        b.position.copy(local);
+      }
+      b.updateMatrixWorld(true);
+    });
+  },
+
+  setLook(look) {
+    scene.background = new THREE.Color(...look.background);
+    ground.material.color.setRGB(...look.ground);
+    ground.position.y = look.ground_y;
+    hemi.intensity = look.ambient;
+    sun.intensity = look.sun;
+    sun.position.set(...look.sun_dir);
+  },
+
+  // cams: [{position, target, up, fov_y}], poses: subframes averaged for motion blur
+  render(cams, poses) {
+    const size = renderer.domElement.width;
+    const gl = renderer.getContext();
+    const out = [];
+    for (const c of cams) {
+      const cam = new THREE.PerspectiveCamera(c.fov_y, 1, 0.01, 100);
+      cam.position.set(...c.position);
+      cam.up.set(...c.up);
+      cam.lookAt(...c.target);
+      const acc = new Float32Array(size * size * 4);
+      const px = new Uint8Array(size * size * 4);
+      for (const p of poses) {
+        this.setPose(p);
+        renderer.render(scene, cam);
+        gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        for (let k = 0; k < px.length; k++) acc[k] += px[k];
+      }
+      const canvas = new OffscreenCanvas(size, size);
+      const ctx = canvas.getContext("2d");
+      const img = ctx.createImageData(size, size);
+      for (let y = 0; y < size; y++) {  // readPixels is bottom-up
+        const src = (size - 1 - y) * size * 4, dst = y * size * 4;
+        for (let x = 0; x < size * 4; x++) img.data[dst + x] = acc[src + x] / poses.length;
+      }
+      ctx.putImageData(img, 0, 0);
+      out.push(canvas);
+    }
+    return Promise.all(out.map(async (cv) => {
+      const blob = await cv.convertToBlob({ type: "image/png" });
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      let s = "";
+      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      return btoa(s);
+    }));
+  },
+};
+window.cpReady = true;
+</script>
+</body>
+</html>

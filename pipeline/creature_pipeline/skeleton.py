@@ -12,7 +12,10 @@ import numpy as np
 
 from . import quat
 
-DEFAULT_LIMIT_DEG = 45.0
+# Rest frames are world aligned (X across the body, Y up, Z forward), so X is the main
+# swing for legs/spine/tail; twist and side bend get less. The root may turn, not tumble.
+DEFAULT_LIMITS = [[-40.0, 40.0], [-15.0, 15.0], [-15.0, 15.0]]
+ROOT_LIMITS = [[-10.0, 10.0], [-30.0, 30.0], [-8.0, 8.0]]
 
 
 @dataclass
@@ -21,7 +24,7 @@ class Joint:
     parent: int  # -1 for the root
     position: np.ndarray  # rest position, world space
     rest_rotation: np.ndarray = field(default_factory=lambda: quat.identity())
-    limits_deg: np.ndarray = field(default_factory=lambda: np.full((3, 2), [-DEFAULT_LIMIT_DEG, DEFAULT_LIMIT_DEG]))
+    limits_deg: np.ndarray = None  # (3, 2) min/max degrees per XYZ axis; None -> defaults
 
 
 class Skeleton:
@@ -58,9 +61,12 @@ class Skeleton:
         out = []
         for old in order:
             j = joints[old]
+            limits = j.limits_deg
+            if limits is None:
+                limits = ROOT_LIMITS if j.parent < 0 else DEFAULT_LIMITS
             out.append(Joint(j.name, remap[j.parent] if j.parent >= 0 else -1,
                              np.asarray(j.position, float), np.asarray(j.rest_rotation, float),
-                             np.asarray(j.limits_deg, float)))
+                             np.asarray(limits, float)))
         return out
 
     # --- serialisation -------------------------------------------------
@@ -76,7 +82,7 @@ class Skeleton:
                 parent=index[j["parent"]] if j.get("parent") else -1,
                 position=np.array(j["position"], float),
                 rest_rotation=np.array(j.get("rest_rotation", [0, 0, 0, 1]), float),
-                limits_deg=np.array(j.get("limits", [[-DEFAULT_LIMIT_DEG, DEFAULT_LIMIT_DEG]] * 3), float),
+                limits_deg=j.get("limits"),
             ))
         return cls(joints, data.get("name", "creature"))
 
@@ -114,3 +120,11 @@ class Skeleton:
 
     def height(self):
         return float(np.ptp(self.rest_positions[:, 1]))
+
+    def extent(self):
+        """Largest rest-pose bounding-box side, used to frame the cameras."""
+        return float(np.ptp(self.rest_positions, axis=0).max())
+
+    def center(self):
+        lo, hi = self.rest_positions.min(0), self.rest_positions.max(0)
+        return (lo + hi) / 2

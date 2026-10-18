@@ -56,10 +56,14 @@ def look_at(name, eye, target, fov_deg, width, height, up=(0.0, 1.0, 0.0)):
     return Camera(name, K, R, -R @ eye, width, height)
 
 
-def stereo_rig(subject_height, view_width=640, view_height=640, fov_deg=35.0, margin=2.2):
-    """Front camera on +Z looking back at the creature, side camera on +X. Distance frames the subject."""
-    dist = margin * subject_height / (2 * np.tan(np.radians(fov_deg) / 2))
-    target = np.array([0.0, subject_height / 2, 0.0])
+def stereo_rig(subject_size, view_width=640, view_height=640, fov_deg=35.0, margin=1.8, center=None):
+    """Front camera on +Z looking back at the creature, side camera on +X.
+
+    ``subject_size`` is the creature's largest extent; the distance leaves ``margin`` times
+    that across the view so the whole body stays in frame while it moves.
+    """
+    dist = margin * subject_size / (2 * np.tan(np.radians(fov_deg) / 2))
+    target = np.array([0.0, subject_size / 2, 0.0]) if center is None else np.asarray(center, float)
     front = look_at("front", target + [0, 0, dist], target, fov_deg, view_width, view_height)
     side = look_at("side", target + [dist, 0, 0], target, fov_deg, view_width, view_height)
     return [front, side]
