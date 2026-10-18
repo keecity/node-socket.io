@@ -113,7 +113,9 @@ def cmd_solve(a):
     views = split_views(frames, layout, cams[0].width)
     det = Detector(a.detector)
     kp = np.stack([det(v) for v in views])
-    local, root, report = solve(skel, cams, kp, sigma_frames=a.smooth, refine_2d=not a.no_refine)
+    from .exam import CLIP_REFINE
+    opts = dict(CLIP_REFINE, key_every=a.key_every, keys_only=a.keys_only)
+    local, root, report = solve(skel, cams, kp, sigma_frames=a.smooth, refine_2d=not a.no_refine, refine_opts=opts)
     report["frames"] = len(frames)
     report["fps"] = fps
     print(json.dumps(report, indent=2))
@@ -193,6 +195,8 @@ def main(argv=None):
     s.add_argument("--fps", type=float)
     s.add_argument("--smooth", type=float, default=1.0, help="temporal smoothing sigma in frames")
     s.add_argument("--no-refine", action="store_true", help="skip fitting the rig directly to the 2D detections")
+    s.add_argument("--key-every", type=int, help="solve keys every n frames, curve in between")
+    s.add_argument("--keys-only", action="store_true", help="with --key-every, use only the key frames' detections")
     s.add_argument("--target", help="model the game plays the clip on; for an .fbx the root track is written in its units/axes")
     s.add_argument("--keypoints", help="also save raw detections (.npy)")
     s.add_argument("--force", action="store_true")
