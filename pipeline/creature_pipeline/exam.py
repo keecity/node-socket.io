@@ -27,6 +27,12 @@ def simulate_detections(cams, X, rng, noise_px=1.5, dropout=0.03):
 def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3):
     X, err, valid = triangulate(cams, kp, min_conf=min_conf)
     report = check_view_agreement(err, valid, body_size_px(skel, cams))
+    never = ~valid.any(0)
+    if never.any():
+        # Joints never confidently seen: use the best-effort estimate rather than giving up.
+        X_any, _, _ = triangulate(cams, kp, min_conf=0.0)
+        X[:, never] = X_any[:, never]
+    report["low_confidence_joints"] = [skel.names[j] for j in np.flatnonzero(valid.mean(0) < 0.5)]
     X = smooth(fill_gaps(X), sigma_frames)
     local, root = solve_rotations(skel, X)
     return local, root, report

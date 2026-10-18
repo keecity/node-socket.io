@@ -114,7 +114,8 @@ def decode(heatmaps, softmax=False):
     u = ((w * xs).sum((-1, -2)) / s + 0.5) / W
     v = ((w * ys).sum((-1, -2)) / s + 0.5) / H
     if softmax:
-        conf = s
+        # A perfect sigma-2 Gaussian keeps ~62% of its mass in the 5x5 window: scale that to 1.
+        conf = s / 0.62
     return torch.stack([u, v], -1), conf.clamp(0, 1)
 
 
