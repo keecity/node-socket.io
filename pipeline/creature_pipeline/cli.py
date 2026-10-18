@@ -28,6 +28,10 @@ def load_skeleton(path):
 
 def cmd_skeleton(a):
     skel = load_skeleton(a.rig)
+    if a.anatomical_limits:
+        from .limits import apply
+        matched = apply(skel)
+        print(f"anatomical limits set on {len(matched)} bones; unmatched bones keep defaults")
     skel.save(a.out)
     print(f"{len(skel)} joints, rest extent {skel.extent():.3f} m -> {a.out}")
 
@@ -134,6 +138,8 @@ def main(argv=None):
     s = sub.add_parser("skeleton")
     s.add_argument("rig")
     s.add_argument("-o", "--out", default="skeleton.json")
+    s.add_argument("--anatomical-limits", action="store_true",
+                   help="set per-joint limits from bone names (jaw hinge, knee hinge, no tail twist, ...)")
     s.set_defaults(fn=cmd_skeleton)
 
     s = sub.add_parser("synth")

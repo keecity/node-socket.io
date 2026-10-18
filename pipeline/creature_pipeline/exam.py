@@ -26,7 +26,9 @@ def simulate_detections(cams, X, rng, noise_px=1.5, dropout=0.03):
 
 # Solver terms for generated clips, tuned on idle/walk/attack: remove floor penetration and
 # most frame-to-frame jitter. ``contact_weight`` assumes planted feet do not slide.
-CLIP_REFINE = dict(smooth_weight=0.1, rot_smooth_weight=0.2, floor_weight=5.0, contact_weight=1.0, iters=1500)
+# ``use_limits`` holds every joint inside the skeleton's limits (see limits.py).
+CLIP_REFINE = dict(smooth_weight=0.1, rot_smooth_weight=0.2, floor_weight=5.0, contact_weight=1.0, iters=1500,
+                   use_limits=True)
 # The exam's random motion slides its feet along the floor, so it is solved without the contact lock.
 EXAM_REFINE = dict(CLIP_REFINE, contact_weight=0.0)
 
@@ -45,7 +47,10 @@ def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3, refine_2d=False, sigma
     if refine_2d:
         # Fit the rig straight to the 2D detections, with smoothing and floor contact.
         from .refine import refine
-        local, root = refine(skel, cams, kp, local, root, sigma=sigma, **(refine_opts or CLIP_REFINE))
+        opts = dict(refine_opts or CLIP_REFINE)
+        if opts.pop("use_limits", False):
+            opts["limits"] = skel.limits
+        local, root = refine(skel, cams, kp, local, root, sigma=sigma, **opts)
     return local, root, report
 
 

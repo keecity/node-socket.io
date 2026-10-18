@@ -60,6 +60,11 @@ $P solve walk.mp4 --skeleton skeleton.json --detector detector.pt --layout layou
 
 ### Joint limits
 
+`python -m creature_pipeline skeleton rig.fbx --anatomical-limits` sets limits from bone names
+(`limits.py`): the jaw only hinges open, knees are near-hinges, tails bend but do not twist,
+`*_nub` tip bones are locked. The solver treats them as hard limits on every non-root joint,
+which removes sideways jaw wobble and twisting tails or feet that the cameras cannot see.
+
 `skeleton.json` holds per-joint `limits` in degrees for X, Y and Z, measured in world-aligned
 rest frames (X across the body, Y up, Z forward). X is the main swing for legs, spine and tail.
 Defaults are ±40° on X and ±15° on Y and Z, and the root gets ±10° pitch, ±30° yaw and ±8° roll.

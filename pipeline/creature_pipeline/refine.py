@@ -38,6 +38,27 @@ def _to_rotvec(q):
     return q[..., :3] / s * angle
 
 
+def _axis_q(axis, angle):
+    z = torch.zeros_like(angle)
+    half_s, half_c = torch.sin(angle / 2), torch.cos(angle / 2)
+    parts = [z, z, z]
+    parts[axis] = half_s
+    return torch.stack(parts + [half_c], -1)
+
+
+def _euler_xyz_q(e):
+    """Same convention as quat.from_euler_xyz: q = qx * qy * qz."""
+    return _qmul(_qmul(_axis_q(0, e[..., 0]), _axis_q(1, e[..., 1])), _axis_q(2, e[..., 2]))
+
+
+def _to_euler_xyz(q):
+    R = quat.to_matrix(quat.normalize(q))
+    b = np.arcsin(np.clip(R[..., 0, 2], -1, 1))
+    a = np.arctan2(-R[..., 1, 2], R[..., 2, 2])
+    c = np.arctan2(-R[..., 0, 1], R[..., 0, 0])
+    return np.stack([a, b, c], -1)
+
+
 def _forward(parents, offsets, local_q, root):
     pos, glob = [None] * len(parents), [None] * len(parents)
     for j, p in enumerate(parents):
@@ -50,7 +71,7 @@ def _forward(parents, offsets, local_q, root):
 
 
 def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.01, huber=8.0, min_conf=0.05, lr=0.02,
-           rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, log=None):
+           rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, limits=None, log=None):
     """kp (V, T, J, 3) detections; local (T, J, 4), root (T, 3) initial solve. Returns refined (local, root).
 
     ``sigma`` (V, J) is the detector's measured pixel noise per view and joint (see calibrate);
@@ -62,6 +83,11 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     then stays above the floor), and ``contact_weight`` stops a foot that is on the ground from
     sliding. ``rot_smooth_weight`` penalises rotational acceleration, which removes the jitter
     that position smoothing alone leaves in end joints.
+
+    ``limits`` (J, 3, 2) radians (e.g. skel.limits after limits.apply) makes every non-root
+    joint a hard-limited Euler XYZ rotation: each angle is squashed into its range, so a jaw
+    cannot swing sideways and a knee cannot twist, however noisy the detections. The root
+    stays free so the creature can rear up and turn.
     """
     dt = torch.float64
     parents = [int(p) for p in skel.parents]
@@ -74,6 +100,26 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     rel = np.ones(kp.shape[::2][:2]) if sigma is None else np.asarray(sigma) / np.median(sigma)
     sig = torch.tensor(rel, dtype=dt)[:, None, :]
     r = torch.tensor(_to_rotvec(local), dtype=dt, requires_grad=True)
+    lim = None
+    if limits is not None:
+        lim = torch.tensor(np.asarray(limits, float), dtype=dt)
+        lo, hi = lim[..., 0], lim[..., 1]
+        e0 = torch.tensor(_to_euler_xyz(local), dtype=dt)
+        frac = ((e0 - lo) / (hi - lo).clamp(min=1e-6)).clamp(0.02, 0.98)
+        raw = torch.log(frac / (1 - frac)).detach().requires_grad_(True)
+        root_idx = [j for j, p in enumerate(parents) if p < 0]
+
+    def local_q():
+        if lim is None:
+            return _from_rotvec(r)
+        q = _euler_xyz_q(lo + (hi - lo) * torch.sigmoid(raw))
+        free = _from_rotvec(r)
+        q = q.clone()
+        q[:, root_idx] = free[:, root_idx]
+        return q
+
+    def rot_params():
+        return r if lim is None else torch.cat([r[:, [i for i in root_idx]], lo + (hi - lo) * torch.sigmoid(raw)], 1)
     t = torch.tensor(root, dtype=dt, requires_grad=True)
     scale = float(np.mean([c.K[0, 0] for c in cams]))
     h = skel.height()
@@ -81,11 +127,11 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     feet = [j for j in range(len(skel)) if rest_y[j] < rest_y.min() + 0.05 * h]
     floor_y = torch.tensor(rest_y[feet], dtype=dt)
     px_per_m = scale / float(np.mean([np.linalg.norm(c.center - skel.center()) for c in cams]))
-    opt = torch.optim.Adam([r, t], lr=lr)
+    opt = torch.optim.Adam([r, t] + ([raw] if lim is not None else []), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, iters, eta_min=lr * 0.02)
     for it in range(iters):
         opt.zero_grad()
-        X = _forward(parents, offsets, _from_rotvec(r), t)  # (T, J, 3)
+        X = _forward(parents, offsets, local_q(), t)  # (T, J, 3)
         Xh = torch.cat([X, torch.ones_like(X[..., :1])], -1)
         uvw = torch.einsum("vij,tkj->vtki", P, Xh)
         uv = uvw[..., :2] / uvw[..., 2:3]
@@ -96,7 +142,8 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
         smooth = (accel * scale).pow(2).sum(-1).mean() if len(X) > 2 else X.sum() * 0
         loss = data + smooth_weight * smooth
         if rot_smooth_weight and len(X) > 2:
-            racc = r[2:] - 2 * r[1:-1] + r[:-2]
+            rp = rot_params()
+            racc = rp[2:] - 2 * rp[1:-1] + rp[:-2]
             loss = loss + rot_smooth_weight * (racc * 100).pow(2).sum(-1).mean()
         if feet and (floor_weight or contact_weight):
             fy = X[:, feet, 1]
@@ -111,7 +158,8 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
         sched.step()
         if log and (it % 100 == 0 or it == iters - 1):
             log(f"refine {it}: reprojection {data.item():.2f}, smooth {smooth.item():.2f}")
-    q = _from_rotvec(r.detach()).numpy()
+    with torch.no_grad():
+        q = local_q().numpy()
     return quat.make_continuous(quat.normalize(q)), t.detach().numpy()
 
 

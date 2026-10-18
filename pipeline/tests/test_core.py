@@ -86,3 +86,15 @@ def test_split_views_scales_layout():
     frames[:, :, 640:] = 255  # right half white
     left, right = split_views(frames, layout, 64)
     assert left.shape == (2, 64, 64, 3) and left.max() == 0 and right.min() == 255
+
+
+def test_limited_refine_respects_limits(wolf):
+    from creature_pipeline.refine import _to_euler_xyz, refine
+    wolf.limits[1:] = np.radians([[-5, 5], [-1, 1], [-1, 1]])
+    cams = rig_for(wolf)
+    local, root, _ = random_motion(wolf, np.random.default_rng(5), frames=12)
+    pos, _ = wolf.forward(local, root)
+    kp = simulate_detections(cams, pos, np.random.default_rng(1), noise_px=3.0)
+    L, R = refine(wolf, cams, kp, local, root, iters=50, limits=wolf.limits)
+    e = _to_euler_xyz(L)[:, 1:]
+    assert np.all(e >= wolf.limits[1:, :, 0] - 1e-6) and np.all(e <= wolf.limits[1:, :, 1] + 1e-6)
