@@ -66,7 +66,7 @@ def patch_features(backbone, x):
 
 def gaussian_targets(uv_norm, vis, side, sigma=1.5):
     """uv in [0,1] (B, J, 2) -> heatmaps (B, J, side, side); invisible joints get all zeros."""
-    g = torch.arange(side, dtype=torch.float32) + 0.5
+    g = torch.arange(side, dtype=torch.float32, device=uv_norm.device) + 0.5
     u = uv_norm[..., 0:1, None] * side
     v = uv_norm[..., 1:2, None] * side
     hm = torch.exp(-((g.view(1, 1, 1, -1) - u) ** 2 + (g.view(1, 1, -1, 1) - v) ** 2) / (2 * sigma ** 2))
