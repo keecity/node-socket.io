@@ -59,6 +59,29 @@ def _to_euler_xyz(q):
     return np.stack([a, b, c], -1)
 
 
+def key_frames(T, every):
+    """First frame, every ``every``-th frame and the last frame."""
+    keys = list(range(0, T, every))
+    if keys[-1] != T - 1:
+        keys.append(T - 1)
+    return keys
+
+
+def interpolation_matrix(T, keys):
+    """(T, K) Catmull-Rom weights: dense frames as a smooth curve through the key frames."""
+    K = len(keys)
+    M = np.zeros((T, K))
+    for i in range(K - 1):
+        a, b = keys[i], keys[i + 1]
+        for t in range(a, b + (i == K - 2)):
+            u = (t - a) / (b - a)
+            w = [-0.5 * u ** 3 + u ** 2 - 0.5 * u, 1.5 * u ** 3 - 2.5 * u ** 2 + 1,
+                 -1.5 * u ** 3 + 2 * u ** 2 + 0.5 * u, 0.5 * u ** 3 - 0.5 * u ** 2]
+            for k, wk in zip((i - 1, i, i + 1, i + 2), w):
+                M[t, min(max(k, 0), K - 1)] += wk
+    return M
+
+
 def _forward(parents, offsets, local_q, root):
     pos, glob = [None] * len(parents), [None] * len(parents)
     for j, p in enumerate(parents):
@@ -72,7 +95,7 @@ def _forward(parents, offsets, local_q, root):
 
 def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.01, huber=8.0, min_conf=0.05, lr=0.02,
            rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, limits=None, rot_smooth_scale=None,
-           log=None):
+           key_every=None, keys_only=False, log=None):
     """kp (V, T, J, 3) detections; local (T, J, 4), root (T, 3) initial solve. Returns refined (local, root).
 
     ``sigma`` (V, J) is the detector's measured pixel noise per view and joint (see calibrate);
@@ -90,6 +113,11 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     cannot swing sideways and a knee cannot twist, however noisy the detections. The root
     stays free so the creature can rear up and turn. A range with min == max locks that axis.
     ``rot_smooth_scale`` (J,) multiplies the rotational smoothing per joint.
+
+    ``key_every`` solves only key frames (first, every n-th, last); every other frame is a
+    Catmull-Rom curve through them, so frame-to-frame jitter cannot exist between keys.
+    By default each key is still fitted against the detections of every frame around it;
+    ``keys_only`` uses the detections of the key frames alone.
     """
     dt = torch.float64
     parents = [int(p) for p in skel.parents]
@@ -101,21 +129,30 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     # so ``huber`` stays in (typical-joint) pixels and smooth_weight means the same either way.
     rel = np.ones(kp.shape[::2][:2]) if sigma is None else np.asarray(sigma) / np.median(sigma)
     sig = torch.tensor(rel, dtype=dt)[:, None, :]
-    r = torch.tensor(_to_rotvec(local), dtype=dt, requires_grad=True)
+    T = len(local)
+    keys = key_frames(T, key_every) if key_every and key_every > 1 else list(range(T))
+    M = torch.tensor(interpolation_matrix(T, keys), dtype=dt) if len(keys) < T else None
+    dense = (lambda p: torch.einsum("tk,k...->t...", M, p)) if M is not None else (lambda p: p)
+    if keys_only and M is not None:
+        mask = np.zeros(T)
+        mask[keys] = 1
+        w = w * torch.tensor(mask, dtype=dt)[None, :, None]
+    local_k, root_k = local[keys], root[keys]
+    r = torch.tensor(_to_rotvec(local_k), dtype=dt, requires_grad=True)
     lim = None
     if limits is not None:
         lim = torch.tensor(np.asarray(limits, float), dtype=dt)
         lo, hi = lim[..., 0], lim[..., 1]
-        e0 = torch.tensor(_to_euler_xyz(local), dtype=dt)
+        e0 = torch.tensor(_to_euler_xyz(local_k), dtype=dt)
         frac = ((e0 - lo) / (hi - lo).clamp(min=1e-6)).clamp(0.02, 0.98)
         raw = torch.log(frac / (1 - frac)).detach().requires_grad_(True)
         root_idx = [j for j, p in enumerate(parents) if p < 0]
 
     def local_q():
         if lim is None:
-            return _from_rotvec(r)
-        q = _euler_xyz_q(lo + (hi - lo) * torch.sigmoid(raw))
-        free = _from_rotvec(r)
+            return _from_rotvec(dense(r))
+        q = _euler_xyz_q(lo + (hi - lo) * torch.sigmoid(dense(raw)))
+        free = _from_rotvec(dense(r))
         q = q.clone()
         q[:, root_idx] = free[:, root_idx]
         return q
@@ -123,14 +160,14 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     def rot_params():
         """Per-joint rotation parameters (T, J, 3): rotation vectors, or Euler angles when limited."""
         if lim is None:
-            return r
-        e = lo + (hi - lo) * torch.sigmoid(raw)
+            return dense(r)
+        e = lo + (hi - lo) * torch.sigmoid(dense(raw))
         e = e.clone()
-        e[:, root_idx] = r[:, root_idx]
+        e[:, root_idx] = dense(r)[:, root_idx]
         return e
     js = torch.ones(len(parents), dtype=dt) if rot_smooth_scale is None else \
         torch.tensor(np.asarray(rot_smooth_scale, float), dtype=dt)
-    t = torch.tensor(root, dtype=dt, requires_grad=True)
+    t = torch.tensor(root_k, dtype=dt, requires_grad=True)
     scale = float(np.mean([c.K[0, 0] for c in cams]))
     h = skel.height()
     rest_y = skel.rest_positions[:, 1]
@@ -141,7 +178,7 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, iters, eta_min=lr * 0.02)
     for it in range(iters):
         opt.zero_grad()
-        X = _forward(parents, offsets, local_q(), t)  # (T, J, 3)
+        X = _forward(parents, offsets, local_q(), dense(t))  # (T, J, 3)
         Xh = torch.cat([X, torch.ones_like(X[..., :1])], -1)
         uvw = torch.einsum("vij,tkj->vtki", P, Xh)
         uv = uvw[..., :2] / uvw[..., 2:3]
@@ -170,7 +207,8 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
             log(f"refine {it}: reprojection {data.item():.2f}, smooth {smooth.item():.2f}")
     with torch.no_grad():
         q = local_q().numpy()
-    return quat.make_continuous(quat.normalize(q)), t.detach().numpy()
+        root_out = dense(t).numpy()
+    return quat.make_continuous(quat.normalize(q)), root_out
 
 
 def calibrate(skel, cams, kp, gt_positions):
