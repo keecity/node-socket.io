@@ -20,6 +20,7 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <h2>Part</h2><div class="row" id="parts"></div>
 <h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
+<div id="blend"></div>
 <h2>Placement data</h2><textarea id="out" readonly></textarea><div class="row"><button id="copy">Copy</button></div><p id="stat"></p></aside></div>
 <script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
 <script>
@@ -42,8 +43,28 @@ window.addEventListener('pointerup', () => drag = null);
 canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.4, Math.min(12, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
 
 // parts and the placement aligned by hand (parts_layout.json); arm/leg pivots are at the top of the limb
-const PARTS = {"body":{"p":[-0.0392,1,0],"r":[0,0,6.733],"s":[1,1,1]},"head":{"p":[0.8574,1.2574,0],"r":[0,0,0],"s":[1.4394,1.4394,1.4394]},"arm":{"p":[0.3601,1.1107,0.3356],"r":[15.6835,49.1527,17.3629],"s":[1,1,1]},"tail":{"p":[-0.889,0.8902,0],"r":[0,0,-172.782],"s":[1,1,1]},"leg":{"p":[-0.0393,1.0196,0.1074],"r":[-41.2838,47.5512,-49.9566],"s":[1.2895,1.2895,1.2895]}};
-const ents = {}, mirrors = {};
+const PARTS = {"arm":{"p":[0.3742,1.1254,0.2615],"r":[41.7643,74.6067,46.0985],"s":[1,1,1]},"leg":{"p":[-0.0393,1.0196,0.1074],"r":[-41.2838,47.5512,-49.9566],"s":[1.2895,1.2895,1.2895]},"head":{"p":[0.8574,1.2574,0],"r":[0,0,0],"s":[1.4394,1.4394,1.4394]},"tail":{"p":[-0.889,0.8902,0],"r":[0,0,-172.782],"s":[1,1,1]},"body":{"p":[-0.0392,1,0],"r":[0,0.8407,6.733],"s":[1,1,1]}};
+const ents = {}, mirrors = {}, VARIANTS = { head: 5, arm: 4, leg: 4 };
+// variant blending: shape through the part's morph targets (one per variant), paint by mixing the baked textures on a canvas
+const setupBlend = nm => {
+  const n = VARIANTS[nm], box = document.createElement('div'); box.innerHTML = '<h2>' + nm[0].toUpperCase() + nm.slice(1) + ' variants</h2>';
+  const sl = []; for (let k = 0; k < n; k++) { const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center';
+    l.innerHTML = '<span style="width:16px">' + 'ABCDE'[k] + '</span><input type="range" min="0" max="1" step="0.01" value="' + (k ? 0 : 1) + '" style="flex:1">'; box.appendChild(l); sl.push(l.querySelector('input')); }
+  $('blend').appendChild(box);
+  const imgs = [...Array(n)].map((_, k) => new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = 'part_' + nm + '_tex' + k + '.jpg'; }));
+  Promise.all(imgs).then(im => {
+    const S = 512, cv = document.createElement('canvas'); cv.width = cv.height = S; const cx = cv.getContext('2d', { willReadFrequently: true });
+    const px = im.map(i => { cx.drawImage(i, 0, 0, S, S); return cx.getImageData(0, 0, S, S).data; }), out = cx.createImageData(S, S);
+    const tex = new pc.Texture(app.graphicsDevice, { width: S, height: S, format: pc.PIXELFORMAT_RGBA8, mipmaps: true });
+    const mis = [ents[nm], mirrors[nm]].filter(Boolean).flatMap(e => e.findComponents('render').flatMap(r => r.meshInstances));
+    mis.forEach(m => { m.material.diffuseMap = tex; m.material.update(); });
+    const upd = () => { const w = sl.map(x => +x.value), t = w.reduce((a, b) => a + b, 0) || 1;
+      mis.forEach(m => { if (m.morphInstance) for (let k = 1; k < n; k++) m.morphInstance.setWeight(k - 1, w[k] / t); });
+      const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
+      cx.putImageData(out, 0, 0); tex.setSource(cv); };
+    sl.forEach(x => x.addEventListener('input', upd)); upd();
+  });
+};
 const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t => new Promise((ok, no) => {
   const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0))], { type: 'model/gltf-binary' }));
   app.assets.loadFromUrlAndFilename(url, nm + '.glb', 'container', (err, a) => err ? no(err) : ok(a.resource));
@@ -70,7 +91,7 @@ Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
   if (nm === 'arm' || nm === 'leg') { const m = make(res); app.root.addChild(m); mirrors[nm] = m; }
 }))).then(() => {
   for (const nm of Object.keys(PARTS)) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
-  syncMirrors(); json(); show();
+  syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend);
 }).catch(e => { $('stat').textContent = 'Could not load parts: ' + e.message; });
 app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
   cam.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.target); });
