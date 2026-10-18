@@ -12,8 +12,9 @@ import numpy as np
 RULES = [
     # end-of-chain markers only carry tips; they should not rotate
     (("nub",), [[0, 0], [0, 0], [0, 0]]),
-    # jaw: a pure hinge that opens down; locked sideways and in roll
-    (("jaw",), [[-3, 35], [0, 0], [0, 0]]),
+    # jaw: a pure hinge, locked sideways and in roll. Both directions: many rigs rest with the
+    # mouth part open, so closing goes past rest (this rig's attack spans about -19..+11 deg).
+    (("jaw",), [[-30, 35], [0, 0], [0, 0]]),
     (("head",), [[-30, 30], [-30, 30], [-8, 8]]),
     (("neck",), [[-30, 30], [-30, 30], [-8, 8]]),
     (("spine",), [[-20, 20], [-20, 20], [-8, 8]]),
@@ -35,7 +36,8 @@ RULES = [
 
 # Extra rotational smoothing for joints whose noise shows most on screen. The jaw rides on the
 # head, so a jittery head nod reads as a loose jaw.
-SMOOTHING = [(("jaw",), 40.0), (("head",), 40.0), (("neck",), 10.0)]
+# The jaw is excluded: smoothing it flattens a quick bite.
+SMOOTHING = [(("head",), 40.0), (("neck",), 10.0)]
 
 
 def smoothing_scale(skel):
