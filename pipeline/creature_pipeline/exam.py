@@ -24,7 +24,14 @@ def simulate_detections(cams, X, rng, noise_px=1.5, dropout=0.03):
     return kp
 
 
-def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3, refine_2d=False, sigma=None):
+# Solver terms for generated clips, tuned on idle/walk/attack: remove floor penetration and
+# most frame-to-frame jitter. ``contact_weight`` assumes planted feet do not slide.
+CLIP_REFINE = dict(smooth_weight=0.1, rot_smooth_weight=0.2, floor_weight=5.0, contact_weight=1.0, iters=1500)
+# The exam's random motion slides its feet along the floor, so it is solved without the contact lock.
+EXAM_REFINE = dict(CLIP_REFINE, contact_weight=0.0)
+
+
+def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3, refine_2d=False, sigma=None, refine_opts=None):
     X, err, valid = triangulate(cams, kp, min_conf=min_conf)
     report = check_view_agreement(err, valid, body_size_px(skel, cams))
     never = ~valid.any(0)
@@ -36,9 +43,9 @@ def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3, refine_2d=False, sigma
     X = smooth(fill_gaps(X), sigma_frames)
     local, root = solve_rotations(skel, X)
     if refine_2d:
-        # Fit the rig straight to the 2D detections; on the exam this cut joint error ~5.7% -> ~3.8%.
+        # Fit the rig straight to the 2D detections, with smoothing and floor contact.
         from .refine import refine
-        local, root = refine(skel, cams, kp, local, root, sigma=sigma)
+        local, root = refine(skel, cams, kp, local, root, sigma=sigma, **(refine_opts or CLIP_REFINE))
     return local, root, report
 
 
@@ -58,7 +65,7 @@ def run_exam(skel, cams, gt_local, gt_root, keypoints=None, rng=None, pass_pct_h
     rng = rng or np.random.default_rng(0)
     gt_pos, _ = skel.forward(gt_local, gt_root)
     kp = simulate_detections(cams, gt_pos, rng) if keypoints is None else keypoints
-    local, root, views = solve(skel, cams, kp, refine_2d=refine_2d)
+    local, root, views = solve(skel, cams, kp, refine_2d=refine_2d, refine_opts=EXAM_REFINE)
     result = score(skel, gt_pos, local, root)
     result["views"] = views
     result["passed"] = bool(views["ok"] and result["mpjpe_pct_height"] <= pass_pct_height)
