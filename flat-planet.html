@@ -2051,8 +2051,10 @@ function drawMini() {
   if (terrToggle || placing) for (const [team, col] of [[0, 'rgba(95,208,255,.35)'], [1, 'rgba(255,80,70,.3)']]) { mctx.fillStyle = col;
     for (const [cx, cz, fn] of Battle.terrDiscs(team)) { mctx.beginPath(); for (let i = 0; i <= 64; i++) { const a = i / 64 * 6.283, r = fn(a) * 12 * s; mctx[i ? 'lineTo' : 'moveTo'](cx * 12 * s + Math.cos(a) * r, cz * 12 * s + Math.sin(a) * r); } mctx.fill(); } }
   for (const f of Battle.oilFields) { mctx.fillStyle = '#1a1208'; mctx.strokeStyle = '#c89a3a'; mctx.lineWidth = 1; mctx.beginPath(); mctx.arc(f.x * 12 * s, f.z * 12 * s, 3.5, 0, 7); mctx.fill(); mctx.stroke(); }
-  for (const o of Battle.outposts) if (o.alive && (o.team === 0 || o.seen || !Battle.fogOn)) { mctx.fillStyle = o.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(o.x * 12 * s - 3, o.z * 12 * s - 3, 6, 6); }
-  for (const b of Battle.airbases) if (b.alive && (b.team === 0 || Battle.towns[1].seenAB)) { mctx.save(); mctx.translate(b.x * 12 * s, b.z * 12 * s); mctx.rotate(-b.rot); mctx.fillStyle = b.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(-4, -7, 8, 14); mctx.restore(); }
+  for (const k of (Battle.fogOn ? Battle.knownStructs : [])) { const b = k; if (k.kind === 'outpost' || k.kind === 'airbase') continue; mctx.fillStyle = '#ff5046'; mctx.strokeStyle = '#300'; mctx.fillRect(b.x * 12 * s - 3, b.z * 12 * s - 3, 6, 6); mctx.strokeRect(b.x * 12 * s - 3, b.z * 12 * s - 3, 6, 6); }   // identified enemy structures stay marked until destroyed
+  for (const k of (Battle.fogOn ? Battle.knownStructs : [])) if (k.kind === 'outpost' || k.kind === 'airbase') { mctx.fillStyle = '#ff5046'; mctx.fillRect(k.x * 12 * s - 3, k.z * 12 * s - 3, 6, 6); }   // as last known
+  for (const o of Battle.outposts) if (o.alive && (o.team === 0 || !Battle.fogOn)) { mctx.fillStyle = o.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(o.x * 12 * s - 3, o.z * 12 * s - 3, 6, 6); }
+  for (const b of Battle.airbases) if (b.alive && (b.team === 0 || !Battle.fogOn)) { mctx.save(); mctx.translate(b.x * 12 * s, b.z * 12 * s); mctx.rotate(-b.rot); mctx.fillStyle = b.team ? '#ff5046' : '#5fd0ff'; mctx.fillRect(-4, -7, 8, 14); mctx.restore(); }
   Battle.drawMini(mctx, s);
   const r = cam.dist * 0.6 * s;
   mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.5;

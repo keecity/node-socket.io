@@ -1031,13 +1031,15 @@ let HQ_SHAPES = null;
 // each entry: [x, z, radiusFn]
 const terrDiscs = team => { if (!HQ_SHAPES) HQ_SHAPES = [blobShape(seed ^ 0x7a11, TERR_HQ_R), blobShape(seed ^ 0x3c09, TERR_HQ_R)];
   const d = []; const t = towns[team]; if (t) d.push([t.x, t.z, HQ_SHAPES[team]]); for (const o of outposts) if (o.team === team && o.alive && o.done !== false) d.push([o.x, o.z, o.shape]); return d; };
+// what the player knows of a team's territory: all of their own; the enemy's only from sources found by recon or engagement
+const terrKnown = team => team === 0 || !FOG_ON ? terrDiscs(team) : terrDiscs(team).filter(([cx, cz]) => { const t = towns[1]; if (t && cx === t.x && cz === t.z) return !!t.hqSeen; const o = outposts.find(o => o.x === cx && o.z === cz); return !!(o && o.seen); });
 const shapeR = (fn, cx, cz, x, z) => fn(Math.atan2(wd(z - cz), wd(x - cx)));
 function inTerritory(team, x, z) { for (const [cx, cz, fn] of terrDiscs(team)) if (wdist2(cx, cz, x, z) < shapeR(fn, cx, cz, x, z)) return true; return false; }
 const TERR_N = 1024, terrData = new Uint8Array(TERR_N * TERR_N * 4), terrTex = new THREE.DataTexture(terrData, TERR_N, TERR_N, THREE.RGBAFormat);
 terrTex.wrapS = terrTex.wrapT = THREE.RepeatWrapping; terrTex.magFilter = terrTex.minFilter = THREE.LinearFilter;
 function rebuildTerritory() {   // r = player territory, g = enemy: 0.5 at the border, a signed distance ramp around it
   terrData.fill(0); const px = W / TERR_N;
-  for (const team of [0, 1]) for (const [cx, cz, fn] of terrDiscs(team)) { const R = Math.ceil((fn.max + 3) / px), ci = Math.round(wm(cx) / px), cj = Math.round(wm(cz) / px);
+  for (const team of [0, 1]) for (const [cx, cz, fn] of terrKnown(team)) { const R = Math.ceil((fn.max + 3) / px), ci = Math.round(wm(cx) / px), cj = Math.round(wm(cz) / px);
     for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) { const ox = i * px + ci * px - wm(cx), oz = j * px + cj * px - wm(cz), d = Math.hypot(ox, oz), v = clamp(0.5 + (fn(Math.atan2(oz, ox)) - d) / 6, 0, 1) * 255;
       const g = (mod(cj + j, TERR_N) * TERR_N + mod(ci + i, TERR_N)) * 4 + team; if (v > terrData[g]) terrData[g] = v; } }
   terrTex.needsUpdate = true; }
@@ -2220,6 +2222,7 @@ const ATTACKS = {
 };
 function unitName(f) { return `${TEAM_NAME[f.team]} ${f.kind === 'airbase' ? 'air base' : f.kind === 'pumpjack' ? 'oil pump' : f.kind === 'woodcutter' ? 'woodcutter camp' : f.kind === 'mine' ? 'mine' : f.kind === 'farm' ? 'farm' : f.kind === 'warehouse' ? 'warehouse' : f.kind === 'hangar' ? 'hangar' : f.kind === 'tank' ? 'tank' : f.kind === 'water' ? 'water tower' : f.kind === 'soldier' ? 'soldier' : f.kind === 'heli' ? 'gunship' : (f.role === 'gunner' ? 'gunner' : 'striker')}`; }
 function damage(att, def, amount, label, heavy, dir, at) {
+  if (att && def && att.team !== def.team) { detect(att.team === 1 ? att : def); if (def.team === 1) def.hitT = missionClock; if (def.team === 1 && def.kind === 'tower' && towns[1]) towns[1].hqSeen = true; }
   if (def.kind === 'heli') return heliHit(def, amount, att, at);
   if (def.kind === 'airbase') return airbaseHit(def, amount);
   if (def.kind === 'pumpjack') return pumpHit(def, amount);
@@ -3333,15 +3336,43 @@ function updateFog(dt) { fogT -= dt; if (fogT > 0) return; fogT = 0.2; fogVis.fi
     if (t.found && t.idx !== 0) log(0, t.idx === 1 ? 'Enemy HQ discovered' : 'Settlement discovered'); }
   fogTex.needsUpdate = true; }
 // hide what the player cannot see: enemy units out of sight, enemy buildings on unexplored ground
-function applyFog() { if (!FOG_ON) return;
-  for (const f of robots) if (f.team === 1 && !fogVisible(f.pos.x, f.pos.z)) { f.root.visible = false; if (f.bar) f.bar.g.visible = false; }
-  for (const h of helis) if (h.team === 1) { const v = fogVisible(h.pos.x, h.pos.z); if (!v) { h.root.visible = false; h.fogHid = true; if (h.bar) h.bar.g.visible = false; } else if (h.fogHid) { h.root.visible = true; h.fogHid = false; } }
-  for (const s of soldiers) if (s.team === 1 && !s.inHeli) { const v = fogVisible(s.pos.x, s.pos.z); s.root.visible = v; if (!v && s.bar) s.bar.g.visible = false; }
-  for (const k of trucks) if (k.team === 1 && !k.dead) { const v = fogVisible(k.x, k.z); k.obj.visible = v; if (!v) { if (k.trailer.visible) { k.trailer.visible = false; k.fogTr = k.trailer; } } else if (k.fogTr) { if (k.fogTr === k.trailer) k.trailer.visible = true; k.fogTr = null; } }
+// ---- enemy detection: the enemy is only known through engagement (an exchange of fire) or recon (outpost radar for now).
+// Each contact refreshes a last known position (every few seconds: troops do not move fast, the map is approximate).
+// Units: seen on the terrain while in contact, then fade out as they move away from where they were last known; their
+// map marker stays 60 s after the last contact. Structures: once identified they stay visible, on the terrain and the map,
+// at their known location until destroyed.
+const DET_HOLD = 60, DET_UPD = 3, FADE_D = 3;   // seconds a marker is kept, seconds between position updates, demo units of drift to fade out
+const enemyUnits = () => [...robots.filter(r => r.team === 1 && r.state !== 'ko'), ...tanks.filter(t => t.team === 1 && t.alive), ...helis.filter(h => h.team === 1 && h.alive), ...soldiers.filter(s => s.team === 1 && s.alive && !s.inHeli), ...trucks.filter(k => k.team === 1 && !k.dead)];
+const upos = u => u.pos || u;
+const known = [];   // enemy structures as the player last knew them: added when identified, removed only when their loss is observed
+function markSeen(b) { if (!b.seen) { b.seen = true; known.push({ b, x: b.x, z: b.z, kind: b.kind, rot: b.rot || 0 }); } if (!b.alive) b.lossSeen = true; }
+function detect(u) { if (!u || u.team !== 1) return; const p = upos(u);
+  if (u.kind && /outpost|airbase|pumpjack|woodcutter|mine|farm|warehouse|hangar|water/.test(u.kind)) { markSeen(u); return; }
+  if (!u.lk || missionClock - (u.lkT || -99) >= DET_UPD) { u.lk = { x: p.x, z: p.z }; u.lkT = missionClock; } u.detT = missionClock; }
+let reconT = 0;
+function updateRecon(dt) { reconT -= dt; if (reconT > 0) return; reconT = 1;
+  const eyes = outposts.filter(o => o.alive && o.team === 0 && o.done !== false);
+  for (const o of eyes) { for (const u of enemyUnits()) { const p = upos(u); if (wdist2(p.x, p.z, o.x, o.z) < OUTPOST_SENSE) detect(u); }
+    for (const [, L] of BLISTS()) for (const b of L) if (b.team === 1 && b.alive && wdist2(b.x, b.z, o.x, o.z) < OUTPOST_SENSE) markSeen(b);
+    for (const k of known) if (!k.b.alive && wdist2(k.x, k.z, o.x, o.z) < OUTPOST_SENSE) k.b.lossSeen = true;   // recon confirms a structure is gone
+    const t = towns[1]; if (t && !t.hqSeen && wdist2(t.x, t.z, o.x, o.z) < OUTPOST_SENSE + TOWN) { t.hqSeen = true; rebuildTerritory(); log(0, '<b>Recon</b>: enemy headquarters identified'); } }
+  for (const k of known) if (!k.b.alive && missionClock - (k.b.hitT || -99) < 8) k.b.lossSeen = true;   // destroyed by your own fire
+  for (let i = known.length - 1; i >= 0; i--) if (known[i].b.lossSeen) known.splice(i, 1);
+  for (const o of outposts) if (o.team === 1 && o.seen && !o.terrShown) { o.terrShown = true; rebuildTerritory(); } }
+// how visible an enemy unit is right now: 1 in contact, fading with distance from its last known position, 0 after 60 s
+function detAlpha(u) { if (!FOG_ON) return 1; if (u.detT === undefined || missionClock - u.detT > DET_HOLD) return 0; if (missionClock - u.detT < 2) return 1;
+  const p = upos(u), d = Math.hypot(wd(p.x - u.lk.x), wd(p.z - u.lk.z)); return clamp(1 - d / FADE_D, 0, 1); }
+function setFade(o, a) { if (!o) return; a = Math.round(a * 10) / 10; o.visible = a > 0; if (o.__fa === a) return; const was = o.__fa; o.__fa = a; if (was === undefined && a >= 1) return;
+  if (!o.__mats) { o.__mats = []; o.traverse(m => { if (!m.isMesh || !m.material) return; const one = x => { const c = x.clone(); c.onBeforeCompile = x.onBeforeCompile; c.customProgramCacheKey = x.customProgramCacheKey; c.__op = x.opacity; c.__tr = x.transparent; o.__mats.push(c); return c; };
+      m.material = Array.isArray(m.material) ? m.material.map(one) : one(m.material); }); }
+  for (const x of o.__mats) { const tr = a < 1 || x.__tr; if (tr !== x.transparent) { x.transparent = tr; x.needsUpdate = true; } x.opacity = x.__op * a; x.depthWrite = a > 0.6; } }
+function applyFog() {
   for (const t of towns) { t.found = true; t.root.visible = true; }   // towns are known geography
-  for (const k of tanks) if (k.team === 1) { const v = fogVisible(k.pos.x, k.pos.z); k.root.visible = v; if (!v && k.bar) k.bar.g.visible = false; }
-  for (const L of [waterTowers, outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { if (!b.seen && fogVisible(b.x, b.z)) b.seen = true; b.obj.visible = !!b.seen; if (b.soil) b.soil.visible = !!b.seen; } }
-const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos ? fogVisible(u.pos.x, u.pos.z) : fogVisible(u.x, u.z));
+  for (const u of enemyUnits()) { const a = detAlpha(u); u.__vis = a; const root = u.root || u.obj; setFade(root, a); if (u.trailer) { setFade(u.trailer, a); }
+    if (u.bar && a < 0.5) u.bar.g.visible = false; }
+  for (const L of [waterTowers, outposts, airbases, pumpjacks, camps, mines, farms, warehouses, hangars]) for (const b of L) if (b.team === 1 && b.obj) { const v = !FOG_ON || !!b.seen; b.obj.visible = v; if (b.soil) b.soil.visible = v; }
+  for (const k of known) if (!k.b.alive && !k.b.lossSeen && k.b.obj && FOG_ON) { k.b.obj.visible = true; if (k.b.obj.parent !== battleRoot) battleRoot.add(k.b.obj); } }
+const fogSeen = u => !FOG_ON || u.team !== 1 || (u.pos || u.obj && !u.kind ? (u.__vis || 0) > 0.3 : !!u.seen);
 // ------------------------------------------------------------------ demolition
 // Your own buildings can be torn down: they drop in a cloud of dust and sink away, the ground is freed for building again and
 // half the price comes back (all of it if construction had not finished). Anything that depended on them is let go first.
@@ -3677,7 +3708,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateFlags(); updateCitizens(dt); updateWaterTowers(); updateBubbles();
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateFlags(); updateCitizens(dt); updateRecon(dt); updateWaterTowers(); updateBubbles();
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3711,10 +3742,12 @@ const Battle = {
   shakeCamera() { const s = trauma * trauma; if (s < 0.0005) return; const t = performance.now() / 1000, amp = 0.012 * cam.dist * s;
     camera.position.x += amp * (Math.sin(t * 91) + Math.sin(t * 57)) * 0.5; camera.position.y += amp * (Math.sin(t * 73) + Math.sin(t * 41)) * 0.5; camera.position.z += amp * (Math.sin(t * 67) + Math.sin(t * 83)) * 0.5; },
   drawMini(ctx, s) {
-    for (const t of towns) { if (FOG_ON && !t.found) continue; ctx.strokeStyle = t.idx === 0 ? '#ff5aa8' : t.idx === 1 ? '#46b8ff' : '#e8e0d0'; ctx.lineWidth = 1.5; ctx.strokeRect(t.x * S * s - 5, t.z * S * s - 5, 10, 10); }
-    for (const r of robots) { if (r.state === 'ko' || !fogSeen(r)) continue; ctx.fillStyle = r.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(r.pos.x * S * s - 2, r.pos.z * S * s - 2, 4, 4); }
-    for (const t of tanks) { if (!t.alive || !fogSeen(t)) continue; ctx.fillStyle = t.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(t.pos.x * S * s - 1.5, t.pos.z * S * s - 1.5, 3, 3); }
-    for (const h of helis) { if (!h.alive || !fogSeen(h)) continue; ctx.fillStyle = h.team ? '#9fe0ff' : '#ffb0d8'; ctx.beginPath(); ctx.arc(h.pos.x * S * s, h.pos.z * S * s, 3, 0, 7); ctx.fill(); }
+    for (const t of towns) { if (FOG_ON && !t.found) continue; ctx.strokeStyle = t.idx === 0 ? '#ff5aa8' : t.idx === 1 && (t.hqSeen || !FOG_ON) ? '#46b8ff' : '#e8e0d0';   /* the enemy HQ looks like any town until identified */ ctx.lineWidth = 1.5; ctx.strokeRect(t.x * S * s - 5, t.z * S * s - 5, 10, 10); }
+    for (const u of enemyUnits()) { if (!FOG_ON || u.detT === undefined) continue; const age = missionClock - u.detT; if (age > DET_HOLD) continue;   // enemy contacts: last known position, fading over 60 s
+      ctx.globalAlpha = clamp(1 - age / DET_HOLD, 0.15, 1); ctx.fillStyle = '#ff5046'; ctx.beginPath(); ctx.arc(u.lk.x * S * s, u.lk.z * S * s, 3, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
+    for (const r of robots) { if (r.state === 'ko' || (r.team === 1 && FOG_ON)) continue; ctx.fillStyle = r.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(r.pos.x * S * s - 2, r.pos.z * S * s - 2, 4, 4); }
+    for (const t of tanks) { if (!t.alive || (t.team === 1 && FOG_ON)) continue; ctx.fillStyle = t.team ? '#46b8ff' : '#ff5aa8'; ctx.fillRect(t.pos.x * S * s - 1.5, t.pos.z * S * s - 1.5, 3, 3); }
+    for (const h of helis) { if (!h.alive || (h.team === 1 && FOG_ON)) continue; ctx.fillStyle = h.team ? '#9fe0ff' : '#ffb0d8'; ctx.beginPath(); ctx.arc(h.pos.x * S * s, h.pos.z * S * s, 3, 0, 7); ctx.fill(); }
   },
   hud() {
     const el = document.getElementById('status'); if (!el) return;
@@ -3739,7 +3772,7 @@ const Battle = {
   airbaseAt2D: (xw, zw) => airbaseAt(new THREE.Vector3(wm(xw / S), -1e3, wm(zw / S))), baseHelis, siteLeft, pumpjacks, oilFields, bridges, mines, farms, warehouses, trucks, soldiers, hangars, HG_COST, MECH_UP, MECH_UPGRADES, MECH_COST, MECH_BUILD, mechResearch, canPlaceHangar, buildHangar: (xw, zw, rot) => buildHangar(0, xw, zw, rot), hangarGhost: () => hangarProto ? makeHangarModel(true) : null, get hangarError() { return HANGAR_ERR; },
   hangarAt2D: (xw, zw) => { const x = wm(xw / S), z = wm(zw / S); return hangars.find(h => h.alive && inHangarLot(h, x, z) && hgLocal(h, x, z).lz < 13) || null; }, requestService, startMechResearch, _hgL: hgLocal, _doorsReady: h => doorsReady(h), queueMech, needsUpgrade, mechLvl, _poseSoldier: poseSoldier, get _sgun() { return soldierGun; }, _offroad: offroad, _lotBlocked: lotBlocked, _semi: { cab: () => makeCab(), trailer: k => makeTrailer(k) }, WH_COST, canPlaceWarehouse, buildWarehouse: (xw, zw, rot) => buildWarehouse(0, xw, zw, rot), warehouseGhost: () => semiParts ? makeWarehouse(true) : null, get warehouseError() { return SEMI_ERR; }, FOOD, FM_COST, foodRate, canPlaceFarm, buildFarm: (xw, zw, rot, crop) => buildFarm(0, xw, zw, rot, crop), farmGhost: () => farmProto ? makeFarmModel(true, 'Lettuce') : null, get farmError() { return FARM_ERR; }, ORE, MN_COST, oreRate, canPlaceMine, buildMine: (xw, zw, rot) => buildMine(0, xw, zw, rot), mineGhost: () => mineProto ? makeMineModel(true) : null, get mineError() { return MINE_ERR; }, mineSnap: (xw, zw) => ({ x: xw, z: zw, rot: mineFacing(wm(xw / S), wm(zw / S)) }), _impact: (...a) => impact(...a), camps, WOOD, WC_COST, WC_REACH, woodRate, canPlaceCamp, buildCamp: (xw, zw, rot) => buildCamp(0, xw, zw, rot), campGhost: () => WC_BOX ? makeCampModel(true) : null, get campError() { return WOOD_ERR; }, campTreeCount: (xw, zw, rot) => WC_BOX ? campTrees({ x: wm(xw / S), z: wm(zw / S), rot: rot || 0 }).length : 0,
    oilSnap: (xw, zw) => { const f = fieldAt(wm(xw / S), wm(zw / S)) || oilFields.find(f => wdist2(f.x, f.z, wm(xw / S), wm(zw / S)) < OIL_R * 1.2); return f ? { x: f.x * S, z: f.z * S, rot: f.rot } : null; }, OIL, PJ_COST, PJ_RATE, oilRate, canPlacePump, buildPump: (xw, zw, rot) => buildPump(0, xw, zw, rot), pumpGhost: () => PJ_BOX ? makePumpModel(true) : null, get pumpError() { return PUMP_ERR; },
-  canPlaceOutpost, inTerritory, terrDiscs, territoryTex: terrTex,
+  knownStructs: known, canPlaceOutpost, inTerritory, terrDiscs: terrKnown, territoryTex: terrTex,
   buildOutpost: (xw, zw, rot) => buildOutpost(0, xw, zw, rot),
   outpostGhost: () => outpostProto ? makeOutpostModel(true) : null, get outpostError() { return OUTPOST_ERR; }, ghostMat: GHOST_MAT, OUTPOST_SENSE, townTrees: TOWN_TREES, _tac: { incoming, attackersOf, alliesNear, DEF_LOG, wreckCar }, cars, get roadNet() { return ROAD_NET; }, robots, helis, towns, TOWNS, wrecks, _startClash: (a, b) => startClash(a, b), get roadSegs() { return Battle_roadSegs; }, get debris() { return debris; },
 };
