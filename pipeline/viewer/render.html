@@ -20,18 +20,26 @@ import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const sanitize = (n) => THREE.PropertyBinding.sanitizeNodeName(n);
-let renderer, scene, model, bones = {}, restWorldQuat = {}, ground, hemi, sun;
+let renderer, scene, model, bones = {}, restWorldQuat = {}, ground, hemi, ambient, lights = [];
 
 window.cp = {
   async load(url, size) {
     renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(size, size, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
     document.body.appendChild(renderer.domElement);
     scene = new THREE.Scene();
-    hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-    sun = new THREE.DirectionalLight(0xffffff, 1.5);
-    scene.add(hemi, sun);
+    // Even, shadowless light from every side so no part of the body falls into shadow:
+    // sky/ground fill + ambient + six directional lights (front, back, left, right, top, below).
+    hemi = new THREE.HemisphereLight(0xffffff, 0x888888, 1.0);
+    ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(hemi, ambient);
+    for (let i = 0; i < 6; i++) {
+      const l = new THREE.DirectionalLight(0xffffff, 1.0);
+      scene.add(l, l.target);
+      lights.push(l);
+    }
     ground = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({ color: 0x777777 }));
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
@@ -44,7 +52,15 @@ window.cp = {
     scene.add(model);
     model.traverse((o) => {
       if (o.isBone) bones[sanitize(o.name)] = o;
-      if (o.isMesh) o.frustumCulled = false;
+      if (o.isMesh) {
+        o.frustumCulled = false;
+        for (const m of [].concat(o.material)) {
+          // FBX diffuse factors (0.26 here) darken the texture; show the texture as painted.
+          if (m.map) { m.map.colorSpace = THREE.SRGBColorSpace; m.color.setRGB(1, 1, 1); }
+          if (m.emissiveMap) m.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+          m.needsUpdate = true;
+        }
+      }
     });
     model.updateMatrixWorld(true);
     const rest = {};
@@ -80,13 +96,31 @@ window.cp = {
     });
   },
 
+  inspect() {
+    const mats = [];
+    model.traverse((o) => { if (o.isMesh) for (const m of [].concat(o.material)) mats.push({
+      type: m.type, color: m.color && m.color.toArray(), map: !!m.map, mapSize: m.map && m.map.image ? [m.map.image.width, m.map.image.height] : null,
+      shininess: m.shininess, emissive: m.emissive && m.emissive.toArray(), specular: m.specular && m.specular.toArray() }); });
+    return mats;
+  },
+
+  // look: {background, ground, ground_y, exposure, hemi, ambient, lights: [{color, intensity, dir}] (up to 6)}
   setLook(look) {
     scene.background = new THREE.Color(...look.background);
     ground.material.color.setRGB(...look.ground);
     ground.position.y = look.ground_y;
-    hemi.intensity = look.ambient;
-    sun.intensity = look.sun;
-    sun.position.set(...look.sun_dir);
+    renderer.toneMappingExposure = look.exposure;
+    hemi.intensity = look.hemi;
+    ambient.intensity = look.ambient;
+    lights.forEach((l, i) => {
+      const spec = look.lights[i];
+      l.visible = !!spec;
+      if (!spec) return;
+      l.color.setRGB(...spec.color);
+      l.intensity = spec.intensity;
+      l.position.set(...spec.dir).multiplyScalar(5).add(new THREE.Vector3(0, look.ground_y, 0));
+      l.target.position.set(0, look.ground_y, 0);
+    });
   },
 
   // cams: [{position, target, up, fov_y}], poses: subframes averaged for motion blur

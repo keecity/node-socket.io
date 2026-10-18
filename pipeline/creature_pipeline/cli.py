@@ -14,10 +14,6 @@ import sys
 
 import numpy as np
 
-START_LOOK = {"background": [0.55, 0.57, 0.6], "ground": [0.42, 0.4, 0.37], "ambient": 1.2, "sun": 1.6,
-              "sun_dir": [2.0, 4.0, 3.0]}
-
-
 def load_skeleton(path):
     from .skeleton import Skeleton
     ext = os.path.splitext(path)[1].lower()
@@ -57,10 +53,11 @@ def cmd_start_frame(a):
     layout = default_layout(a.width, a.height)
     side = layout["views"][0][2]
     render_cams = stereo_rig(skel.extent(), side, side, margin=a.margin, center=skel.center())
-    look = dict(START_LOOK, ground_y=float(skel.rest_positions[:, 1].min() - 0.01 * skel.height()))
+    from .synth import even_look
+    look = even_look(float(skel.rest_positions[:, 1].min() - 0.01 * skel.height()))
     with Renderer(skel, a.rig, side) as r:
         pngs = r.render(render_cams, [(quat.identity(len(skel)), skel.rest_positions[0])], look)
-    bg = tuple(int(255 * c) for c in START_LOOK["background"])
+    bg = tuple(int(255 * c) for c in look["background"])
     compose([Image.open(io.BytesIO(p)).convert("RGB") for p in pngs], layout, bg).save(a.out)
     det_cams = stereo_rig(skel.extent(), a.view_size, a.view_size, margin=a.margin, center=skel.center())
     save_layout(layout, det_cams, a.layout)

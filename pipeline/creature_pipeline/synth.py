@@ -45,15 +45,38 @@ def camera_for_three(cam):
     return {"position": eye.tolist(), "target": (eye + cam.R[2]).tolist(), "up": (-cam.R[1]).tolist(), "fov_y": fov_y}
 
 
+def _direction(rng, azimuth, elevation):
+    az, el = np.radians(azimuth), np.radians(elevation)
+    return [float(np.cos(el) * np.sin(az)), float(np.sin(el)), float(np.cos(el) * np.cos(az))]
+
+
+def _tint(rng, spread):
+    return np.clip(1 + rng.uniform(-spread, spread, 3), 0, 1.2).tolist()
+
+
+# Directions of the six fill lights: front, back, left, right, top, below.
+LIGHT_DIRS = [(0, 0.35, 1), (0, 0.35, -1), (-1, 0.35, 0), (1, 0.35, 0), (0, 1, 0), (0, -1, 0.2)]
+LIGHT_LEVELS = [1.0, 0.8, 0.9, 0.9, 1.0, 0.35]
+
+
+def even_look(ground_y, brightness=1.0, tint=(1.0, 1.0, 1.0), background=(0.62, 0.64, 0.68),
+              ground=(0.45, 0.43, 0.4), rng=None, wobble=0.0):
+    """Shadowless all-round lighting. ``wobble`` varies each light a little (training only)."""
+    lights = []
+    for d, level in zip(LIGHT_DIRS, LIGHT_LEVELS):
+        k = 1.0 + (rng.uniform(-wobble, wobble) if rng is not None else 0.0)
+        lights.append({"color": list(tint), "intensity": float(1.1 * level * k * brightness),
+                       "dir": (np.array(d) / np.linalg.norm(d)).tolist()})
+    return {"background": list(background), "ground": list(ground), "ground_y": float(ground_y),
+            "exposure": float(brightness), "hemi": 1.0 * brightness, "ambient": 0.5 * brightness, "lights": lights}
+
+
 def random_look(rng, ground_y):
-    return {
-        "background": rng.uniform(0.05, 0.95, 3).tolist(),
-        "ground": rng.uniform(0.1, 0.9, 3).tolist(),
-        "ground_y": float(ground_y),
-        "ambient": float(rng.uniform(0.6, 1.8)),
-        "sun": float(rng.uniform(0.5, 2.5)),
-        "sun_dir": [float(rng.uniform(-3, 3)), float(rng.uniform(2, 6)), float(rng.uniform(-3, 3))],
-    }
+    """Training variation stays mild: brightness +-20%, slight colour tint, per-light +-25%."""
+    return even_look(ground_y, brightness=float(rng.uniform(0.8, 1.2)),
+                     tint=np.clip(1 + rng.uniform(-0.08, 0.08, 3), 0, 1).tolist(),
+                     background=rng.uniform(0.05, 0.95, 3).tolist(), ground=rng.uniform(0.1, 0.9, 3).tolist(),
+                     rng=rng, wobble=0.25)
 
 
 def degrade(png_bytes, rng):
