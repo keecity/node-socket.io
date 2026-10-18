@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part Assembly</title>
+<style>
+:root { --bg: #eef0ec; --panel: #fbfaf6; --ink: #22271f; --muted: #6a6f63; --accent: #2e7d5b; --stage: #4a5450; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1b1e1b; --panel: #232723; --ink: #e8eae2; --muted: #9aa094; --accent: #5fbf8f; --stage: #2a302d; } }
+:root[data-theme="dark"] { --bg: #1b1e1b; --panel: #232723; --ink: #e8eae2; --muted: #9aa094; --accent: #5fbf8f; --stage: #2a302d; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+#wrap { display: flex; height: 100%; } #stage { flex: 1; position: relative; min-width: 0; }
+canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+aside { width: 300px; padding: 16px; background: var(--panel); overflow: auto; box-sizing: border-box; }
+h1 { font-size: 18px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 12px; font-size: 13px; } h2 { font-size: 13px; margin: 14px 0 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; } button { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--muted); background: transparent; color: var(--ink); cursor: pointer; }
+button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monospace; background: var(--bg); color: var(--ink); }
+@media (max-width: 700px) { #wrap { flex-direction: column; } aside { width: 100%; height: 45%; } }
+</style></head>
+<body><div id="wrap"><div id="stage"><canvas id="c"></canvas></div>
+<aside><h1>Part assembly</h1><p>Pick a part, then move, rotate or scale it with the gizmo. The right arm and leg mirror the left. Drag empty space to orbit, scroll to zoom.</p>
+<h2>Part</h2><div class="row" id="parts"></div>
+<h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
+<label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
+<h2>Placement data</h2><textarea id="out" readonly></textarea><div class="row"><button id="copy">Copy</button></div><p id="stat"></p></aside></div>
+<script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id), css = n => { const h = getComputedStyle(document.documentElement).getPropertyValue(n).trim().replace('#', ''); return new pc.Color(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255); };
+const canvas = $('c'), app = new pc.Application(canvas, { mouse: new pc.Mouse(canvas) });
+app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
+const resize = () => { const r = canvas.parentElement.getBoundingClientRect(); app.resizeCanvas(r.width, r.height); }; window.addEventListener('resize', resize);
+const cam = new pc.Entity(); cam.addComponent('camera', { clearColor: css('--stage'), fov: 35, nearClip: 0.01, farClip: 50 }); app.root.addChild(cam);
+const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.2 }); key.setEulerAngles(45, 35, 0); app.root.addChild(key);
+const fill = new pc.Entity(); fill.addComponent('light', { type: 'directional', intensity: 0.5 }); fill.setEulerAngles(-20, -150, 0); app.root.addChild(fill);
+app.scene.ambientLight = new pc.Color(0.45, 0.45, 0.43);
+const ground = new pc.Entity(); ground.addComponent('render', { type: 'plane' }); ground.setLocalScale(6, 1, 6);
+const gm = new pc.StandardMaterial(); gm.diffuse = new pc.Color(0.42, 0.5, 0.36); gm.update(); ground.render.meshInstances[0].material = gm; app.root.addChild(ground);
+const orbit = { yaw: 30, pitch: -15, dist: 3.2, target: new pc.Vec3(0, 0.8, 0) };
+let drag = null, busy = false;
+canvas.addEventListener('pointerdown', e => { if (!busy) drag = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointermove', e => { if (!drag || busy) return; orbit.yaw -= (e.clientX - drag[0]) * 0.4; orbit.pitch = Math.max(-85, Math.min(10, orbit.pitch - (e.clientY - drag[1]) * 0.3)); drag = [e.clientX, e.clientY]; });
+window.addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.4, Math.min(12, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+
+// parts and their starting guesses; arm/leg pivots are at the top of the limb
+const PARTS = { body: [0, 0.95, 0], head: [0.75, 1.05, 0], tail: [-0.95, 0.9, 0], arm: [0.3, 0.85, 0.2], leg: [-0.2, 0.75, 0.2] };
+const ents = {}, mirrors = {};
+const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t => new Promise((ok, no) => {
+  const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0))], { type: 'model/gltf-binary' }));
+  app.assets.loadFromUrlAndFilename(url, nm + '.glb', 'container', (err, a) => err ? no(err) : ok(a.resource));
+}));
+const make = res => { const e = res.instantiateRenderEntity(); e.findComponents('render').forEach(r => r.meshInstances.forEach(m => { m.material.cull = pc.CULLFACE_NONE; m.material.update(); })); return e; };
+let part = 'body', mode = 'move', gz = null, layer = null;
+const json = () => { const o = {}; for (const k in ents) { const e = ents[k], p = e.getLocalPosition(), r = e.getLocalEulerAngles(), s = e.getLocalScale(), f = x => +x.toFixed(4);
+  o[k] = { p: [f(p.x), f(p.y), f(p.z)], r: [f(r.x), f(r.y), f(r.z)], s: [f(s.x), f(s.y), f(s.z)] }; } $('out').value = JSON.stringify(o); };
+const syncMirrors = () => { for (const k in mirrors) { const e = ents[k], m = mirrors[k], p = e.getLocalPosition(), q = e.getLocalRotation(), s = e.getLocalScale();
+  m.setLocalPosition(p.x, p.y, -p.z); m.setLocalRotation(new pc.Quat(-q.x, -q.y, q.z, q.w)); m.setLocalScale(s.x, s.y, -s.z); } };
+const show = () => {
+  if (gz) gz.destroy(); if (!layer) { layer = pc.Gizmo.createLayer(app); cam.camera.layers = cam.camera.layers.concat(layer.id); }
+  gz = new ({ move: pc.TranslateGizmo, rotate: pc.RotateGizmo, scale: pc.ScaleGizmo }[mode])(cam.camera, layer);
+  if (mode === 'scale') gz.uniform = $('uni').checked;
+  gz.coordSpace = 'local'; gz.attach([ents[part]]);
+  gz.on('transform:start', () => { busy = true; drag = null; }); gz.on('transform:move', () => { syncMirrors(); json(); }); gz.on('transform:end', () => { busy = false; syncMirrors(); json(); });
+  document.querySelectorAll('#parts button').forEach(b => b.classList.toggle('on', b.dataset.p === part));
+  document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.g === mode));
+};
+document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode = b.dataset.g; show(); }); $('uni').onchange = show;
+$('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
+Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
+  const e = make(res); e.setLocalPosition(...PARTS[nm]); app.root.addChild(e); ents[nm] = e;
+  if (nm === 'arm' || nm === 'leg') { const m = make(res); app.root.addChild(m); mirrors[nm] = m; }
+}))).then(() => {
+  for (const nm of Object.keys(PARTS)) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
+  syncMirrors(); json(); show();
+}).catch(e => { $('stat').textContent = 'Could not load parts: ' + e.message; });
+app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
+  cam.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.target); });
+resize(); app.start();
+})();
+</script></body></html>
