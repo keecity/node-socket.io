@@ -3,7 +3,7 @@
 Run it for every monster before paying for any generated video, and after every change
 to the pipeline. With ``keypoints=None`` it simulates the detector with pixel noise and
 dropouts (tests the geometry and solver). For the full exam, render the saved motion in
-the same two cameras (blender/render_synthetic.py --motion), run the trained detector on
+the same two cameras (synth.render_motion, or the exam --detector command), run the trained detector on
 that video, and pass its keypoints here.
 """
 import numpy as np
