@@ -1162,6 +1162,10 @@ function assignHome(h) { const f = freePad(h.team, h.pos);
   // no free air base pad: set down on open ground beside the HQ (slower service, no limit)
   const t = towns[h.team], k = helis.filter(e => e.team === h.team && e.home && e.home.hq).length, x = wm(t.x + 1.2 * TS + (k % 3) * 1.5), z = wm(t.z + (Math.floor(k / 3) % 2 ? -1 : 0) * 1.2 * TS);
   h.home = hqHome[h.team]; h.pad = { x, z, y: Hd(x, z), heli: h }; return true; }
+// player order: fly to a friendly air base and park on a free pad (stays down until ordered out)
+function dockHeli(h, b) { let p = h.home === b && h.pad && h.pad.heli === h ? h.pad : b.pads.find(p => !p.heli || !(p.heli.alive || p.heli.falling)); if (!p) return false;
+  if (h.pad && h.pad.heli === h && h.pad !== p) h.pad.heli = null; h.home = b; h.pad = p; p.heli = h; h.target = null; h.order = null; h.sortie = false;
+  h.anchor = { x: p.x, z: p.z }; if (h.mode !== 'landed') h.mode = 'rtb'; else if (Math.hypot(h.pos.x - p.x, h.pos.z - p.z) > 0.05) { h.mode = 'takeoff'; h.dockGo = true; } return true; }
 function queueHeli(b) { if (!b.alive || baseHelis(b) + b.queue >= AB_CAP) return 'All 3 pads are taken'; b.queue++; if (b.queue === 1) b.buildT = 0; return null; }
 function startResearch(team, key) { if (research[team]) return 'Already researching'; if (!airbases.some(b => b.alive && b.done && b.team === team)) return 'Needs a finished air base';
   const U = UPGRADES[key], lvl = HELI_UP[team][key]; if (lvl >= U.cost.length) return 'Fully upgraded'; research[team] = { key, t: 0, total: U.time[lvl] }; return null; }
@@ -1190,7 +1194,7 @@ function heliService(h, dt) {
     return true; }
   h.rotor = Math.min(1, (h.rotor ?? 1) + dt * 0.6);
   if (h.mode !== 'takeoff') h.fuel -= dt;
-  if (h.mode === 'takeoff') { const top = (P ? P.y : Hd(h.pos.x, h.pos.z)) + 1.3; h.goTo = { x: h.pos.x, z: h.pos.z, y: top }; if (h.pos.y > top - 0.15) { h.mode = 'fly'; h.goTo = null; } return false; }
+  if (h.mode === 'takeoff') { const top = (P ? P.y : Hd(h.pos.x, h.pos.z)) + 1.3; h.goTo = { x: h.pos.x, z: h.pos.z, y: top }; if (h.pos.y > top - 0.15) { h.mode = h.dockGo ? 'rtb' : 'fly'; h.dockGo = false; h.goTo = null; } return false; }
   const low = h.fuel < h.fuelMax * 0.22 || h.hp < h.maxHp * 0.3;
   if (P && (h.mode === 'rtb' || h.mode === 'land' || (low && h.mode === 'fly'))) {
     if (h.mode === 'fly') { h.mode = 'rtb'; h.sortie = true; if (h.team === 0) log(0, `<b>${unitName(h)}</b> returning to base (${h.fuel < h.fuelMax * 0.22 ? 'low fuel' : 'damaged'})`); }
@@ -3281,7 +3285,7 @@ function updateTanks(dt) { const c = camD();
     if (t.sel && t.alive) { const r = ringFor(t); r.visible = true; r.position.set(disp(t.pos.x, c.x), t.pos.y + 0.01, disp(t.pos.z, c.z)); r.scale.setScalar(1.5); } else if (t.ring) t.ring.visible = false; }
   updateShells(dt); }
 // ---- depots build tanks: one at a time, they roll out of the lot
-function queueTank(w) { if (!w.alive || !w.done) return 'Depot not ready'; w.tankQ = w.tankQ || 0; if (w.tankQ >= 3) return 'Build queue full'; w.tankQ++; if (w.tankQ === 1) w.tankT = 0; return null; }
+function queueTank(w) { return 'Tanks cannot be built at a depot'; w.tankQ = w.tankQ || 0; if (w.tankQ >= 3) return 'Build queue full'; w.tankQ++; if (w.tankQ === 1) w.tankT = 0; return null; }
 function updateDepots(dt) { for (const w of warehouses) { if (!w.alive || !w.done || !w.tankQ) continue; w.tankT = (w.tankT || 0) + dt * pe(w.team);
   if (w.tankT >= TANK_BUILD && tankProto) { w.tankT = 0; w.tankQ--; const p = whWorld(w, rand(-0.3, 0.3), WH_D / 2 + WH_LOT + 0.5), t = makeTank(w.team, p.x, p.z, w.rot);
     const o = whWorld(w, rand(-0.6, 0.6), WH_D / 2 + WH_LOT + 1.6); t.order = { type: 'move', x: o.x, z: o.z }; log(w.team, `<b>${TEAM_NAME[w.team]}</b> tank rolls out of the depot`); } } }
@@ -3691,9 +3695,12 @@ const Battle = {
   select(list) { for (const u of Battle.selectables()) u.sel = false; for (const u of list) u.sel = true; },
   order(sel, ground, enemy) {
     if (!sel.length) return; if (enemy && !fogSeen(enemy)) enemy = null;
-    if (enemy) { for (const u of sel) { u.order = { type: 'attack', target: enemy }; u.target = enemy; if (u.kind === 'robot' && u.state === 'idle') { u.thinkT = u.pilot.react * 0.5; u.st = 0; } if (u.kind === 'soldier') { u.order = null; u.target = enemy; continue; } if (u.kind === 'heli') { u.retarget = 0; u.anchor = { x: enemy.pos.x, z: enemy.pos.z }; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; } }
+    if (enemy) { for (const u of sel) { u.order = { type: 'attack', target: enemy }; u.target = enemy; if (u.kind === 'robot' && u.state === 'idle') { u.thinkT = u.pilot.react * 0.5; u.st = 0; } if (u.kind === 'soldier') { u.order = null; u.target = enemy; continue; } if (u.kind === 'heli') { u.dockGo = false; u.retarget = 0; u.anchor = { x: enemy.pos.x, z: enemy.pos.z }; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; } }
       log(0, `Attack order: ${sel.length} unit${sel.length > 1 ? 's' : ''} → <b>${unitName(enemy)}</b>`); return; }
-    const gx = ground.x / S, gz = ground.z / S;
+    const gx = ground.x / S, gz = ground.z / S, ab = airbaseAt(new THREE.Vector3(wm(gx), -1e3, wm(gz)));
+    if (ab && ab.team === 0 && ab.done) { const hs = sel.filter(u => u.kind === 'heli' && !(u.cargo && u.cargo.length)); let n = 0;
+      for (const h of hs) if (dockHeli(h, ab)) n++; else log(0, `<b>${unitName(h)}</b>: no free pad at this air base`);
+      if (n) log(0, `Dock order: ${n} gunship${n > 1 ? 's' : ''} → air base`); sel = sel.filter(u => !hs.includes(u)); if (!sel.length) return; }
     sel.forEach((u, i) => { const a = i * 2.4, r = 1.25 * Math.sqrt(i);   // spread formation
       let x = wm(gx + Math.cos(a) * r), z = wm(gz + Math.sin(a) * r);
       if (u.kind === 'robot' && !passableD(x, z)) {           // goal in deep water: stop at the last dry ground on the way
@@ -3703,7 +3710,7 @@ const Battle = {
       if (u.kind === 'soldier') { const k = sel.filter(v => v.kind === 'soldier').indexOf(u), a2 = k * 2.4, r2 = 0.3 * Math.sqrt(k);   // soldiers form up tighter than mechs
         u.order = { type: 'move', x: wm(gx + Math.cos(a2) * r2), z: wm(gz + Math.sin(a2) * r2) }; u.target = null; u.stuck = 0; }
       else if (u.kind === 'heli' && u.cargo && u.cargo.length) orderDrop(u, x, z);
-      else if (u.kind === 'heli') { u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; }
+      else if (u.kind === 'heli') { u.dockGo = false; u.anchor = { x, z }; u.order = null; u.target = null; u.retarget = 0; u.sortie = true; if (u.mode === 'landed') u.mode = 'takeoff'; }
       else { if (u.svc) cancelService(u); if (u.docked) return; u.order = { type: 'move', x, z }; u.target = null; if (u.state === 'fly') { u.flyGoal = { x, z }; if (u.flyPhase === 'down' && u.y > 0.3 && u.boost > 10) { u.flyPhase = 'cruise'; play(u, 'Boost_Forward', 0.2); } } else if (['idle', 'walk', 'fire'].includes(u.state)) { u.state === 'walk' ? (u.st = 99) : null; const rt = u.pilot.react * 0.5; u.thinkT = rt; if (u.state !== 'idle') toIdle(u, 0.12, rt); else u.st = 0; } } });
   },
   update(dt) {
