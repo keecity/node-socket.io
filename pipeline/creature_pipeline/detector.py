@@ -50,11 +50,14 @@ class HeatmapHead(nn.Module):
         return self.net(f)
 
 
-def preprocess(images, size):
-    """uint8 (B, H, W, 3) -> normalised float tensor (B, 3, size, size)."""
-    x = torch.from_numpy(np.ascontiguousarray(np.stack(list(images)))).permute(0, 3, 1, 2).float() / 255.0
-    x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
-    return (x - MEAN) / STD
+def preprocess(images, size, device=None):
+    """uint8 (B, H, W, 3) -> normalised float tensor (B, 3, size, size), computed on ``device``."""
+    if not torch.is_tensor(images):
+        images = torch.from_numpy(np.ascontiguousarray(np.stack(list(images))))
+    x = images.to(device or "cpu").permute(0, 3, 1, 2).float() / 255.0
+    if x.shape[-2:] != (size, size):
+        x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
+    return (x - MEAN.to(x.device)) / STD.to(x.device)
 
 
 def patch_features(backbone, x):
@@ -106,8 +109,8 @@ def decode(heatmaps, softmax=False):
     conf, idx = flat.max(-1)
     py, px = (idx // W).float(), (idx % W).float()
     # refine with a 5x5 window weighted by positive heat
-    ys = torch.arange(H).view(1, 1, H, 1).float()
-    xs = torch.arange(W).view(1, 1, 1, W).float()
+    ys = torch.arange(H, device=heatmaps.device).view(1, 1, H, 1).float()
+    xs = torch.arange(W, device=heatmaps.device).view(1, 1, 1, W).float()
     window = ((ys - py[..., None, None]).abs() <= 2) & ((xs - px[..., None, None]).abs() <= 2)
     w = heatmaps.clamp(min=0) * window
     s = w.sum((-1, -2)).clamp(min=1e-6)
@@ -134,6 +137,26 @@ def load_dataset(root):
 def _read_image(path):
     from PIL import Image
     return np.asarray(Image.open(path).convert("RGB"))
+
+
+class _Images(torch.utils.data.Dataset):
+    """Raw uint8 images, decoded in DataLoader workers so the GPU is not left waiting on PNGs."""
+
+    def __init__(self, root, items):
+        self.root, self.items = root, items
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, k):
+        return torch.from_numpy(_read_image(os.path.join(self.root, self.items[k]["image"])))
+
+
+def _loader(root, items, batches):
+    workers = min(8, os.cpu_count() or 1)
+    return torch.utils.data.DataLoader(_Images(root, items), batch_sampler=batches, num_workers=workers,
+                                       pin_memory=torch.cuda.is_available(), persistent_workers=False,
+                                       prefetch_factor=4 if workers else None)
 
 
 def _batch(root, items, size):
@@ -207,14 +230,15 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
     def run(idx, training):
         head.train(training)
         total, n = 0.0, 0
-        for i in range(0, len(idx), batch):
-            b = idx[i:i + batch]
+        batches = [list(idx[i:i + batch]) for i in range(0, len(idx), batch)]
+        images = iter(_loader(root, items, batches)) if feats is None else None
+        for b in batches:
             if feats is not None:
                 f = feats[b].float().to(device)
             else:
-                x, _, _ = _batch(root, [items[k] for k in b], size)
+                x = preprocess(next(images), size, device)
                 with torch.set_grad_enabled(training):
-                    f = patch_features(backbone, x.to(device))
+                    f = patch_features(backbone, x)
             uv, vis = uv_all[b].to(device), vis_all[b].to(device)
             with torch.set_grad_enabled(training):
                 pred = head(f)
@@ -228,8 +252,8 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
                 loss_v.backward()
                 opt.step()
             with torch.no_grad():
-                p_uv, _ = decode(pred.float().cpu(), softmax=loss == "coord")
-                err = ((p_uv - uv.cpu()).norm(dim=-1) * vis.cpu()).sum() / vis.sum().clamp(min=1)
+                p_uv, _ = decode(pred.float(), softmax=loss == "coord")
+                err = ((p_uv - uv).norm(dim=-1) * vis).sum() / vis.sum().clamp(min=1)
             total += float(err) * len(b)
             n += len(b)
         return total / max(n, 1)
