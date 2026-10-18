@@ -73,8 +73,34 @@ def gaussian_targets(uv_norm, vis, side, sigma=1.5):
     return hm * vis[..., None, None]
 
 
-def decode(heatmaps):
-    """Soft-argmax around the peak. Returns uv in [0,1] (B, J, 2) and confidence (B, J)."""
+def coord_loss(logits, uv, vis, sigma=2.0):
+    """Integral (soft-argmax) regression plus a KL pull towards a Gaussian around the label.
+
+    Plain MSE on sparse heatmaps lets the head sit near all-zeros for a long time; regressing
+    the expected coordinate gives every pixel a gradient from the first step.
+    """
+    B, J, H, W = logits.shape
+    logp = F.log_softmax(logits.flatten(2), -1).view_as(logits)
+    p = logp.exp()
+    xs = (torch.arange(W, device=logits.device).float() + 0.5) / W
+    ys = (torch.arange(H, device=logits.device).float() + 0.5) / H
+    u = (p.sum(-2) * xs).sum(-1)
+    v = (p.sum(-1) * ys).sum(-1)
+    w = vis.sum().clamp(min=1)
+    l_coord = ((torch.stack([u, v], -1) - uv).abs().sum(-1) * vis).sum() / w
+    t = gaussian_targets(uv, torch.ones_like(vis), H, sigma)
+    t = t / t.flatten(2).sum(-1).clamp(min=1e-8)[..., None, None]
+    kl = ((t * (torch.log(t.clamp(min=1e-8)) - logp)).sum((-1, -2)) * vis).sum() / w
+    return 10 * l_coord + kl
+
+
+def decode(heatmaps, softmax=False):
+    """Soft-argmax around the peak. Returns uv in [0,1] (B, J, 2) and confidence (B, J).
+
+    With ``softmax`` the maps are logits from coord_loss training and confidence is the
+    probability mass near the peak; otherwise they are regressed heatmaps."""
+    if softmax:
+        heatmaps = F.softmax(heatmaps.flatten(2), -1).view_as(heatmaps)
     B, J, H, W = heatmaps.shape
     flat = heatmaps.flatten(2)
     conf, idx = flat.max(-1)
@@ -87,6 +113,8 @@ def decode(heatmaps):
     s = w.sum((-1, -2)).clamp(min=1e-6)
     u = ((w * xs).sum((-1, -2)) / s + 0.5) / W
     v = ((w * ys).sum((-1, -2)) / s + 0.5) / H
+    if softmax:
+        conf = s
     return torch.stack([u, v], -1), conf.clamp(0, 1)
 
 
@@ -135,7 +163,7 @@ def cache_features(backbone, root, items, size, device, batch=16):
 
 
 def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name="dinov2_vits14",
-          finetune=False, unfreeze_blocks=2, device=None, log=print):
+          finetune=False, unfreeze_blocks=2, backbone_lr=2e-5, loss="coord", device=None, log=print):
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     joints, items = load_dataset(root)
     backbone = load_backbone(backbone_name)
@@ -146,6 +174,7 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
     val_idx, train_idx = order[:n_val], order[n_val:]
 
     params = list(head.parameters())
+    backbone_params = []
     if finetune:
         backbone.to(device).train()
         for p in backbone.parameters():
@@ -153,11 +182,14 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
         for blk in backbone.blocks[-unfreeze_blocks:]:
             for p in blk.parameters():
                 p.requires_grad = True
-                params.append(p)
+                backbone_params.append(p)
         feats = None
     else:
         feats = cache_features(backbone, root, items, size, device)
-    opt = torch.optim.AdamW(params, lr=lr, weight_decay=1e-4)
+    groups = [{"params": params, "lr": lr}]
+    if backbone_params:
+        groups.append({"params": backbone_params, "lr": backbone_lr})
+    opt = torch.optim.AdamW(groups, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     uv_all, vis_all = _labels(items)
 
@@ -175,14 +207,17 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
             uv, vis = uv_all[b].to(device), vis_all[b].to(device)
             with torch.set_grad_enabled(training):
                 pred = head(f)
-                target = gaussian_targets(uv, vis, pred.shape[-1]).to(device)
-                loss = F.mse_loss(pred, target) * 1000
+                if loss == "coord":
+                    loss_v = coord_loss(pred.float(), uv, vis)
+                else:
+                    target = gaussian_targets(uv, vis, pred.shape[-1]).to(device)
+                    loss_v = F.mse_loss(pred, target) * 1000
             if training:
                 opt.zero_grad()
-                loss.backward()
+                loss_v.backward()
                 opt.step()
             with torch.no_grad():
-                p_uv, _ = decode(pred.float().cpu())
+                p_uv, _ = decode(pred.float().cpu(), softmax=loss == "coord")
                 err = ((p_uv - uv.cpu()).norm(dim=-1) * vis.cpu()).sum() / vis.sum().clamp(min=1)
             total += float(err) * len(b)
             n += len(b)
@@ -195,7 +230,7 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
         sched.step()
         history.append({"epoch": ep + 1, "train_err": tr, "val_err": va})
         log(f"epoch {ep + 1}/{epochs}  train err {tr * 100:.2f}%  val err {va * 100:.2f}% of image width", flush=True)
-    torch.save({"joints": joints, "size": size, "backbone": backbone_name, "head": head.state_dict(),
+    torch.save({"joints": joints, "size": size, "backbone": backbone_name, "head": head.state_dict(), "loss": loss,
                 "backbone_state": backbone.state_dict() if finetune else None, "history": history}, out_path)
     return history
 
@@ -205,6 +240,7 @@ class Detector:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         ck = torch.load(path, map_location="cpu")
         self.joints, self.size = ck["joints"], ck["size"]
+        self.softmax = ck.get("loss", "mse") == "coord"
         self.backbone = load_backbone(ck["backbone"])
         if ck.get("backbone_state"):
             self.backbone.load_state_dict(ck["backbone_state"])
@@ -220,6 +256,6 @@ class Detector:
         out = []
         for i in range(0, len(images), batch):
             f = patch_features(self.backbone, preprocess(images[i:i + batch], self.size).to(self.device))
-            uv, conf = decode(self.head(f).float().cpu())
+            uv, conf = decode(self.head(f).float().cpu(), softmax=self.softmax)
             out.append(torch.cat([uv * torch.tensor([W, H]), conf[..., None]], -1))
         return torch.cat(out).numpy()
