@@ -23,9 +23,11 @@ def variants(fn,lift):
         out.append(dict(Q=v-c_,UV=T[used],I=mp[Fk],TEX=TEX))
     return out,img,mime
 def fit(base,h):
+    # weld the base by position first: texture-seam duplicates must move together or the wrap tears the mesh open
+    U,inv=np.unique(np.round(base['Q'],5),axis=0,return_inverse=True);inv=inv.ravel();FI=inv[base['I']]
     S,_=sample(h['Q'],h['I'],0.003);best=None
-    for V0 in (base['Q'],prefit(base['Q'],h['Q'])):
-        X=wrap(V0,base['I'],h['Q'],h['I'],iters=45);W_,_=sample(X,base['I'],0.003)
+    for V0 in (U,prefit(U,h['Q'])):
+        X=wrap(V0,FI,h['Q'],h['I'],iters=45)[inv];W_,_=sample(X,base['I'],0.003)
         e=cKDTree(W_).query(S)[0].mean()+cKDTree(S).query(W_)[0].mean()
         if best is None or e<best[0]: best=(e,X)
     return best[1],best[0]

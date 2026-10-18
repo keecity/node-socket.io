@@ -20,9 +20,11 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <h2>Part</h2><div class="row" id="parts"></div>
 <h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
+<label style="display:block;margin-top:4px"><input type="checkbox" id="fuse"> Fuse parts into one mesh</label>
 <div id="blend"></div>
 <h2>Placement data</h2><textarea id="out" readonly></textarea><div class="row"><button id="copy">Copy</button></div><p id="stat"></p></aside></div>
 <script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
+<script src="fuse.js"></script>
 <script>
 (() => {
 const $ = id => document.getElementById(id), css = n => { const h = getComputedStyle(document.documentElement).getPropertyValue(n).trim().replace('#', ''); return new pc.Color(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255); };
@@ -59,14 +61,20 @@ const setupBlend = nm => {
     const mis = [ents[nm], mirrors[nm]].filter(Boolean).flatMap(e => e.findComponents('render').flatMap(r => r.meshInstances));
     mis.forEach(m => { m.material.diffuseMap = tex; m.material.update(); });
     const upd = () => { const w = sl.map(x => +x.value), t = w.reduce((a, b) => a + b, 0) || 1;
+      blendW[nm] = w.slice(1).map(x => x / t); refuse();
       mis.forEach(m => { if (m.morphInstance) for (let k = 1; k < n; k++) m.morphInstance.setWeight(k - 1, w[k] / t); });
       const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
       cx.putImageData(out, 0, 0); tex.setSource(cv); };
     sl.forEach(x => x.addEventListener('input', upd)); upd();
   });
 };
+const geo = {}, blendW = {};
+const parse = (nm, buf) => { const dv = new DataView(buf), jl = dv.getUint32(12, true), J = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl))), bin = 20 + jl + 8;
+  const acc = i => { const a = J.accessors[i], v = J.bufferViews[a.bufferView], n = { SCALAR: 1, VEC2: 2, VEC3: 3 }[a.type], T = { 5126: Float32Array, 5125: Uint32Array }[a.componentType], o = bin + (v.byteOffset || 0) + (a.byteOffset || 0); return new T(buf.slice(o, o + a.count * n * T.BYTES_PER_ELEMENT)); };
+  const pr = J.meshes[0].primitives[0]; geo[nm] = { P: acc(pr.attributes.POSITION), UV: acc(pr.attributes.TEXCOORD_0), I: acc(pr.indices), D: (pr.targets || []).map(t => acc(t.POSITION)) }; };
 const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t => new Promise((ok, no) => {
-  const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0))], { type: 'model/gltf-binary' }));
+  const bytes = Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0)); parse(nm, bytes.buffer.slice(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'model/gltf-binary' }));
   app.assets.loadFromUrlAndFilename(url, nm + '.glb', 'container', (err, a) => err ? no(err) : ok(a.resource));
 }));
 const make = res => { const e = res.instantiateRenderEntity(); e.findComponents('render').forEach(r => r.meshInstances.forEach(m => { m.material.cull = pc.CULLFACE_NONE; m.material.update(); })); return e; };
@@ -80,11 +88,42 @@ const show = () => {
   gz = new ({ move: pc.TranslateGizmo, rotate: pc.RotateGizmo, scale: pc.ScaleGizmo }[mode])(cam.camera, layer);
   if (mode === 'scale') gz.uniform = $('uni').checked;
   gz.coordSpace = 'local'; gz.attach([ents[part]]);
-  gz.on('transform:start', () => { busy = true; drag = null; }); gz.on('transform:move', () => { syncMirrors(); json(); }); gz.on('transform:end', () => { busy = false; syncMirrors(); json(); });
+  gz.on('transform:start', () => { busy = true; drag = null; showFused(false); }); gz.on('transform:move', () => { syncMirrors(); json(); }); gz.on('transform:end', () => { busy = false; syncMirrors(); json(); refuse(); });
   document.querySelectorAll('#parts button').forEach(b => b.classList.toggle('on', b.dataset.p === part));
   document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.g === mode));
 };
 document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode = b.dataset.g; show(); }); $('uni').onchange = show;
+// fuse: every part (blended, in world space) is welded by position, cut where it enters the body and zipped to the body's hole
+// (joinParts from the main viewer); each part keeps its own texture, the seam strip takes the body's paint
+let fusedEnt = null, fuseTimer = null;
+const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
+const instance = (nm, e, flip) => { const g = geo[nm], w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
+  for (let i = 0; i < n; i++) { let x = g.P[i*3], y = g.P[i*3+1], z = g.P[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
+  const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
+  const I = new Uint32Array(g.I.length); for (let t = 0; t < I.length; t += 3) { I[t] = g.I[t]; I[t+1] = flip ? g.I[t+2] : g.I[t+1]; I[t+2] = flip ? g.I[t+1] : g.I[t+2]; }
+  const WI = Array.from(I, x => map[x]); return { nm, e, I, map, WP: Float32Array.from(WP), WI, uv: g.UV }; };
+const fuseNow = () => {
+  const list = [instance('body', ents.body, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
+  let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
+  for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI }, 0.08); P = J.P; I = J.I; }
+  const N = vertexNormals(P, I), owner = v => { for (const L of list) if (v >= L.off && v < L.end) return L; return null; };
+  const kept = list.map(() => new Set()), strip = [], tk = (a, b, c) => [a, b, c].sort((x, y) => x - y).join(',');
+  for (let t = 0; t < I.length; t += 3) { const o = owner(I[t]); if (o && owner(I[t+1]) === o && owner(I[t+2]) === o) kept[list.indexOf(o)].add(tk(I[t], I[t+1], I[t+2])); else strip.push(I[t], I[t+1], I[t+2]); }
+  if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
+  const meshOf = (pos, nrm, uv, idx, mat) => { const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, mat); mi.cull = false; mis.push(mi); };
+  list.forEach((L, k) => { const n = L.map.length, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = [];
+    for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let c = 0; c < 3; c++) { pos[i*3+c] = P[w*3+c]; nrm[i*3+c] = N[w*3+c]; } }
+    for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
+    meshOf(pos, nrm, L.uv, idx, L.e.findComponents('render')[0].meshInstances[0].material); });
+  if (strip.length) { const B = list[0], used = [...new Set(strip)], loc = new Map(used.map((v, i) => [v, i])), pos = new Float32Array(used.length * 3), nrm = new Float32Array(used.length * 3), uv = new Float32Array(used.length * 2), buv = new Float32Array(B.WP.length / 3 * 2);
+    for (let i = 0; i < B.map.length; i++) { buv[B.map[i]*2] = B.uv[i*2]; buv[B.map[i]*2+1] = B.uv[i*2+1]; }
+    used.forEach((v, i) => { let best = 0, bd = Infinity; for (let u = 0; u < B.WP.length / 3; u++) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; best = u; } }
+      for (let c = 0; c < 3; c++) { pos[i*3+c] = P[v*3+c]; nrm[i*3+c] = N[v*3+c]; } uv[i*2] = buv[best*2]; uv[i*2+1] = buv[best*2+1]; });
+    meshOf(pos, nrm, uv, strip.map(v => loc.get(v)), B.e.findComponents('render')[0].meshInstances[0].material); }
+  fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true);
+};
+const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
+$('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
 $('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
 Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
   const e = make(res); e.setLocalPosition(...PARTS[nm].p); e.setLocalEulerAngles(...PARTS[nm].r); e.setLocalScale(...PARTS[nm].s); app.root.addChild(e); ents[nm] = e;
