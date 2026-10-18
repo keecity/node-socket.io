@@ -10,7 +10,23 @@ def random_euler(skel, rng, n):
     return lo + (hi - lo) * rng.random((n,) + lo.shape)
 
 
-def random_motion(skel, rng, frames=120, fps=24, speed=1.0, travel=0.0):
+def ground(skel, local, root):
+    """Shift the root vertically so the lowest foot rests on the floor in every frame.
+
+    Feet are joints within 5% of body height of the lowest rest joint; "on the floor" means at
+    their rest height. Without this, random motion swings feet through the ground, which no
+    real creature does and which would make the exam punish the solver's floor constraint.
+    """
+    pos, _ = skel.forward(local, root)
+    rest_y = skel.rest_positions[:, 1]
+    feet = [j for j in range(len(skel)) if rest_y[j] < rest_y.min() + 0.05 * skel.height()]
+    lift = -(pos[:, feet, 1] - rest_y[feet]).min(axis=1)
+    out = root.copy()
+    out[:, 1] += lift
+    return out
+
+
+def random_motion(skel, rng, frames=120, fps=24, speed=1.0, travel=0.0, grounded=True):
     """Smooth random motion: every joint axis is a sum of three sines mapped into its limits.
 
     Returns local rotations (T, J, 4), root positions (T, 3), euler (T, J, 3).
@@ -29,4 +45,6 @@ def random_motion(skel, rng, frames=120, fps=24, speed=1.0, travel=0.0):
     root = np.tile(skel.rest_positions[0], (frames, 1))
     root[:, 2] += travel * t
     root[:, 1] += 0.03 * skel.height() * np.sin(2 * np.pi * 1.5 * speed * t)
+    if grounded:
+        root = ground(skel, local, root)
     return local, root, euler

@@ -50,12 +50,18 @@ def _forward(parents, offsets, local_q, root):
 
 
 def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.01, huber=8.0, min_conf=0.05, lr=0.02,
-           log=None):
+           rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, log=None):
     """kp (V, T, J, 3) detections; local (T, J, 4), root (T, 3) initial solve. Returns refined (local, root).
 
     ``sigma`` (V, J) is the detector's measured pixel noise per view and joint (see calibrate);
     residuals are divided by it relative to its median, so a joint the detector cannot see well
     in one view counts for little there. ``huber`` is in pixels for a typical joint.
+
+    Ground terms use the feet (joints within 5% of body height of the lowest rest joint):
+    ``floor_weight`` keeps each foot at or above its rest height (the mesh below a foot joint
+    then stays above the floor), and ``contact_weight`` stops a foot that is on the ground from
+    sliding. ``rot_smooth_weight`` penalises rotational acceleration, which removes the jitter
+    that position smoothing alone leaves in end joints.
     """
     dt = torch.float64
     parents = [int(p) for p in skel.parents]
@@ -70,7 +76,13 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     r = torch.tensor(_to_rotvec(local), dtype=dt, requires_grad=True)
     t = torch.tensor(root, dtype=dt, requires_grad=True)
     scale = float(np.mean([c.K[0, 0] for c in cams]))
+    h = skel.height()
+    rest_y = skel.rest_positions[:, 1]
+    feet = [j for j in range(len(skel)) if rest_y[j] < rest_y.min() + 0.05 * h]
+    floor_y = torch.tensor(rest_y[feet], dtype=dt)
+    px_per_m = scale / float(np.mean([np.linalg.norm(c.center - skel.center()) for c in cams]))
     opt = torch.optim.Adam([r, t], lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, iters, eta_min=lr * 0.02)
     for it in range(iters):
         opt.zero_grad()
         X = _forward(parents, offsets, _from_rotvec(r), t)  # (T, J, 3)
@@ -83,8 +95,20 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
         accel = X[2:] - 2 * X[1:-1] + X[:-2]
         smooth = (accel * scale).pow(2).sum(-1).mean() if len(X) > 2 else X.sum() * 0
         loss = data + smooth_weight * smooth
+        if rot_smooth_weight and len(X) > 2:
+            racc = r[2:] - 2 * r[1:-1] + r[:-2]
+            loss = loss + rot_smooth_weight * (racc * 100).pow(2).sum(-1).mean()
+        if feet and (floor_weight or contact_weight):
+            fy = X[:, feet, 1]
+            below = (floor_y - fy).clamp(min=0) * px_per_m
+            loss = loss + floor_weight * below.pow(2).mean()
+            if contact_weight and len(X) > 1:
+                on_ground = torch.sigmoid((floor_y + 0.03 * h - fy.detach()) / (0.01 * h))
+                step = (X[1:, feet][..., [0, 2]] - X[:-1, feet][..., [0, 2]]).norm(dim=-1) * px_per_m
+                loss = loss + contact_weight * (on_ground[1:] * on_ground[:-1] * step.pow(2)).mean()
         loss.backward()
         opt.step()
+        sched.step()
         if log and (it % 100 == 0 or it == iters - 1):
             log(f"refine {it}: reprojection {data.item():.2f}, smooth {smooth.item():.2f}")
     q = _from_rotvec(r.detach()).numpy()
