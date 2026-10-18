@@ -52,7 +52,7 @@ class HeatmapHead(nn.Module):
 
 def preprocess(images, size):
     """uint8 (B, H, W, 3) -> normalised float tensor (B, 3, size, size)."""
-    x = torch.as_tensor(np.asarray(images)).permute(0, 3, 1, 2).float() / 255.0
+    x = torch.from_numpy(np.ascontiguousarray(np.stack(list(images)))).permute(0, 3, 1, 2).float() / 255.0
     x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
     return (x - MEAN) / STD
 
@@ -109,9 +109,14 @@ def _read_image(path):
 
 def _batch(root, items, size):
     imgs = preprocess([_read_image(os.path.join(root, it["image"])) for it in items], size)
-    uv = torch.tensor([np.array(it["uv"]) / [it["width"], it["height"]] for it in items], dtype=torch.float32)
-    vis = torch.tensor([it["visible"] for it in items], dtype=torch.float32)
+    uv, vis = _labels(items)
     return imgs, uv, vis
+
+
+def _labels(items):
+    uv = np.stack([np.array(it["uv"]) / [it["width"], it["height"]] for it in items])
+    vis = np.array([it["visible"] for it in items])
+    return torch.from_numpy(uv).float(), torch.from_numpy(vis).float()
 
 
 def cache_features(backbone, root, items, size, device, batch=16):
@@ -154,8 +159,7 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
         feats = cache_features(backbone, root, items, size, device)
     opt = torch.optim.AdamW(params, lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
-    uv_all = torch.tensor([np.array(it["uv"]) / [it["width"], it["height"]] for it in items], dtype=torch.float32)
-    vis_all = torch.tensor([it["visible"] for it in items], dtype=torch.float32)
+    uv_all, vis_all = _labels(items)
 
     def run(idx, training):
         head.train(training)
@@ -190,7 +194,7 @@ def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name=
         va = run(val_idx, False)
         sched.step()
         history.append({"epoch": ep + 1, "train_err": tr, "val_err": va})
-        log(f"epoch {ep + 1}/{epochs}  train err {tr * 100:.2f}%  val err {va * 100:.2f}% of image width")
+        log(f"epoch {ep + 1}/{epochs}  train err {tr * 100:.2f}%  val err {va * 100:.2f}% of image width", flush=True)
     torch.save({"joints": joints, "size": size, "backbone": backbone_name, "head": head.state_dict(),
                 "backbone_state": backbone.state_dict() if finetune else None, "history": history}, out_path)
     return history
