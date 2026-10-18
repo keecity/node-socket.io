@@ -51,6 +51,9 @@ body { background: var(--night); color: var(--ink); font-family: var(--ui); over
 .hpbar { height: 10px; border-radius: 5px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .hpbar i { display: block; height: 100%; width: 100%; background: var(--hp-high); transition: width 0.45s ease-out, background-color 0.3s; }
 .plate.right .hpbar i { margin-left: auto; }
+.enbar { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.enbar i { display: block; height: 100%; width: 0; background: var(--arc); transition: width 0.3s; }
+.plate.right .enbar i { margin-left: auto; }
 .hpnum { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; min-height: 18px; }
 .chip { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; }
@@ -114,6 +117,7 @@ body { background: var(--night); color: var(--ink); font-family: var(--ui); over
       <div class="meta"><span class="type">Electric</span><span>Lv 36</span></div>
       <div class="hpbar"><i></i></div>
       <div class="hpnum">120 / 120 HP</div>
+      <div class="enbar" title="Energy"><i></i></div>
       <div class="chips"></div>
     </section>
     <section class="plate gold right" id="plateB">
@@ -121,11 +125,12 @@ body { background: var(--night); color: var(--ink); font-family: var(--ui); over
       <div class="meta"><span>Lv 36</span><span class="type">Electric</span></div>
       <div class="hpbar"><i></i></div>
       <div class="hpnum">115 / 115 HP</div>
+      <div class="enbar" title="Energy"><i></i></div>
       <div class="chips"></div>
     </section>
   </div>
   <div class="center">
-    <div class="turn" id="turn">Turn 1</div>
+    <div class="turn" id="turn">0:00</div>
     <div class="callout" id="callout"></div>
   </div>
   <div class="bottom">
@@ -162,9 +167,26 @@ async function loadBinary(url) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes.buffer;
 }
-const CLIPS = ['idle', 'walk', 'attack', 'bite', 'jump', 'dodge', 'spin'];
-const EVENT = { attack: 0.42, bite: 0.36, jump: 0.62, spin: 0.62, dodge: 0.3 };
-const PLAYBACK = { idle: 1, walk: 1.5, attack: 1.35, bite: 1.35, jump: 1.25, dodge: 1.6, spin: 1.2 };
+const SOURCES = ['idle', 'walk', 'run', 'attack', 'bite', 'jump', 'dodge', 'spin', 'hurt', 'faint'];
+// Each generated clip is 6 s; the game plays only the part where the action happens. Times are
+// seconds in the source clip, measured from the solved motion: start/end of the segment, then
+// events (hit = damage frame, land = touchdown), iframe (Spark Step can't be hit) and air
+// (feet off the floor, clears ground waves), all relative to the segment start.
+const SEG = {
+  idle:   { src: 'idle',   from: 0,   to: 6,   loop: true },
+  walk:   { src: 'walk',   from: 1.0, to: 5.2, loop: true },
+  run:    { src: 'run',    from: 0.8, to: 5.8, loop: true },
+  attack: { src: 'attack', from: 2.0, to: 3.6, events: [{ at: 1.0, hit: true }] },
+  bite:   { src: 'bite',   from: 1.2, to: 2.6, events: [{ at: 0.3, hit: true }] },
+  leap:   { src: 'jump',   from: 0.9, to: 4.0, events: [{ at: 1.1, fx: 'land' }, { at: 2.5, hit: true }] },
+  hop:    { src: 'jump',   from: 0.9, to: 2.4, air: [0.6, 1.1], events: [{ at: 1.1, fx: 'land' }] },
+  dodge:  { src: 'dodge',  from: 2.0, to: 4.4, iframe: [0.15, 2.2] },
+  spin:   { src: 'spin',   from: 1.0, to: 4.0, air: [0.6, 2.0], events: [{ at: 2.1, hit: true }] },
+  charge: { src: 'idle',   from: 0,   to: 2.4, events: [{ at: 0.4, hit: true }, { at: 1.2, hit: true }, { at: 2.0, hit: true, last: true }] },
+  hurt:   { src: 'hurt',   from: 0.8, to: 3.4 },
+  faint:  { src: 'faint',  from: 0.3, to: 6 },
+};
+const PLAYBACK = { idle: 1, walk: 1.4, run: 1.3, attack: 1.3, bite: 1.35, leap: 1.2, hop: 1.25, dodge: 1.6, spin: 1.15, charge: 1.6, hurt: 1.7, faint: 1.15 };
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- clock: everything runs on game time so Pause and 2x apply to all of it ----------
@@ -346,14 +368,23 @@ function popText(worldPos, text, cls) {
 }
 
 // ---------- monsters ----------
+// Real-time combat. Each fighter runs its own AI every frame: it picks a plan (close in, poke from
+// range, circle, back off), moves with walk/run, and fires moves when they are in range and off
+// cooldown. Attacks announce themselves to the target, which may react with Spark Step (dodge,
+// invulnerable while hopping out and back) or a hop (clears ground shockwaves). Hits interrupt
+// with the hurt clip; at 0 HP the faint clip plays.
 const MOVES = {
-  horn:   { name: 'Thunder Horn', anim: 'attack', power: 24, acc: 95, melee: true, line: 'drives a crackling horn forward' },
-  fang:   { name: 'Volt Fang',    anim: 'bite',   power: 20, acc: 100, melee: true, par: 0.3, line: 'sinks in electrified fangs' },
-  leap:   { name: 'Static Leap',  anim: 'jump',   power: 26, acc: 85, line: 'leaps and slams a shockwave across the arena' },
-  spin:   { name: 'Storm Spin',   anim: 'spin',   power: 34, acc: 80, melee: true, recoil: 0.1, line: 'spins through the air and crashes down' },
-  step:   { name: 'Spark Step',   anim: 'dodge',  self: true, line: 'flickers out of reach' },
-  charge: { name: 'Overcharge',   anim: 'idle',   self: true, line: 'calls lightning down onto itself' },
+  horn:   { name: 'Thunder Horn', clip: 'attack', range: 2.15, cd: 1.7, dmg: 11, lunge: 0.45, knock: 0.7, cone: 0.9 },
+  fang:   { name: 'Volt Fang',    clip: 'bite',   range: 1.95, cd: 2.3, dmg: 8,  lunge: 0.55, knock: 0.35, cone: 0.8, par: 0.3 },
+  leap:   { name: 'Static Leap',  clip: 'leap',   min: 2.8, range: 5.2, cd: 5.0, dmg: 13, wave: 7.5, special: true },
+  spin:   { name: 'Storm Spin',   clip: 'spin',   min: 2.0, range: 4.2, cd: 6.0, dmg: 22, energy: 60, aoe: 1.7, armor: true, special: true },
+  step:   { name: 'Spark Step',   clip: 'dodge',  cd: 1.8 },
+  charge: { name: 'Overcharge',   clip: 'idle',   cd: 9.0, special: true },
 };
+const ARENA = 5.0;          // fighters stay inside this radius
+const BODY = 0.82;          // half the closest centre-to-centre distance (the body is long)
+const WALK = 1.25, RUN = 3.7;
+
 // Rotate the texture's hue in the shader so a variant keeps its shading but swaps colours.
 function hueShift(material, degrees) {
   const a = degrees * Math.PI / 180;
@@ -372,22 +403,19 @@ function hueShift(material, degrees) {
   };
   material.customProgramCacheKey = () => 'hue' + degrees;
 }
-
-const GAP = 2.3;        // spawn distance from centre
-const MELEE = 0.75;     // how close a melee attacker gets to centre
+const angleTo = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const flat = (v) => new THREE.Vector3(v.x, 0, v.z);
 
 class Monster {
   constructor(opts) {
     Object.assign(this, opts);
     this.root = new THREE.Group();
-    this.pivot = new THREE.Group();
-    this.root.add(this.pivot);
-    this.pivot.add(this.model);
+    this.root.add(this.model);
     scene.add(this.root);
     this.mixer = new THREE.AnimationMixer(this.model);
     this.actions = {};
     for (const [n, clip] of Object.entries(opts.clips)) this.actions[n] = this.mixer.clipAction(clip);
-    this.events = [];
     this.materials = [];
     this.model.traverse((o) => {
       if (o.isMesh) {
@@ -399,66 +427,303 @@ class Monster {
         }
       }
       if (o.isBone && /horn|head_nub/i.test(o.name)) this.hornBone = this.hornBone || o;
-      if (o.isBone && /^head$/i.test(o.name)) this.headBone = o;
       if (o.isBone && /jaw_nub/i.test(o.name)) this.jawBone = o;
       if (o.isBone && /^hip$/i.test(o.name)) this.hipBone = o;
     });
-    this.reset();
   }
-  reset() {
-    this.hp = this.maxHp; this.par = false; this.charged = false; this.evasive = false; this.fainted = false;
-    this.root.position.set(this.side * GAP, 0, 0);
-    this.root.rotation.set(0, this.side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
-    this.pivot.rotation.set(0, 0, 0); this.pivot.position.y = 0;
-    this.materials.forEach((m) => { m.transparent = false; m.opacity = 1; if (m.emissive) m.emissive.setRGB(0, 0, 0); });
-    this.play('idle', { loop: true });
+  reset(spawn) {
+    this.hp = this.maxHp; this.energy = 20; this.par = 0; this.fainted = false;
+    this.cd = Object.fromEntries(Object.keys(MOVES).map((k) => [k, rand(0.5, 1.5)]));
+    this.act = null; this.hurtT = 0; this.vel = new THREE.Vector3();
+    this.plan = 'close'; this.planT = 0; this.strafe = Math.random() < 0.5 ? 1 : -1; this.think = 0;
+    this.root.position.copy(spawn); this.root.rotation.set(0, angleTo(spawn, new THREE.Vector3()), 0);
+    this.materials.forEach((m) => { if (m.emissive) m.emissive.setRGB(0, 0, 0); });
+    this.model.rotation.z = 0; this.pendingHop = false; this.reactIn = undefined;
+    this.loco = null; this.current = null;
+    this.mixer.stopAllAction();
+    this.play('idle', { loop: true, fade: 0 }); this.loco = 'idle';
   }
-  play(name, { loop = false, rate = 1, fade = 0.18 } = {}) {
+  play(name, { loop = false, rate = 1, fade = 0.12 } = {}) {
     const a = this.actions[name];
     a.reset(); a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
     a.clampWhenFinished = !loop; a.timeScale = rate * (PLAYBACK[name] || 1);
     if (this.current && this.current !== a) this.current.crossFadeTo(a, fade, false);
-    a.play(); this.current = a;
+    a.setEffectiveWeight(1); a.play(); this.current = a;
     return a;
   }
-  // play a clip once; onEvent fires at the clip's impact fraction; resolves when it finishes
-  perform(name, onEvent) {
-    const a = this.play(name);
-    const dur = a.getClip().duration;
-    return new Promise((res) => {
-      this.events.push({ a, frac: EVENT[name] ?? 0.5, fired: false, onEvent, dur, res });
-    });
+  world(bone) { const v = new THREE.Vector3(); (bone || this.root).getWorldPosition(v); return v; }
+  body() { return this.hipBone ? this.world(this.hipBone).add(new THREE.Vector3(0, 0.12, 0)) : this.root.position.clone().setY(0.7); }
+  ground() { return flat(this.hipBone ? this.world(this.hipBone) : this.root.position); }
+  facing() { const y = this.root.rotation.y; return new THREE.Vector3(Math.sin(y), 0, Math.cos(y)); }
+  busy() { return !!this.act || this.hurtT > 0 || this.fainted; }
+  invulnerable() { return this.act && this.act.iframe && this.act.t >= this.act.iframe[0] && this.act.t <= this.act.iframe[1]; }
+  airborne() { return this.act && this.act.air && this.act.t >= this.act.air[0] && this.act.t <= this.act.air[1]; }
+
+  // ----- actions: one clip, timed events in clip seconds -----
+  start(key, foe, extra = {}) {
+    const move = MOVES[key];
+    const clipName = extra.clip || move.clip;
+    const seg = SEG[clipName];
+    const a = this.play(clipName, { fade: 0.08 });
+    this.loco = null;
+    this.act = { key, move, a, clipName, t: 0, dur: a.getClip().duration, events: [...(seg.events || [])].map((e) => ({ ...e })),
+      iframe: seg.iframe, air: seg.air, foe, ...extra };
+    this.cd[key] = move.cd;
+    if (move.special) callout(move.name, this.name);
+    if (MOVES[key].dmg && foe) foe.threat(this, key, (seg.events?.find((e) => e.hit)?.at ?? 0.4) / a.timeScale);
   }
-  update(dt) {
+  threat(att, key, eta) {
+    // The defender sees the attack coming; a skilled, free, unparalysed fighter reacts sometimes.
+    if (this.busy() || this.par > 0) return;
+    const d = this.ground().distanceTo(att.ground());
+    if (key === 'leap') {
+      if (Math.random() < this.skill) this.pendingHop = true;   // hop when the wave arrives
+      return;
+    }
+    if (d > (MOVES[key].range || 2) + 0.8) return;
+    if (this.cd.step <= 0 && Math.random() < this.skill && eta > 0.18) this.reactIn = Math.min(eta * 0.4, 0.25);
+  }
+  update(dt, foe) {
     this.mixer.update(dt);
-    for (let i = this.events.length - 1; i >= 0; i--) {
-      const e = this.events[i];
-      const k = e.a.time / e.dur;
-      if (!e.fired && k >= e.frac) { e.fired = true; e.onEvent && e.onEvent(); }
-      if (k >= 0.999 || !e.a.isRunning()) {
-        if (!e.fired) { e.fired = true; e.onEvent && e.onEvent(); }
-        this.events.splice(i, 1); e.res();
+    for (const k in this.cd) this.cd[k] -= dt;
+    this.energy = Math.min(100, this.energy + dt * 4);
+    if (this.par > 0) {
+      this.par -= dt;
+      if (Math.random() < dt * 2.5) bolt(() => this.body().add(new THREE.Vector3(0, 0.35, 0)), () => this.body().add(new THREE.Vector3(rand(-0.5, 0.5), -0.4, rand(-0.5, 0.5))), { life: 0.25, segments: 5, branches: 0, width: 0.015 });
+      if (this.par <= 0) drawPlate(this);
+    }
+    if (this.fainted) return;
+    if (this.hurtT > 0) {
+      this.hurtT -= dt;
+      this.slide(dt);
+      if (this.hurtT <= 0) this.loco = null;
+      return;
+    }
+    if (this.reactIn !== undefined) {
+      this.reactIn -= dt;
+      if (this.reactIn <= 0) { this.reactIn = undefined; if (!this.act) this.start('step', null); }
+    }
+    if (this.act) { this.runAction(dt, foe); this.slide(dt); return; }
+    this.ai(dt, foe);
+  }
+  slide(dt) {
+    this.root.position.addScaledVector(this.vel, dt);
+    this.vel.multiplyScalar(Math.exp(-6 * dt));
+    this.keepInArena();
+  }
+  keepInArena() {
+    const p = this.root.position, r = Math.hypot(p.x, p.z);
+    if (r > ARENA) { p.x *= ARENA / r; p.z *= ARENA / r; }
+  }
+  faceToward(target, dt, rate = 9) {
+    const want = angleTo(this.root.position, target);
+    this.root.rotation.y += wrap(want - this.root.rotation.y) * Math.min(1, rate * dt);
+  }
+  runAction(dt, foe) {
+    const act = this.act;
+    act.t = act.a.time;
+    const toFoe = flat(foe.ground()).sub(flat(this.root.position));
+    // track the foe while winding up; commit once the strike is out
+    if (act.track !== false && act.t < (act.lockAt ?? 0.35 * act.dur)) this.faceToward(foe.ground(), dt, 6);
+    if (act.move.lunge && act.t < (act.events.find((e) => e.hit)?.at ?? 0)) {
+      const want = Math.max(0, toFoe.length() - BODY * 2);
+      this.root.position.addScaledVector(this.facing(), Math.min(want, act.move.lunge * 2.2 * dt));
+    }
+    if (act.key === 'spin' && act.t >= SEG.spin.air[0] && act.t <= SEG.spin.air[1]) {
+      // fly toward where the foe was when it took off
+      act.aim = act.aim || flat(foe.ground());
+      const left = flat(act.aim).sub(flat(this.root.position));
+      const remain = Math.max(0.05, (SEG.spin.air[1] - act.t));
+      if (left.length() > BODY * 1.6) this.root.position.addScaledVector(left, Math.min(1, dt / remain) * 0.9);
+    }
+    for (const e of act.events) {
+      if (!e.fired && act.t >= e.at) { e.fired = true; this.event(e, foe); }
+    }
+    if (act.t >= act.dur - 1e-3 || !act.a.isRunning()) { this.act = null; this.loco = null; }
+  }
+  event(e, foe) {
+    const key = this.act.key, move = this.act.move;
+    if (e.fx === 'land') { shockwave(this.ground(), { radius: 1.4 }); kick(0.05); }
+    if (!e.hit) return;
+    if (key === 'horn') {
+      bolt(() => this.world(this.hornBone), () => this.world(this.hornBone).addScaledVector(this.facing(), 1.1), { life: 0.25, jitter: 0.12 });
+      this.melee(foe, move, this.world(this.hornBone));
+    } else if (key === 'fang') {
+      sparks(this.world(this.jawBone), { count: 30, color: '#66d6ff', speed: 2 });
+      this.melee(foe, move, this.world(this.jawBone));
+    } else if (key === 'leap') {
+      const from = this.ground();
+      shockwave(from, { radius: 2.2 }); kick(0.12);
+      const dir = flat(foe.ground()).sub(from).normalize();
+      groundWave(this, foe, from, dir, move);
+    } else if (key === 'spin') {
+      const p = this.world(this.hornBone).setY(0.05);
+      skyStrike(p, 0.45); shockwave(p, { radius: 3.2, color: '#ffe14a' }); sparks(p, { count: 120, speed: 4.5, up: 2.5 });
+      kick(0.28);
+      const d = flat(foe.ground()).distanceTo(flat(p));
+      if (d < move.aoe + BODY) resolveHit(this, foe, move, p);
+      else { popText(foe.body().add(new THREE.Vector3(0, 0.6, 0)), 'MISS', 'miss'); stats.missed++; }
+    } else if (key === 'charge') {
+      skyStrike(this.body(), 0.35); kick(0.06);
+      if (e.last) {
+        this.energy = Math.min(100, this.energy + 55);
+        const heal = Math.min(this.maxHp - this.hp, 6);
+        this.hp += heal; if (heal > 0) popText(this.body().add(new THREE.Vector3(0, 0.6, 0)), `+${heal}`, 'heal');
+        log(`${tag(this)} overcharges. Storm Spin is ready.`); drawPlate(this);
       }
     }
   }
-  idle() { if (!this.fainted) this.play('idle', { loop: true, fade: 0.3 }); }
-  world(bone, fallbackY = 0.8) {
-    const v = new THREE.Vector3();
-    if (bone) bone.getWorldPosition(v); else v.set(this.root.position.x, fallbackY, 0);
-    return v;
+  melee(foe, move, tip) {
+    const to = flat(foe.ground()).sub(flat(this.root.position));
+    const d = to.length();
+    const ang = Math.acos(Math.max(-1, Math.min(1, to.normalize().dot(this.facing()))));
+    if (d <= move.range && ang <= move.cone) resolveHit(this, foe, move, tip);
+    else { popText(foe.body().add(new THREE.Vector3(0, 0.6, 0)), 'MISS', 'miss'); stats.missed++; }
   }
-  body() { return this.world(this.hipBone, 0.6).add(new THREE.Vector3(0, 0.15, 0)); }
-  async walkTo(x, dur = 0.7) {
-    const from = this.root.position.x;
-    this.play('walk', { loop: true, fade: 0.12 });
-    await tween(dur, (k) => { this.root.position.x = from + (x - from) * ease(k); });
+  hurt(from, knock) {
+    if (this.act && this.act.move.armor) return;        // Storm Spin has super armour
+    this.act = null; this.reactIn = undefined;
+    const dir = flat(this.root.position).sub(flat(from.root.position)).normalize();
+    this.vel.addScaledVector(dir, 2.6 * knock + 1);
+    if (this.actions.hurt) { const a = this.play('hurt', { fade: 0.05 }); this.hurtT = 0.75 * a.getClip().duration / a.timeScale; }
+    else { this.hurtT = 0.45; this.play('idle', { loop: true, fade: 0.05 }); }
+    this.loco = null;
+  }
+  faint() {
+    this.fainted = true; this.act = null; this.hurtT = 0;
+    if (this.actions.faint) this.play('faint', { fade: 0.08 });
+    else {
+      this.mixer.stopAllAction();
+      tween(1.0, (k) => { this.model.rotation.z = ease(k) * 1.4; });
+    }
   }
   flashHit() {
     this.materials.forEach((m) => m.emissive && m.emissive.set('#fff3a0'));
-    fx.push({ life: 0.35, t: 0, update: (k) => this.materials.forEach((m) => m.emissive && m.emissive.setRGB(1 - k, (1 - k) * 0.95, (1 - k) * 0.6)), dispose() {} });
-    const base = this.root.position.x;
-    tween(0.12, (k) => { this.root.position.x = base + this.side * 0.22 * Math.sin(k * Math.PI); });
+    fx.push({ life: 0.3, t: 0, update: (k) => this.materials.forEach((m) => m.emissive && m.emissive.setRGB(1 - k, (1 - k) * 0.95, (1 - k) * 0.6)), dispose() {} });
   }
+
+  // ----- brain -----
+  ai(dt, foe) {
+    const me = flat(this.root.position), them = flat(foe.ground());
+    const d = me.distanceTo(them);
+    const slow = this.par > 0 ? 0.55 : 1;
+    if (foe.fainted) { this.locomote(new THREE.Vector3(), dt, them); return; }
+
+    this.planT -= dt;
+    if (this.planT <= 0) {
+      const low = this.hp < this.maxHp * 0.3;
+      const r = Math.random();
+      this.plan = low && foe.energy >= 60 && r < 0.35 ? 'retreat'
+        : r < this.aggro ? 'close' : r < this.aggro + 0.2 ? 'poke' : 'circle';
+      this.planT = rand(1.2, 2.8); this.strafe = Math.random() < 0.5 ? 1 : -1;
+    }
+
+    // attack choice
+    this.think -= dt;
+    if (this.think <= 0) {
+      this.think = rand(0.12, 0.3) / slow;
+      const can = (k) => this.cd[k] <= 0;
+      const opts = [];
+      if (can('spin') && this.energy >= MOVES.spin.energy && d >= MOVES.spin.min && d <= MOVES.spin.range) opts.push(['spin', 3]);
+      if (can('horn') && d <= MOVES.horn.range * 0.95) opts.push(['horn', 3]);
+      if (can('fang') && d <= MOVES.fang.range * 0.95) opts.push(['fang', foe.par > 0 ? 1 : 2.5]);
+      if (can('leap') && d >= MOVES.leap.min && d <= MOVES.leap.range && this.plan !== 'close') opts.push(['leap', 2]);
+      if (can('charge') && this.energy < 50 && d > 3.6) opts.push(['charge', 2]);
+      if (opts.length && Math.random() < 0.75) {
+        let tot = opts.reduce((s, o) => s + o[1], 0), r = Math.random() * tot;
+        for (const [k, w] of opts) if ((r -= w) <= 0) {
+          if (k === 'charge') this.start('charge', foe, { clip: 'charge', track: false });
+          else this.start(k, foe);
+          if (k === 'spin') this.energy -= MOVES.spin.energy;
+          return;
+        }
+      }
+    }
+
+    // movement for the current plan
+    const toward = them.clone().sub(me).normalize();
+    const side = new THREE.Vector3(toward.z, 0, -toward.x).multiplyScalar(this.strafe);
+    let want = new THREE.Vector3(), speed = 0;
+    if (this.plan === 'close') {
+      if (d > 1.9) { want.copy(toward); speed = d > 3.4 ? RUN : WALK * 1.4; }
+      else { want.copy(side); speed = WALK * 0.6; }
+    } else if (this.plan === 'poke') {
+      if (d < 3.3) { want.copy(toward).negate(); speed = WALK * 1.5; }
+      else if (d > 4.6) { want.copy(toward); speed = WALK * 1.5; }
+      else { want.copy(side); speed = WALK; }
+    } else if (this.plan === 'circle') {
+      want.copy(side).addScaledVector(toward, d > 3.0 ? 0.4 : -0.3).normalize(); speed = WALK * 1.2;
+    } else if (this.plan === 'retreat') {
+      want.copy(toward).negate().addScaledVector(side, 0.6).normalize(); speed = RUN * 0.85;
+    }
+    // stay off the wall: steer inward near the edge
+    const r = Math.hypot(me.x, me.z);
+    if (r > ARENA - 0.8) want.addScaledVector(me.clone().normalize(), -(r - (ARENA - 0.8)) * 2).normalize();
+    this.locomote(want.multiplyScalar(speed * slow), dt, them);
+  }
+  locomote(v, dt, lookAt) {
+    const s = v.length();
+    this.root.position.addScaledVector(v, dt);
+    this.keepInArena();
+    // run faces where it is going; walking keeps eyes on the foe
+    if (s > RUN * 0.6) this.faceToward(this.root.position.clone().add(v), dt, 8);
+    else this.faceToward(lookAt, dt, 7);
+    const want = s > RUN * 0.6 ? (this.actions.run ? 'run' : 'walk') : s > 0.15 ? 'walk' : 'idle';
+    if (want !== this.loco) { this.play(want, { loop: true, fade: 0.2 }); this.loco = want; }
+    if (want === 'walk') this.current.timeScale = PLAYBACK.walk * Math.min(2.5, Math.max(0.6, s / WALK));
+    if (want === 'run') this.current.timeScale = PLAYBACK.run * Math.max(0.7, s / RUN);
+  }
+}
+
+function groundWave(att, def, from, dir, move) {
+  const pos = from.clone();
+  const travelled = { d: 0 };
+  const max = 6.5;
+  let hit = false;
+  fx.push({ life: max / move.wave, t: 0, update(k, dt) {
+    pos.addScaledVector(dir, move.wave * dt); travelled.d += move.wave * dt;
+    if (Math.random() < 0.8) sparks(pos.clone().setY(0.05), { count: 5, speed: 1.6, life: 0.35 });
+    const gap = flat(def.ground()).distanceTo(pos);
+    // a defender that read the leap hops just before the wave arrives
+    if (def.pendingHop && !def.busy() && gap < move.wave * SEG.hop.air[0] / PLAYBACK.hop + BODY) {
+      def.pendingHop = false; def.start('step', null, { clip: 'hop' });
+    }
+    if (!hit && !def.fainted && gap < BODY + 0.35) {
+      hit = true;
+      if (def.airborne() || def.invulnerable()) {
+        popText(def.body().add(new THREE.Vector3(0, 0.6, 0)), 'JUMPED', 'miss'); stats.jumped++;
+      } else {
+        shockwave(def.ground(), { radius: 1.4, color: '#ffe14a' });
+        resolveHit(att, def, move, def.body());
+      }
+    }
+  }, dispose() {} });
+}
+
+function resolveHit(att, def, move, at) {
+  if (def.fainted) return;
+  if (def.invulnerable()) {
+    popText(def.body().add(new THREE.Vector3(0, 0.6, 0)), 'DODGED', 'miss'); stats.dodged++;
+    sparks(def.body(), { count: 30, color: '#66d6ff', speed: 2.2 });
+    return;
+  }
+  const crit = Math.random() < 0.1;
+  let amount = Math.round(move.dmg * (att.atk / def.def) * rand(0.9, 1.1) * (crit ? 1.5 : 1));
+  def.hp -= amount;
+  stats.hits[move.name] = (stats.hits[move.name] || 0) + 1;
+  att.energy = Math.min(100, att.energy + 8);
+  def.flashHit();
+  sparks(at, { count: crit ? 110 : 60 });
+  lightFlash(at, '#ffe14a', crit ? 22 : 12);
+  screenFlash(crit ? 0.6 : 0.25);
+  kick(crit ? 0.2 : 0.1);
+  hitStop = crit ? 0.12 : 0.07;
+  popText(def.body().add(new THREE.Vector3(0, 0.6, 0)), `${amount}${crit ? '!' : ''}`, crit ? 'crit' : '');
+  if (move.special || crit) log(`${tag(att)} lands ${move.name}${crit ? ' — critical' : ''} for ${amount}.`);
+  if (move.par && def.par <= 0 && Math.random() < move.par) { def.par = 3.5; log(`${tag(def)} is paralyzed.`); }
+  if (def.hp <= 0) { def.hp = 0; def.faint(); }
+  else def.hurt(att, move.knock ?? 1);
+  drawPlate(def); drawPlate(att);
 }
 
 // ---------- HUD ----------
@@ -468,11 +733,11 @@ function log(html) {
   while (logEl.children.length > 3) logEl.firstChild.remove();
 }
 const calloutEl = document.getElementById('callout');
-async function callout(title, sub) {
+let calloutTimer = 0;
+function callout(title, sub) {
   calloutEl.innerHTML = `${title}<small>${sub}</small>`;
   calloutEl.classList.add('show');
-  await wait(900);
-  calloutEl.classList.remove('show');
+  calloutTimer = 0.9;
 }
 function drawPlate(m) {
   const el = document.getElementById(m.plate);
@@ -481,184 +746,70 @@ function drawPlate(m) {
   bar.style.width = (f * 100) + '%';
   bar.style.backgroundColor = f > 0.5 ? 'var(--hp-high)' : f > 0.2 ? 'var(--hp-mid)' : 'var(--hp-low)';
   el.querySelector('.hpnum').textContent = `${Math.max(0, Math.ceil(m.hp))} / ${m.maxHp} HP`;
+  el.querySelector('.enbar i').style.width = m.energy + '%';
   el.querySelector('.chips').innerHTML =
-    (m.par ? '<span class="chip par">PAR</span>' : '') +
-    (m.charged ? '<span class="chip chg">CHARGED</span>' : '') +
-    (m.evasive ? '<span class="chip eva">EVASIVE</span>' : '');
+    (m.par > 0 ? '<span class="chip par">PAR</span>' : '') +
+    (m.energy >= MOVES.spin.energy ? '<span class="chip chg">SPIN READY</span>' : '');
 }
 
 // ---------- battle ----------
-let A, B, battleId = 0, turn = 0;
+let A, B, battleId = 0, matchTime = 0, hitStop = 0, ending = false;
+// running tally, readable from the console as arenaStats
+const stats = window.arenaStats = { hits: {}, dodged: 0, jumped: 0, missed: 0, results: [] };
 const tag = (m) => `<b>${m.name}</b>`;
-
-function chooseMove(me, foe) {
-  const w = {
-    horn: 3, fang: foe.par ? 2 : 4, leap: 2.5, spin: me.charged ? 6 : 2,
-    step: me.evasive ? 0 : 1.6, charge: me.charged ? 0 : (me.hp < me.maxHp * 0.45 ? 4 : 1.4),
-  };
-  let total = Object.values(w).reduce((s, x) => s + x, 0), r = Math.random() * total;
-  for (const [k, x] of Object.entries(w)) { if ((r -= x) <= 0) return k; }
-  return 'horn';
-}
-
-function rollHit(att, def, move) {
-  let acc = move.acc / 100;
-  if (def.evasive) acc *= 0.45;
-  return Math.random() < acc;
-}
-function damage(att, def, move) {
-  const crit = Math.random() < 0.12;
-  let d = move.power * (att.atk / def.def) * rand(0.85, 1.0);
-  if (crit) d *= 1.5;
-  if (att.charged) d *= 1.5;
-  return { amount: Math.round(d), crit };
-}
-
-async function applyHit(att, def, move, id) {
-  if (id !== battleId) return;
-  const hit = rollHit(att, def, move);
-  const wasEvasive = def.evasive;
-  def.evasive = false;
-  if (!hit) {
-    popText(def.body().add(new THREE.Vector3(0, 0.6, 0)), 'MISS', 'miss');
-    log(`${tag(def)} ${wasEvasive ? 'sidesteps in a burst of sparks' : 'avoids the attack'}.`);
-    def.perform('dodge').then(() => def.idle());
-    drawPlate(def);
-    return false;
-  }
-  const { amount, crit } = damage(att, def, move);
-  att.charged = false;
-  def.hp -= amount;
-  def.flashHit();
-  sparks(def.body(), { count: crit ? 110 : 70 });
-  lightFlash(def.body(), '#ffe14a', crit ? 22 : 14);
-  screenFlash(crit ? 0.7 : 0.35);
-  kick(crit ? 0.22 : 0.12);
-  popText(def.body().add(new THREE.Vector3(0, 0.6, 0)), `${amount}${crit ? '!' : ''}`, crit ? 'crit' : '');
-  log(`${tag(att)} ${move.line}${crit ? ' — critical hit' : ''}. ${tag(def)} takes ${amount}.`);
-  if (move.par && !def.par && def.hp > 0 && Math.random() < move.par) {
-    def.par = true; log(`${tag(def)} is paralyzed.`);
-    bolt(() => def.body().add(new THREE.Vector3(0, 0.4, 0)), () => def.body().add(new THREE.Vector3(rand(-0.4, 0.4), -0.3, rand(-0.4, 0.4))), { life: 0.5, jitter: 0.12, segments: 6, branches: 1 });
-  }
-  if (move.recoil) {
-    const r = Math.round(amount * move.recoil); att.hp -= r;
-    log(`${tag(att)} is hit by recoil for ${r}.`);
-  }
-  drawPlate(def); drawPlate(att);
-  return true;
-}
-
-async function doMove(att, def, key, id) {
-  const move = MOVES[key];
-  const toward = -att.side; // +1 means moving toward +x
-  callout(move.name, `${att.name}`);
-  await wait(250);
-  if (id !== battleId) return;
-
-  if (key === 'horn' || key === 'fang') {
-    await att.walkTo(att.side * MELEE, 0.55);
-    await att.perform(move.anim, () => {
-      const tip = key === 'horn' ? att.world(att.hornBone) : att.world(att.jawBone);
-      if (key === 'horn') bolt(() => att.world(att.hornBone), () => def.body(), { life: 0.4, jitter: 0.15 });
-      else sparks(tip, { count: 40, color: '#66d6ff', speed: 2 });
-      applyHit(att, def, move, id);
-    });
-    if (id !== battleId) return;
-    await att.walkTo(att.side * GAP, 0.6);
-  } else if (key === 'leap') {
-    await att.perform('jump', async () => {
-      const start = att.root.position.clone();
-      shockwave(start, { radius: 2.5 });
-      kick(0.1);
-      const wave = new THREE.Vector3(start.x, 0.05, 0);
-      const target = def.root.position.x;
-      await tween(0.35, (k) => { wave.x = start.x + (target - start.x) * k; if (Math.random() < 0.6) sparks(wave.clone(), { count: 6, speed: 1.6, life: 0.4 }); });
-      shockwave(def.root.position, { radius: 1.6, color: '#ffe14a' });
-      applyHit(att, def, move, id);
-    });
-  } else if (key === 'spin') {
-    const from = att.root.position.x, to = att.side * MELEE;
-    const go = tween(0.9, (k) => { att.root.position.x = from + (to - from) * ease(k); });
-    await att.perform('spin', () => {
-      const p = att.world(att.hornBone).setY(0.05);
-      skyStrike(p, 0.45); shockwave(p, { radius: 3.2, color: '#ffe14a' }); sparks(p, { count: 120, speed: 4.5, up: 2.5 });
-      kick(0.25);
-      applyHit(att, def, move, id);
-    });
-    await go;
-    if (id !== battleId) return;
-    await att.walkTo(att.side * GAP, 0.6);
-  } else if (key === 'step') {
-    att.evasive = true;
-    await att.perform('dodge', () => sparks(att.body(), { count: 50, color: '#66d6ff', speed: 2.4 }));
-    log(`${tag(att)} ${move.line}. Its next dodge chance rises.`);
-    drawPlate(att);
-  } else if (key === 'charge') {
-    att.play('idle', { loop: true, rate: 1.6 });
-    for (let i = 0; i < 3; i++) { skyStrike(att.body(), 0.35); kick(0.08); await wait(260); }
-    att.charged = true;
-    const heal = Math.min(att.maxHp - att.hp, 12);
-    att.hp += heal;
-    if (heal > 0) popText(att.body().add(new THREE.Vector3(0, 0.6, 0)), `+${Math.round(heal)}`, 'heal');
-    log(`${tag(att)} ${move.line}. Charged up${heal > 0 ? ` and recovers ${Math.round(heal)} HP` : ''}.`);
-    drawPlate(att);
-  }
-  if (id === battleId) att.idle();
-}
-
-async function faint(m) {
-  m.fainted = true;
-  m.mixer.stopAllAction();
-  m.materials.forEach((x) => { x.transparent = true; });
-  await tween(1.2, (k) => {
-    m.pivot.rotation.z = -m.side * 0 + ease(k) * 1.4;
-    m.pivot.position.y = -k * 0.15;
-    m.materials.forEach((x) => { x.opacity = 1 - k * 0.7; });
-  });
-}
+const turnEl = document.getElementById('turn');
 
 async function battle() {
   const id = ++battleId;
-  turn = 0;
-  A.reset(); B.reset(); drawPlate(A); drawPlate(B);
+  ending = false; matchTime = 0;
+  A.reset(new THREE.Vector3(-2.6, 0, 0.3)); B.reset(new THREE.Vector3(2.6, 0, -0.3));
+  drawPlate(A); drawPlate(B);
   logEl.innerHTML = '<p>Two Electric-types square off in the storm arena.</p>';
-  await wait(600);
-  // opening roars
-  await Promise.all([A.perform('attack'), wait(300).then(() => B.perform('attack'))]);
-  A.idle(); B.idle();
-  while (id === battleId && A.hp > 0 && B.hp > 0) {
-    turn++;
-    document.getElementById('turn').textContent = `Turn ${turn}`;
-    const sa = A.spd * (A.par ? 0.5 : 1), sb = B.spd * (B.par ? 0.5 : 1);
-    const order = sa === sb ? (Math.random() < 0.5 ? [A, B] : [B, A]) : (sa > sb ? [A, B] : [B, A]);
-    for (const att of order) {
-      const def = att === A ? B : A;
-      if (id !== battleId || att.hp <= 0 || def.hp <= 0) break;
-      if (att.par && Math.random() < 0.25) {
-        log(`${tag(att)} is paralyzed and can't move.`);
-        bolt(() => att.body().add(new THREE.Vector3(0, 0.5, 0)), () => att.body().add(new THREE.Vector3(rand(-0.5, 0.5), -0.4, 0)), { life: 0.5, segments: 6 });
-        att.flashHit();
-        await wait(900);
-        continue;
-      }
-      if (att.par && Math.random() < 0.2) { att.par = false; log(`${tag(att)} shakes off the paralysis.`); drawPlate(att); }
-      await doMove(att, def, chooseMove(att, def), id);
-      await wait(450);
-    }
-  }
+  A.frozen = B.frozen = true;
+  callout('Fight', 'Voltusk vs Shockhorn');
+  await wait(1100);
+  if (id === battleId) A.frozen = B.frozen = false;
+}
+
+async function finish(loser) {
+  if (ending) return;
+  ending = true;
+  const id = battleId, winner = loser === A ? B : A;
+  log(`${tag(loser)} faints. ${tag(winner)} wins in ${matchTime.toFixed(0)} s.`);
+  stats.results.push({ winner: winner.name, seconds: Math.round(matchTime), hpLeft: Math.ceil(winner.hp) });
+  await wait(900);
   if (id !== battleId) return;
-  const loser = A.hp <= 0 ? A : B, winner = loser === A ? B : A;
-  log(`${tag(loser)} faints. ${tag(winner)} wins the battle.`);
-  await faint(loser);
-  callout(`${winner.name} wins`, `after ${turn} turns`);
-  await winner.perform('jump', () => { skyStrike(winner.body(), 0.5); shockwave(winner.root.position, { radius: 2.4, color: '#ffe14a' }); });
-  winner.idle();
-  await wait(3500);
+  callout(`${winner.name} wins`, `${matchTime.toFixed(0)} seconds`);
+  winner.act = null;
+  winner.start('step', null, { clip: 'hop' });
+  skyStrike(winner.body(), 0.5); shockwave(winner.ground(), { radius: 2.4, color: '#ffe14a' });
+  await wait(4200);
   if (id === battleId) battle();
+}
+
+function stepBattle(dt) {
+  if (!A) return;
+  matchTime += dt;
+  if (!ending) turnEl.textContent = `${Math.floor(matchTime / 60)}:${String(Math.floor(matchTime % 60)).padStart(2, '0')}`;
+  for (const [m, f] of [[A, B], [B, A]]) {
+    if (m.frozen) { m.mixer.update(dt); continue; }
+    m.update(dt, f);
+  }
+  // keep bodies from overlapping
+  const pa = A.root.position, pb = B.root.position;
+  const sep = new THREE.Vector3(pb.x - pa.x, 0, pb.z - pa.z), d = sep.length(), min = BODY * 2;
+  if (d < min && d > 1e-4 && !A.airborne() && !B.airborne()) {
+    sep.multiplyScalar((min - d) / d / 2); pa.sub(sep); pb.add(sep);
+  }
+  if (Math.random() < dt * 4) { drawPlate(A); drawPlate(B); }
+  if (calloutTimer > 0 && (calloutTimer -= dt) <= 0) calloutEl.classList.remove('show');
+  if (!ending && (A.fainted || B.fainted)) finish(A.fainted ? A : B);
 }
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
+const camTarget = new THREE.Vector3(0, 0.75, 0);
+let camDist = 7.2;
 function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h, false); camera.aspect = w / h;
@@ -668,16 +819,22 @@ function resize() {
 addEventListener('resize', resize);
 function frame() {
   const raw = Math.min(clock.getDelta(), 0.05);
-  const dt = paused ? 0 : raw * speed;
+  let dt = paused ? 0 : raw * speed;
+  if (hitStop > 0) { hitStop -= dt; dt *= 0.08; }   // freeze a beat on impact
   gameTime += dt;
   tickTimers();
-  if (A) { A.update(dt); B.update(dt); }
+  stepBattle(dt);
   runFx(dt);
-  // camera: slow orbit around the arena, framing both fighters
-  const t = gameTime * 0.08;
-  const r = camera.aspect < 0.8 ? 9.5 : 7.2;
-  camera.position.set(Math.sin(t) * 1.6, 2.1 + Math.sin(t * 0.7) * 0.25, r);
-  const look = new THREE.Vector3(0, 0.75, 0);
+  // camera: frame both fighters from the side of the line between them
+  if (A) {
+    const mid = A.root.position.clone().add(B.root.position).multiplyScalar(0.5);
+    const span = A.root.position.distanceTo(B.root.position);
+    camTarget.lerp(new THREE.Vector3(mid.x * 0.7, 0.75, mid.z * 0.7), Math.min(1, raw * 3));
+    camDist += ((camera.aspect < 0.8 ? 7.5 : 5.4) + span * (camera.aspect < 0.8 ? 1.5 : 0.85) - camDist) * Math.min(1, raw * 2);
+  }
+  const t = gameTime * 0.05;
+  camera.position.set(camTarget.x + Math.sin(t) * camDist * 0.25, 2.2 + camDist * 0.12, camTarget.z + camDist);
+  const look = camTarget.clone();
   if (shake > 0) {
     camera.position.x += rand(-shake, shake); camera.position.y += rand(-shake, shake);
     shake = Math.max(0, shake - raw * 0.8);
@@ -693,7 +850,7 @@ function frame() {
 const btnPause = document.getElementById('btnPause'), btnSpeed = document.getElementById('btnSpeed');
 btnPause.onclick = () => { paused = !paused; btnPause.textContent = paused ? 'Resume' : 'Pause'; btnPause.setAttribute('aria-pressed', String(paused)); };
 btnSpeed.onclick = () => { speed = speed === 1 ? 2 : 1; btnSpeed.textContent = `Speed ${speed}×`; btnSpeed.setAttribute('aria-pressed', String(speed === 2)); };
-document.getElementById('btnNew').onclick = () => { timers.length = 0; A.events.length = 0; B.events.length = 0; battle(); };
+document.getElementById('btnNew').onclick = () => { timers.length = 0; battle(); };
 
 // ---------- boot ----------
 (async function boot() {
@@ -703,8 +860,17 @@ document.getElementById('btnNew').onclick = () => { timers.length = 0; A.events.
     const rigBuf = await loadBinary(ASSETS.rig);
     msg.textContent = 'Loading animations…';
     const gl = new GLTFLoader();
+    const src = {};
+    // run/hurt/faint are optional: the game falls back to walk, a flinch and a topple without them
+    await Promise.all(SOURCES.map(async (n) => {
+      try { src[n] = (await gl.parseAsync(await loadBinary(ASSETS.anim(n)), '')).animations[0]; } catch (e) { console.info('no clip', n); }
+    }));
     const clips = {};
-    await Promise.all(CLIPS.map(async (n) => { clips[n] = (await gl.parseAsync(await loadBinary(ASSETS.anim(n)), '')).animations[0]; }));
+    for (const [name, sg] of Object.entries(SEG)) {
+      const c = src[sg.src]; if (!c) continue;
+      const fps = 30;
+      clips[name] = THREE.AnimationUtils.subclip(c, name, Math.round(sg.from * fps), Math.round(Math.min(sg.to, c.duration) * fps), fps);
+    }
     const fbx = new FBXLoader();
     const makeModel = () => {
       const m = fbx.parse(rigBuf, '');
@@ -713,8 +879,8 @@ document.getElementById('btnNew').onclick = () => { timers.length = 0; A.events.
       m.scale.setScalar(s);
       return m;
     };
-    A = new Monster({ name: 'Voltusk', plate: 'plateA', side: -1, model: makeModel(), clips, maxHp: 120, atk: 1.05, def: 1.0, spd: 52 });
-    B = new Monster({ name: 'Shockhorn', plate: 'plateB', side: 1, model: makeModel(), clips, maxHp: 115, atk: 1.1, def: 0.95, spd: 50, hue: 175 });
+    A = new Monster({ name: 'Voltusk', plate: 'plateA', side: -1, model: makeModel(), clips, maxHp: 120, atk: 1.05, def: 1.0, skill: 0.5, aggro: 0.55 });
+    B = new Monster({ name: 'Shockhorn', plate: 'plateB', side: 1, model: makeModel(), clips, maxHp: 115, atk: 1.1, def: 0.95, skill: 0.4, aggro: 0.65, hue: 175 });
     document.getElementById('loading').hidden = true;
     battle();
   } catch (e) {
