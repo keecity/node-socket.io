@@ -152,7 +152,16 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // Animations were solved from generated video by the creature pipeline. Event times are the
 // fraction of each clip where its impact happens (measured from the solved motion).
-const ASSETS = { rig: 'rig.fbx', anim: (n) => `anims/${n}.glb` };
+// Binary models ship base64-encoded as text (see pack_assets.py) so any static host can serve them.
+const ASSETS = { rig: 'assets/rig.fbx.b64.txt', anim: (n) => `assets/${n}.glb.b64.txt` };
+async function loadBinary(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  const bin = atob((await res.text()).trim());
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
 const CLIPS = ['idle', 'walk', 'attack', 'bite', 'jump', 'dodge', 'spin'];
 const EVENT = { attack: 0.42, bite: 0.36, jump: 0.62, spin: 0.62, dodge: 0.3 };
 const PLAYBACK = { idle: 1, walk: 1.5, attack: 1.35, bite: 1.35, jump: 1.25, dodge: 1.6, spin: 1.2 };
@@ -691,11 +700,11 @@ document.getElementById('btnNew').onclick = () => { timers.length = 0; A.events.
   resize(); frame();
   const msg = document.getElementById('loadmsg');
   try {
-    const rigBuf = await (await fetch(ASSETS.rig)).arrayBuffer();
+    const rigBuf = await loadBinary(ASSETS.rig);
     msg.textContent = 'Loading animations…';
     const gl = new GLTFLoader();
     const clips = {};
-    await Promise.all(CLIPS.map(async (n) => { clips[n] = (await gl.loadAsync(ASSETS.anim(n))).animations[0]; }));
+    await Promise.all(CLIPS.map(async (n) => { clips[n] = (await gl.parseAsync(await loadBinary(ASSETS.anim(n)), '')).animations[0]; }));
     const fbx = new FBXLoader();
     const makeModel = () => {
       const m = fbx.parse(rigBuf, '');
