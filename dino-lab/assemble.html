@@ -41,8 +41,8 @@ canvas.addEventListener('pointermove', e => { if (!drag || busy) return; orbit.y
 window.addEventListener('pointerup', () => drag = null);
 canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.4, Math.min(12, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
 
-// parts and their starting guesses; arm/leg pivots are at the top of the limb
-const PARTS = { body: [0, 0.95, 0], head: [0.75, 1.05, 0], tail: [-0.95, 0.9, 0], arm: [0.3, 0.85, 0.2], leg: [-0.2, 0.75, 0.2] };
+// parts and the placement aligned by hand (parts_layout.json); arm/leg pivots are at the top of the limb
+const PARTS = {"body":{"p":[-0.0392,1,0],"r":[0,0,6.733],"s":[1,1,1]},"head":{"p":[0.8574,1.2574,0],"r":[0,0,0],"s":[1.4394,1.4394,1.4394]},"arm":{"p":[0.3601,1.1107,0.3356],"r":[15.6835,49.1527,17.3629],"s":[1,1,1]},"tail":{"p":[-0.889,0.8902,0],"r":[0,0,-172.782],"s":[1,1,1]},"leg":{"p":[-0.0393,1.0196,0.1074],"r":[-41.2838,47.5512,-49.9566],"s":[1.2895,1.2895,1.2895]}};
 const ents = {}, mirrors = {};
 const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t => new Promise((ok, no) => {
   const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0))], { type: 'model/gltf-binary' }));
@@ -66,7 +66,7 @@ const show = () => {
 document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode = b.dataset.g; show(); }); $('uni').onchange = show;
 $('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
 Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
-  const e = make(res); e.setLocalPosition(...PARTS[nm]); app.root.addChild(e); ents[nm] = e;
+  const e = make(res); e.setLocalPosition(...PARTS[nm].p); e.setLocalEulerAngles(...PARTS[nm].r); e.setLocalScale(...PARTS[nm].s); app.root.addChild(e); ents[nm] = e;
   if (nm === 'arm' || nm === 'leg') { const m = make(res); app.root.addChild(m); mirrors[nm] = m; }
 }))).then(() => {
   for (const nm of Object.keys(PARTS)) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
