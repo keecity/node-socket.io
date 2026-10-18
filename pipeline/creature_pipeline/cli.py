@@ -114,7 +114,12 @@ def cmd_solve(a):
     if not report["ok"] and not a.force:
         print("clip rejected: regenerate it (or pass --force to export anyway)", file=sys.stderr)
         sys.exit(2)
-    write_animation_glb(a.out, skel, local, root, fps, clip_name=a.name or os.path.splitext(os.path.basename(a.video))[0])
+    root_space = None
+    if a.target and a.target.lower().endswith(".fbx"):
+        from .fbx import root_parent_space
+        root_space = root_parent_space(a.target)
+    write_animation_glb(a.out, skel, local, root, fps, root_space=root_space,
+                        clip_name=a.name or os.path.splitext(os.path.basename(a.video))[0])
     if a.keypoints:
         np.save(a.keypoints, kp)
     print(f"animation -> {a.out}")
@@ -179,6 +184,7 @@ def main(argv=None):
     s.add_argument("--name")
     s.add_argument("--fps", type=float)
     s.add_argument("--smooth", type=float, default=1.0, help="temporal smoothing sigma in frames")
+    s.add_argument("--target", help="model the game plays the clip on; for an .fbx the root track is written in its units/axes")
     s.add_argument("--keypoints", help="also save raw detections (.npy)")
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_solve)

@@ -94,9 +94,13 @@ def degrade(png_bytes, rng):
     return buf.getvalue()
 
 
-def _route(page, model_path):
+def _route(page, model_path, files):
     def handle(route):
         url = route.request.url
+        if url.startswith("http://cp.local/files/"):
+            name = url[len("http://cp.local/files/"):]
+            if name in files:
+                return route.fulfill(path=files[name], content_type="application/octet-stream")
         if url == "http://cp.local/render.html":
             return route.fulfill(path=RENDER_HTML, content_type="text/html")
         if url.startswith("http://cp.local/model"):
@@ -118,6 +122,7 @@ class Renderer:
 
     def __init__(self, skel, model_path, size=448, headless=True):
         self.skel, self.model_path, self.size, self.headless = skel, model_path, size, headless
+        self.files = {}  # extra files served at http://cp.local/files/<name>
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -126,7 +131,7 @@ class Renderer:
         self.browser = self._pw.chromium.launch(headless=self.headless, args=args)
         self.page = self.browser.new_page()
         self.page.on("pageerror", lambda e: print("page error:", e))
-        _route(self.page, self.model_path)
+        _route(self.page, self.model_path, self.files)
         self.page.goto("http://cp.local/render.html")
         self.page.wait_for_function("window.cpReady === true")
         ext = os.path.splitext(self.model_path)[1].lower()
@@ -146,6 +151,13 @@ class Renderer:
     def __exit__(self, *exc):
         self.browser.close()
         self._pw.stop()
+
+    def play_clip(self, glb_path, times):
+        """Play an exported clip on the model in three.js; bone world positions (len(times), J, 3)."""
+        self.files["clip.glb"] = glb_path
+        pos = self.page.evaluate("([u, n, t]) => cp.playClip(u, n, t)",
+                                 ["http://cp.local/files/clip.glb", self.skel.names, list(times)])
+        return np.array(pos)
 
     def render(self, cams, subframes, look):
         """subframes: list of (global_rot (J,4), root (3,)). Returns list of PNG bytes, one per camera."""

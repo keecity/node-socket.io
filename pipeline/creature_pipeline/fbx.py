@@ -198,7 +198,8 @@ def skeleton_from_fbx(path, name=None):
     for uid in ids:
         m = world_of(uid)
         pos = axes @ (m[:3, 3] * unit)
-        rot = axes @ (m[:3, :3] / np.linalg.norm(m[:3, :3], axis=0)) @ axes.T
+        # Bone axes expressed in glTF world coordinates, so parent-relative rotations stay those of the file.
+        rot = axes @ (m[:3, :3] / np.linalg.norm(m[:3, :3], axis=0))
         p = parent.get(uid)
         while p is not None and p not in bones:
             p = parent.get(p)
@@ -209,3 +210,29 @@ def skeleton_from_fbx(path, name=None):
         for j in joints[1:]:
             j.parent = 0 if j.parent < 0 else j.parent + 1
     return Skeleton(joints, name or "creature")
+
+
+def root_parent_space(path):
+    """4x4 taking pipeline (glTF, metres) points into the local space of the root bone's parent
+    as a loader such as three.js FBXLoader sees the file (file units and axes, no conversion).
+    Pass it to gltf.write_animation_glb(root_space=...) when the game loads this FBX directly.
+    """
+    root, _ = parse(path)
+    settings = _props70(root.find("GlobalSettings"))
+    unit = float(settings.get("UnitScaleFactor", (1.0,))[0]) / 100.0
+    axes = _axis_matrix(settings)
+    objects = root.find("Objects")
+    models = {o.props[0]: o for o in objects.find_all("Model")}
+    parent = {}
+    for c in root.find("Connections").children:
+        if c.props[0] == "OO" and c.props[1] in models and c.props[2] in models:
+            parent[c.props[1]] = c.props[2]
+    bones = [uid for uid, o in models.items() if o.props[2] == "LimbNode"]
+    top = next(uid for uid in bones if parent.get(uid) not in bones)
+    chain, p = np.eye(4), parent.get(top)
+    while p is not None:
+        chain = local_matrix(_props70(models[p])) @ chain
+        p = parent.get(p)
+    to_file = np.eye(4)
+    to_file[:3, :3] = axes.T / unit
+    return np.linalg.inv(chain) @ to_file

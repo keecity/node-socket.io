@@ -87,10 +87,23 @@ class _Buffer:
         return len(self.accessors) - 1
 
 
-def write_animation_glb(path, skel, local, root, fps, clip_name="clip"):
-    """local (T, J, 4) identity-rest rotations and root (T, 3) world positions -> GLB."""
+def write_animation_glb(path, skel, local, root, fps, clip_name="clip", root_space=None):
+    """local (T, J, 4) identity-rest rotations and root (T, 3) world positions -> GLB.
+
+    ``root_space`` (4x4) maps pipeline space into the root bone's parent space of the model the
+    clip will play on (see fbx.root_parent_space). Omit it for a glTF model in metres, Y up,
+    whose root bone has no transformed parent.
+    """
     T = len(local)
     rig_rot = to_rig_frames(skel, local)
+    root = np.asarray(root, float)
+    if root_space is not None:
+        S = np.asarray(root_space, float)
+        lin = S[:3, :3]
+        q_space = quat.from_matrix(lin / np.linalg.norm(lin, axis=0))
+        root = root @ lin.T + S[:3, 3]
+        rig_rot = rig_rot.copy()
+        rig_rot[:, 0] = quat.mul(np.broadcast_to(q_space, (T, 4)), rig_rot[:, 0])
     offsets = rig_local_offsets(skel)
     W = np.array([j.rest_rotation for j in skel.joints])
 

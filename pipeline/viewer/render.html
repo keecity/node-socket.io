@@ -96,6 +96,21 @@ window.cp = {
     });
   },
 
+  // Play an exported animation GLB on the loaded model; returns bone world positions per sampled time.
+  async playClip(url, names, times) {
+    const gltf = await new GLTFLoader().loadAsync(url);
+    const target = model.children[0];
+    const mixer = new THREE.AnimationMixer(target);
+    mixer.clipAction(gltf.animations[0]).play();
+    const out = [];
+    for (const t of times) {
+      mixer.setTime(t);
+      model.updateMatrixWorld(true);
+      out.push(names.map((n) => bones[sanitize(n)].getWorldPosition(new THREE.Vector3()).toArray()));
+    }
+    return out;
+  },
+
   inspect() {
     const mats = [];
     model.traverse((o) => { if (o.isMesh) for (const m of [].concat(o.material)) mats.push({
