@@ -5,6 +5,7 @@
   train        train the per-monster joint detector
   exam         invented-motion exam (simulated detector, or real detector on rendered frames)
   start-frame  render the two-view start image for the video model, plus its layout/cameras
+  prompt       video prompt for a clip (subject only: no effects, props or extra geometry)
   solve        generated clip -> checked, solved animation GLB for three.js
 """
 import argparse
@@ -67,6 +68,11 @@ def cmd_start_frame(a):
     det_cams = stereo_rig(skel.extent(), a.view_size, a.view_size, margin=a.margin, center=skel.center())
     save_layout(layout, det_cams, a.layout)
     print(f"start frame -> {a.out}, layout + cameras -> {a.layout}")
+
+
+def cmd_prompt(a):
+    from .prompts import clip_prompt
+    print(clip_prompt(a.action))
 
 
 def cmd_exam(a):
@@ -176,6 +182,10 @@ def main(argv=None):
     s.add_argument("--view-size", type=int, default=448, help="detector view size (match synth --size)")
     s.add_argument("--margin", type=float, default=1.5)
     s.set_defaults(fn=cmd_start_frame)
+
+    s = sub.add_parser("prompt")
+    s.add_argument("action", help="the motion only, e.g. 'BITE: lunges forward and snaps its jaws twice'")
+    s.set_defaults(fn=cmd_prompt)
 
     s = sub.add_parser("exam")
     s.add_argument("--skeleton", required=True)

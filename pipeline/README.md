@@ -50,13 +50,18 @@ $P skeleton rig.fbx -o skeleton.json                       # then edit joint lim
 $P synth --rig rig.fbx --skeleton skeleton.json -o data --poses 3000
 $P train data -o detector.pt                               # --input-size 448 sharper, --finetune on GPU
 $P start-frame --rig rig.fbx --skeleton skeleton.json -o start_frame.png --layout layout.json
-#   generate clips from start_frame.png with locked cameras (idle, walk in place, attack, ...)
+$P prompt "BITE: the creature lunges forward and snaps its jaws twice"   # prompt for the video model
+#   generate clips from start_frame.png with that prompt (idle, walk in place, attack, ...)
 $P exam --skeleton skeleton.json --rig rig.fbx --detector detector.pt --layout layout.json
 $P solve walk.mp4 --skeleton skeleton.json --detector detector.pt --layout layout.json \
         --target rig.fbx -o walk.glb
 ```
 
 `solve` exits with code 2 when the two views disagree: regenerate the clip instead of fixing it.
+
+Clips must contain the creature and nothing else. Anything extra the video model draws (lightning,
+impact flashes, debris, a shockwave) is a mismatch between the views and fails the check even when the
+body motion is right, so `prompt` always appends a subject-only clause. Add attack effects in the game.
 
 ### Joint limits
 
