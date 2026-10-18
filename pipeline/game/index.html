@@ -186,7 +186,7 @@ const SEG = {
   hurt:   { src: 'hurt',   from: 0.8, to: 3.4 },
   faint:  { src: 'faint',  from: 0.3, to: 6 },
 };
-const PLAYBACK = { idle: 1, walk: 1.4, run: 1.3, attack: 1.3, bite: 1.35, leap: 1.2, hop: 1.25, dodge: 1.6, spin: 1.15, charge: 1.6, hurt: 1.7, faint: 1.15 };
+const PLAYBACK = { idle: 1, walk: 1.4, run: 1.3, attack: 1.95, bite: 2.0, leap: 1.8, hop: 1.25, dodge: 1.6, spin: 1.7, charge: 1.6, hurt: 1.7, faint: 1.15 };
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- clock: everything runs on game time so Pause and 2x apply to all of it ----------
@@ -375,8 +375,8 @@ function popText(worldPos, text, cls) {
 // invulnerable while hopping out and back) or a hop (clears ground shockwaves). Hits interrupt
 // with the hurt clip; at 0 HP the faint clip plays.
 const MOVES = {
-  horn:   { name: 'Thunder Horn', clip: 'attack', range: 2.15, cd: 1.7, dmg: 11, lunge: 0.45, knock: 0.7, cone: 0.9 },
-  fang:   { name: 'Volt Fang',    clip: 'bite',   range: 1.95, cd: 2.3, dmg: 8,  lunge: 0.55, knock: 0.35, cone: 0.8, par: 0.3 },
+  horn:   { name: 'Thunder Horn', clip: 'attack', reach: 0.45, cd: 1.7, dmg: 11, lunge: 0.45, knock: 0.7, cone: 0.9 },
+  fang:   { name: 'Volt Fang',    clip: 'bite',   reach: 0.3, cd: 2.3, dmg: 8,  lunge: 0.55, knock: 0.35, cone: 0.8, par: 0.3 },
   leap:   { name: 'Static Leap',  clip: 'leap',   min: 2.8, range: 5.2, cd: 6.0, dmg: 11, wave: 7.5, special: true },
   spin:   { name: 'Storm Spin',   clip: 'spin',   min: 2.0, range: 4.2, cd: 9.0, dmg: 20, energy: 75, aoe: 1.7, armor: true, special: true },
   step:   { name: 'Spark Step',   clip: 'dodge',  cd: 1.8 },
@@ -387,6 +387,11 @@ const BODY = 0.82;          // half the closest centre-to-centre distance (the b
 const WALK = 1.25, RUN = 3.7;
 const CAPSULE_R = 0.42, RUMP = 0.5, SNOUT = 0.85;   // body footprint, metres from the hip
 
+function closestOnSegment(p, q, x) {
+  const d = q.clone().sub(p), l = d.lengthSq();
+  const t = l > 1e-8 ? THREE.MathUtils.clamp(x.clone().sub(p).dot(d) / l, 0, 1) : 0;
+  return p.clone().addScaledVector(d, t);
+}
 function closestOnSegments(p1, q1, p2, q2) {
   const d1 = q1.clone().sub(p1), d2 = q2.clone().sub(p2), r = p1.clone().sub(p2);
   const a = d1.dot(d1), e = d2.dot(d2), f = d2.dot(r), c = d1.dot(r), b = d1.dot(d2);
@@ -448,7 +453,8 @@ class Monster {
     this.hp = this.maxHp; this.energy = 20; this.par = 0; this.fainted = false;
     this.cd = Object.fromEntries(Object.keys(MOVES).map((k) => [k, rand(0.5, 1.5)]));
     this.act = null; this.hurtT = 0; this.vel = new THREE.Vector3();
-    this.plan = 'close'; this.planT = 0; this.strafe = Math.random() < 0.5 ? 1 : -1; this.think = 0;
+    this.lastPos = null; this.realSpeed = 0;
+    this.plan = 'press'; this.planT = 0; this.replan = null; this.goal = null; this.strafe = Math.random() < 0.5 ? 1 : -1; this.think = 0;
     this.root.position.copy(spawn); this.root.rotation.set(0, angleTo(spawn, new THREE.Vector3()), 0);
     this.materials.forEach((m) => { if (m.emissive) m.emissive.setRGB(0, 0, 0); });
     this.model.rotation.z = 0; this.model.position.set(0, 0, 0); this.comp = null; this.hipStart = null; this.pendingHop = null; this.reactIn = undefined;
@@ -486,7 +492,7 @@ class Monster {
     this.act = { key, move, a, clipName, t: 0, dur: a.getClip().duration, events: [...(seg.events || [])].map((e) => ({ ...e })),
       iframe: seg.iframe, air: seg.air, foe, ...extra };
     this.cd[key] = move.cd;
-    this.hipStart = this.ground();
+    this.hipStart = this.ground(); this.lastPos = null;
     if (move.special) callout(move.name, this.name);
     if (MOVES[key].dmg && foe) foe.threat(this, key, (seg.events?.find((e) => e.hit)?.at ?? 0.4) / a.timeScale);
   }
@@ -498,7 +504,7 @@ class Monster {
       if (Math.random() < this.skill + 0.25) this.pendingHop = att;   // hop so the wave passes underneath
       return;
     }
-    if (d > (MOVES[key].range || 2) + 0.8) return;
+    if (key !== 'spin' && this.gapTo(att) > 1.4) return;
     if (this.cd.step <= 0 && Math.random() < this.skill && eta > 0.18) this.reactIn = Math.min(eta * 0.4, 0.25);
   }
   update(dt, foe) {
@@ -575,7 +581,7 @@ class Monster {
     // track the foe while winding up; commit once the strike is out
     if (act.track !== false && act.t < (act.lockAt ?? 0.35 * act.dur)) this.faceToward(foe.ground(), dt, 6);
     if (act.move.lunge && act.t < (act.events.find((e) => e.hit)?.at ?? 0)) {
-      const want = Math.max(0, toFoe.length() - BODY * 2);
+      const want = Math.max(0, this.gapTo(foe) - 0.05);
       this.root.position.addScaledVector(this.facing(), Math.min(want, act.move.lunge * 2.2 * dt));
     }
     if (act.key === 'spin' && act.t >= SEG.spin.air[0] && act.t <= SEG.spin.air[1]) {
@@ -623,16 +629,13 @@ class Monster {
     }
   }
   melee(foe, move, tip) {
-    const to = flat(foe.ground()).sub(flat(this.root.position));
-    const d = to.length();
-    const ang = Math.acos(Math.max(-1, Math.min(1, to.normalize().dot(this.facing()))));
-    if (d <= move.range && ang <= move.cone) resolveHit(this, foe, move, tip);
+    if (this.reachTo(foe) <= move.reach && this.facingTo(foe) <= move.cone) resolveHit(this, foe, move, tip);
     else { popText(foe.body().add(new THREE.Vector3(0, 0.6, 0)), 'MISS', 'miss'); stats.missed++; }
   }
   hurt(from, knock) {
     if (this.act && this.act.move.armor) return;        // Storm Spin has super armour
     if (this.act) this.keepTravel();
-    this.act = null; this.reactIn = undefined;
+    this.act = null; this.reactIn = undefined; this.replan = 'hit';
     this.hipStart = null;
     const dir = flat(this.root.position).sub(flat(from.root.position)).normalize();
     this.vel.addScaledVector(dir, 2.6 * knock + 1);
@@ -654,32 +657,63 @@ class Monster {
   }
 
   // ----- brain -----
+  // Gap between the bodies' surfaces, and from this fighter's snout to the foe's body.
+  gapTo(foe) {
+    const [pa, qa] = this.capsule(), [pb, qb] = foe.capsule();
+    const [ca, cb] = closestOnSegments(pa, qa, pb, qb);
+    return ca.distanceTo(cb) - 2 * CAPSULE_R;
+  }
+  reachTo(foe) {
+    const tip = this.capsule()[1], [pb, qb] = foe.capsule();
+    return closestOnSegment(pb, qb, tip).distanceTo(tip) - 2 * CAPSULE_R;   // snout surface to body surface
+  }
+  facingTo(foe) {
+    const to = flat(foe.ground()).sub(flat(this.ground())).normalize();
+    return Math.acos(THREE.MathUtils.clamp(to.dot(this.facing()), -1, 1));
+  }
+  pickPlan(foe, reason) {
+    // Plans: press (get to melee), poke (hold leap range), circle (strafe round the foe),
+    // flank (run to a spot beside or behind it), retreat (back off, e.g. after a hit or when a
+    // charged Storm Spin is coming). Each lasts a moment, so fighters keep moving.
+    const r = Math.random(), low = this.hp < this.maxHp * 0.35;
+    if (reason === 'hit') this.plan = r < 0.45 ? 'retreat' : r < 0.75 ? 'flank' : 'press';
+    else if (reason === 'swung') this.plan = r < 0.4 ? 'circle' : r < 0.7 ? 'flank' : 'press';
+    else if (foe.energy >= MOVES.spin.energy && r < 0.3) this.plan = 'retreat';
+    else if (low && r < 0.3) this.plan = 'poke';
+    else this.plan = r < this.aggro * 0.7 ? 'press' : r < this.aggro * 0.7 + 0.2 ? 'flank' : r < 0.85 ? 'circle' : 'poke';
+    this.planT = this.plan === 'retreat' ? rand(0.8, 1.6) : rand(1.2, 2.6);
+    this.strafe = Math.random() < 0.5 ? 1 : -1;
+    if (this.plan === 'flank') {
+      // a point 2.5-3.5 m from the foe, 70-160 degrees round from where we stand
+      const them = flat(foe.ground()), me = flat(this.root.position);
+      const a0 = Math.atan2(me.x - them.x, me.z - them.z) + this.strafe * rand(1.2, 2.8);
+      const rr = rand(2.5, 3.5);
+      this.goal = new THREE.Vector3(them.x + Math.sin(a0) * rr, 0, them.z + Math.cos(a0) * rr);
+      const len = Math.hypot(this.goal.x, this.goal.z);
+      if (len > ARENA - 0.9) this.goal.multiplyScalar((ARENA - 0.9) / len);
+    }
+  }
   ai(dt, foe) {
     const me = flat(this.root.position), them = flat(foe.ground());
-    const d = me.distanceTo(them);
+    const d = me.distanceTo(them), gap = this.gapTo(foe), reach = this.reachTo(foe), ang = this.facingTo(foe);
     const slow = this.par > 0 ? 0.55 : 1;
     if (foe.fainted) { this.locomote(new THREE.Vector3(), dt, them); return; }
 
     this.planT -= dt;
-    if (this.planT <= 0) {
-      const low = this.hp < this.maxHp * 0.3;
-      const r = Math.random();
-      this.plan = low && foe.energy >= 60 && r < 0.35 ? 'retreat'
-        : r < this.aggro ? 'close' : r < this.aggro + 0.2 ? 'poke' : 'circle';
-      this.planT = rand(1.2, 2.8); this.strafe = Math.random() < 0.5 ? 1 : -1;
-    }
+    if (this.planT <= 0 || this.replan) { this.pickPlan(foe, this.replan); this.replan = null; }
 
     // attack choice
     this.think -= dt;
     if (this.think <= 0) {
       this.think = rand(0.12, 0.3) / slow;
       const can = (k) => this.cd[k] <= 0;
+      const facing = ang < 0.7;
       const opts = [];
       if (can('spin') && this.energy >= MOVES.spin.energy && d >= MOVES.spin.min && d <= MOVES.spin.range) opts.push(['spin', 1.6]);
-      if (can('horn') && d <= MOVES.horn.range * 0.95) opts.push(['horn', 3]);
-      if (can('fang') && d <= MOVES.fang.range * 0.95) opts.push(['fang', foe.par > 0 ? 1.5 : 3]);
-      if (can('leap') && d >= MOVES.leap.min && d <= MOVES.leap.range && this.plan !== 'close') opts.push(['leap', 2]);
-      if (can('charge') && this.energy < 50 && d > 3.6) opts.push(['charge', 2]);
+      if (can('horn') && facing && reach <= MOVES.horn.reach * 0.9) opts.push(['horn', 3]);
+      if (can('fang') && facing && reach <= MOVES.fang.reach * 0.9) opts.push(['fang', foe.par > 0 ? 1.5 : 3]);
+      if (can('leap') && d >= MOVES.leap.min && d <= MOVES.leap.range && this.plan !== 'press') opts.push(['leap', 1.5]);
+      if (can('charge') && this.energy < 50 && d > 3.6 && this.plan !== 'press') opts.push(['charge', 1.5]);
       // a fighter that saw a Static Leap coming waits for the wave instead of swinging
       if (opts.length && !this.pendingHop && Math.random() < 0.75) {
         let tot = opts.reduce((s, o) => s + o[1], 0), r = Math.random() * tot;
@@ -687,6 +721,7 @@ class Monster {
           if (k === 'charge') this.start('charge', foe, { clip: 'charge', track: false });
           else this.start(k, foe);
           if (k === 'spin') this.energy -= MOVES.spin.energy;
+          if (k === 'horn' || k === 'fang') this.replan = 'swung';
           return;
         }
       }
@@ -696,27 +731,42 @@ class Monster {
     const toward = them.clone().sub(me).normalize();
     const side = new THREE.Vector3(toward.z, 0, -toward.x).multiplyScalar(this.strafe);
     let want = new THREE.Vector3(), speed = 0;
-    if (this.plan === 'close') {
-      if (d > 1.9) { want.copy(toward); speed = d > 3.4 ? RUN : WALK * 1.4; }
-      else { want.copy(side); speed = WALK * 0.6; }
+    if (this.plan === 'press') {
+      if (reach > MOVES.fang.reach * 0.6) { want.copy(toward); speed = gap > 2 ? RUN : WALK * 1.5; }
+      else { want.copy(side).addScaledVector(toward, -0.2); speed = WALK * 0.5; }   // in range: shuffle, don't shove
     } else if (this.plan === 'poke') {
-      if (d < 3.3) { want.copy(toward).negate(); speed = WALK * 1.5; }
-      else if (d > 4.6) { want.copy(toward); speed = WALK * 1.5; }
+      if (d < 3.3) { want.copy(toward).negate(); speed = WALK * 1.6; }
+      else if (d > 4.6) { want.copy(toward); speed = WALK * 1.6; }
       else { want.copy(side); speed = WALK; }
     } else if (this.plan === 'circle') {
-      want.copy(side).addScaledVector(toward, d > 3.0 ? 0.4 : -0.3).normalize(); speed = WALK * 1.2;
+      want.copy(side).addScaledVector(toward, gap > 1.6 ? 0.35 : -0.5).normalize(); speed = WALK * 1.4;
+    } else if (this.plan === 'flank') {
+      const to = this.goal.clone().sub(me); const left = to.length();
+      if (left < 0.4) { this.planT = 0; this.replan = null; }
+      want.copy(to.normalize()); speed = left > 1.2 ? RUN : WALK * 1.4;
     } else if (this.plan === 'retreat') {
-      want.copy(toward).negate().addScaledVector(side, 0.6).normalize(); speed = RUN * 0.85;
+      want.copy(toward).negate().addScaledVector(side, 0.7).normalize(); speed = RUN * 0.9;
     }
+    // never push into the foe's body: drop the part of the motion that heads into it
+    if (gap < 0.04) { const into = want.dot(toward); if (into > 0) want.addScaledVector(toward, -into); }
     // stay off the wall: steer inward near the edge
     const r = Math.hypot(me.x, me.z);
-    if (r > ARENA - 0.8) want.addScaledVector(me.clone().normalize(), -(r - (ARENA - 0.8)) * 2).normalize();
+    if (r > ARENA - 0.8) want.addScaledVector(me.clone().normalize(), -(r - (ARENA - 0.8)) * 2);
+    if (want.lengthSq() > 1) want.normalize();
     this.locomote(want.multiplyScalar(speed * slow), dt, them);
   }
   locomote(v, dt, lookAt) {
-    const s = v.length();
-    this.root.position.addScaledVector(v, dt);
+    // animate from how fast the body really moves (after spacing and walls), so a blocked
+    // fighter doesn't run in place
+    const p = this.root.position;
+    if (this.lastPos && dt > 0) {
+      const real = Math.hypot(p.x - this.lastPos.x, p.z - this.lastPos.z) / dt;
+      this.realSpeed += (real - this.realSpeed) * Math.min(1, dt * 10);
+    }
+    p.addScaledVector(v, dt);
     this.keepInArena();
+    this.lastPos = p.clone();
+    const s = Math.min(v.length(), this.realSpeed + 0.4);
     // run faces where it is going; walking keeps eyes on the foe
     if (s > RUN * 0.6) this.faceToward(this.root.position.clone().add(v), dt, 8);
     else this.faceToward(lookAt, dt, 7);
@@ -898,8 +948,10 @@ function frame() {
   pylons.forEach((p, i) => {
     p.material.emissiveIntensity = 0.3 + 0.25 * Math.max(0, Math.sin(gameTime * 3 + i * 1.7));
     // fade pylons standing between the camera and the fight
-    const near = Math.hypot(p.position.x - camera.position.x, p.position.z - camera.position.z);
-    p.material.opacity = THREE.MathUtils.clamp((near - 1.5) / 3, 0.08, 1);
+    const cam = flat(camera.position), off = flat(p.position).sub(cam), view = flat(camTarget).sub(cam);
+    const along = THREE.MathUtils.clamp(off.dot(view) / view.lengthSq(), 0, 1);
+    const miss = off.distanceTo(view.multiplyScalar(along));
+    p.material.opacity = along > 0 && along < 1 ? THREE.MathUtils.clamp((miss - 0.6) / 1.4, 0.08, 1) : 1;
   });
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
