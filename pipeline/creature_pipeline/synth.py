@@ -173,16 +173,28 @@ def _sanitize(name):
     return re.sub(r"[\[\]\.:\/]", "", re.sub(r"\s", "_", name))
 
 
-def sample_pose(skel, rng, blur, n_sub=6):
-    """Random pose inside joint limits; with blur, a short sweep towards a second pose."""
+def sample_pose(skel, rng, blur, n_sub=6, acrobatic=False):
+    """Random pose inside joint limits; with blur, a short sweep towards a second pose.
+
+    ``acrobatic`` covers spins, flips and jumps: the whole body turns to any heading, tips up to
+    35 deg nose up/down and 20 deg sideways, and is lifted off the floor in half the samples;
+    a blurred sample also spins up to 60 deg during the exposure.
+    """
     lo, hi = skel.limits[..., 0], skel.limits[..., 1]
     a = lo + (hi - lo) * rng.random(lo.shape)
+    root = int(np.flatnonzero(skel.parents < 0)[0])
+    if acrobatic:
+        a[root] = np.radians([rng.uniform(-35, 35), rng.uniform(-180, 180), rng.uniform(-20, 20)])
     if blur:
         b = np.clip(a + (hi - lo) * rng.uniform(-0.25, 0.25, lo.shape), lo, hi)
+        if acrobatic:
+            b[root] = a[root] + np.radians([rng.uniform(-10, 10), rng.uniform(-60, 60), rng.uniform(-5, 5)])
         eulers = [a + (b - a) * k / (n_sub - 1) for k in range(n_sub)]
     else:
         eulers = [a]
     root_jitter = rng.normal(0, 0.03 * skel.height(), 3)
+    if acrobatic and rng.random() < 0.5:
+        root_jitter[1] += rng.uniform(0.05, 0.6) * skel.height()
     subs = []
     for e in eulers:
         local = quat.from_euler_xyz(e)[None]
@@ -193,7 +205,7 @@ def sample_pose(skel, rng, blur, n_sub=6):
 
 
 def generate(skel, model_path, out_dir, n_poses=3000, size=448, blur_fraction=0.5, seed=0, margin=1.5,
-             zoom_jitter=0.15, log=print):
+             zoom_jitter=0.15, acrobatic=False, log=print):
     """Each sample re-frames the rig by up to +-zoom_jitter so small framing drift in generated video is covered."""
     rng = np.random.default_rng(seed)
     os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
@@ -204,7 +216,7 @@ def generate(skel, model_path, out_dir, n_poses=3000, size=448, blur_fraction=0.
         for i in range(n_poses):
             m = margin * rng.uniform(1 - zoom_jitter, 1 + zoom_jitter)
             cams = stereo_rig(skel.extent(), size, size, margin=m, center=skel.center())
-            subs = sample_pose(skel, rng, rng.random() < blur_fraction)
+            subs = sample_pose(skel, rng, rng.random() < blur_fraction, acrobatic=acrobatic)
             label_pos = subs[len(subs) // 2][0]
             pngs = r.render(cams, [(g, root) for _, g, root in subs], random_look(rng, ground_y))
             for cam, png in zip(cams, pngs):

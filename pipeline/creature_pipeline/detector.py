@@ -164,11 +164,21 @@ def cache_features(backbone, root, items, size, device, batch=16):
 
 
 def train(root, out_path, size=224, epochs=15, lr=1e-3, batch=32, backbone_name="dinov2_vits14",
-          finetune=False, unfreeze_blocks=2, backbone_lr=2e-5, loss="coord", device=None, log=print):
+          finetune=False, unfreeze_blocks=2, backbone_lr=2e-5, loss="coord", init=None, device=None, log=print):
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     joints, items = load_dataset(root)
     backbone = load_backbone(backbone_name)
-    head = HeatmapHead(backbone.embed_dim, len(joints)).to(device)
+    head = HeatmapHead(backbone.embed_dim, len(joints))
+    if init:
+        # Continue from an earlier checkpoint (e.g. add new pose types without starting over).
+        ck = torch.load(init, map_location="cpu")
+        if ck["joints"] != joints:
+            raise ValueError("init checkpoint was trained on a different joint list")
+        head.load_state_dict(ck["head"])
+        if ck.get("backbone_state"):
+            backbone.load_state_dict(ck["backbone_state"])
+        log(f"initialised from {init}")
+    head = head.to(device)
     rng = np.random.default_rng(0)
     order = rng.permutation(len(items))
     n_val = max(1, len(items) // 20)

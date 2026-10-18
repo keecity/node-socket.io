@@ -38,12 +38,13 @@ def cmd_skeleton(a):
 
 def cmd_synth(a):
     from .synth import generate
-    generate(load_skeleton(a.skeleton), a.rig, a.out, n_poses=a.poses, size=a.size, seed=a.seed)
+    generate(load_skeleton(a.skeleton), a.rig, a.out, n_poses=a.poses, size=a.size, seed=a.seed, acrobatic=a.acrobatic)
 
 
 def cmd_train(a):
     from .detector import train
-    train(a.data, a.out, size=a.input_size, epochs=a.epochs, finetune=a.finetune, backbone_name=a.backbone)
+    train(a.data, a.out, size=a.input_size, epochs=a.epochs, finetune=a.finetune, backbone_name=a.backbone,
+          init=a.init, lr=a.lr)
 
 
 def cmd_start_frame(a):
@@ -151,6 +152,7 @@ def main(argv=None):
     s.add_argument("--poses", type=int, default=3000)
     s.add_argument("--size", type=int, default=448)
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--acrobatic", action="store_true", help="full spins, flips and airborne poses")
     s.set_defaults(fn=cmd_synth)
 
     s = sub.add_parser("train")
@@ -160,6 +162,8 @@ def main(argv=None):
     s.add_argument("--epochs", type=int, default=15)
     s.add_argument("--backbone", default="dinov2_vits14")
     s.add_argument("--finetune", action="store_true", help="also train DINO's last blocks (GPU)")
+    s.add_argument("--init", help="start from this detector checkpoint instead of from scratch")
+    s.add_argument("--lr", type=float, default=1e-3)
     s.set_defaults(fn=cmd_train)
 
     s = sub.add_parser("start-frame")
