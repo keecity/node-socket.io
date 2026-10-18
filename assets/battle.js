@@ -424,10 +424,25 @@ function chunkMaterial(opts, K, atlas = false) {       // per-instance planar te
   }; m.customProgramCacheKey = () => 'chunk' + K + atlas; }
   return m;
 }
-// facade sheet: 3x3 cells (brick door/window/plain, siding door/window/plain, shingle/metal/flat roof) + a height map.
-// Each chunk shows one third of a cell per axis; aOff says which third, so a 3x3 block of chunks shows a whole door / window panel.
-const T_FACADE = texLoader.load('assets/facade.jpg'), T_FACADE_H = texLoader.load('assets/facade_h.jpg');
-T_FACADE.encoding = THREE.sRGBEncoding; for (const t of [T_FACADE, T_FACADE_H]) { t.anisotropy = 8; t.generateMipmaps = true; }
+// building walls: a 4x6 sheet. Rows 0-1: red brick, tan brick, cream siding, blue clapboard, grey/brown shingle, concrete, fence.
+// Rows 2-5 (commercial, one column per colour: blue, teal, grey, charcoal): curtain-wall glass, office floor, glass entrance, cladding.
+// with a relief map. The texture runs continuously along a wall: aOff is the chunk's place on the wall in panel units (a panel = 3x3 chunks),
+// aTile = wall + 512 * lit. Doors and windows are separate decal quads (a 4x2 sheet of cut-outs) placed just in front of the wall.
+const T_FACADE = texLoader.load('assets/walls.jpg'), T_FACADE_H = texLoader.load('assets/walls_h.jpg'), T_OPEN = texLoader.load('assets/openings.png');
+T_FACADE.encoding = T_OPEN.encoding = THREE.sRGBEncoding; for (const t of [T_FACADE, T_FACADE_H, T_OPEN]) { t.anisotropy = 8; t.generateMipmaps = true; }
+// opening sizes and heights as a fraction of a storey, from their real pixel sizes (a door is about 78% of a storey); cy = centre height
+const OPEN_SZ = [[263, 226], [182, 184], [170, 247], [256, 214], [180, 300], [157, 302], [170, 301], [159, 303]].map(([w, h], i) => { const k = 0.78 / 302; return { w: w * k, h: h * k, cy: i < 4 ? 0.6 : h * k / 2 + 0.005 }; });
+function decalMaterial() {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, map: T_OPEN, roughness: .6, alphaTest: 0.5, side: THREE.DoubleSide });
+  m.onBeforeCompile = sh => { sh.uniforms.uNight = NIGHT_U;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aTile; varying float vTile; varying vec2 vDUV;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvDUV = uv; vTile = aTile;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vTile; varying vec2 vDUV; uniform float uNight;')
+      .replace('#include <map_fragment>', `float lit = step(15.5, vTile), op = mod(vTile, 16.); vec2 ou = clamp(vDUV, 0.004, 0.996);
+        vec4 texelColor = texture2D(map, vec2((mod(op, 4.) + ou.x) / 4., 1. - (floor(op / 4.) + 1. - ou.y) / 2.)); texelColor = mapTexelToLinear(texelColor); diffuseColor *= texelColor;
+        float glow = step(op, 3.5) * smoothstep(0.35, 0.1, dot(texelColor.rgb, vec3(0.3, 0.55, 0.15)) * 2.2);`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.68, 0.32) * (0.35 + 2.4 * uNight) * glow * lit;'); };
+  m.customProgramCacheKey = () => 'decal'; return m;
+}
 function rtex(f) { const t = texLoader.load('assets/' + f); t.encoding = THREE.sRGBEncoding; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; }
 // night factor (0 day .. 1 night) from the day/night cycle: lit windows and street lamps glow brighter after dark
 const NIGHT_U = { value: 0 };
@@ -440,17 +455,19 @@ function facadeMaterial() {
         vLUV = aOff + pl / 3.; vTile = aTile;`);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vLUV; varying float vTile; uniform sampler2D tH; uniform float uNight;')
       .replace('#include <map_fragment>', `
-        float tl = mod(vTile, 16.), lit = step(15.5, vTile); vec2 cell = vec2(mod(tl, 3.), floor(tl / 3.)); vec2 fr = clamp(vLUV, 0.004, 0.996);
-        vec2 auv = vec2((cell.x + fr.x) / 3., 1. - (cell.y + 1. - fr.y) / 3.);
-        vec4 texelColor = mapTexelToLinear(texture2D(map, auv)); float hh = texture2D(tH, auv).r;
-        diffuseColor *= texelColor * mix(0.62, 1.08, hh);                              // height map as relief shading (grout, frames, recesses)
-        float win = step(0.2, fr.x) * step(fr.x, 0.8) * step(0.37, fr.y) * step(fr.y, 0.76) * step(0.5, mod(tl, 3.)) * step(mod(tl, 3.), 1.5);
-        totalEmissiveRadiance += vec3(1.0, 0.68, 0.32) * (0.35 + 2.4 * uNight) * win * lit * (1. - hh);`)
+        float lit = step(511.5, vTile), wm = mod(mod(vTile, 512.), 32.), wr = floor(wm / 4.); vec2 fr = fract(vLUV), gs = vec2(0.992 / 4., 0.992 / 6.);
+        vec2 auv = vec2((mod(wm, 4.) + 0.004 + fr.x * 0.992) / 4., 1. - (wr + 0.996 - fr.y * 0.992) / 6.);   /* tiles seamlessly; gradients from the unwrapped coords so no mip seam */
+        vec4 texelColor = mapTexelToLinear(textureGrad(map, auv, dFdx(vLUV) * gs, dFdy(vLUV) * gs)); float hh = textureGrad(tH, auv, dFdx(vLUV) * gs, dFdy(vLUV) * gs).r, glow = 0.;
+        if (wr > 1.5) hh = 0.82;   /* glass and cladding: no relief speckle */
+        if (wr > 2.5 && wr < 4.5) glow = smoothstep(0.35, 0.7, dot(texelColor.rgb, vec3(0.3, 0.55, 0.15))) + 0.06 * uNight;   /* office floor / lobby: interior lights */
+        diffuseColor *= texelColor * mix(0.62, 1.08, hh);                              // height map as relief shading (grout, boards)
+        totalEmissiveRadiance += vec3(1.0, 0.68, 0.32) * (0.35 + 2.4 * uNight) * glow * lit;`)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>'); };
   m.customProgramCacheKey = () => 'facade'; return m;
 }
 const GROUP_DEFS = {
   facade: { geo: unitBox, mat: facadeMaterial(), cap: 30000 },
+  decal: { geo: new THREE.PlaneGeometry(1, 1), mat: decalMaterial(), cap: 6000 },
   roofMetal: { geo: unitBox, mat: chunkMaterial({ color: 0xffffff, map: rtex('roof_metal.jpg'), roughness: .5, metalness: .4 }, 3.2), cap: 4000 },
   roofFlat: { geo: unitBox, mat: chunkMaterial({ color: 0xffffff, map: rtex('roof_flat.jpg'), roughness: .95 }, 3.2), cap: 4000 },
   wall: { geo: unitBox, mat: chunkMaterial({ color: 0xffffff, map: T_SIDING, roughness: .9 }, 14, true), cap: 24000 },
@@ -498,8 +515,8 @@ const TRIMC = [0x6b5040, 0xf0f0f0, 0x3a3f48, 0x7a3a2a, 0x2f4a3a];
 function buildHouse(x, z, rot, r) {
   const pick = a => a[Math.floor(r() * a.length)];
   const style = pick(['cottage', 'cottage', 'twostory', 'lshape', 'lshape', 'modern', 'garage', 'porch', 'porch']);
-  const brick = r() < 0.45, MAT_ROW = brick ? 0 : 1, litHouse = r() < 0.6, roofKind = r() < 0.72 ? 'roof' : 'roofMetal';
-  const wallC = brick ? pick([0xffffff, 0xf2e6dc, 0xe0d4cc]) : pick(WALLC), roofC = roofKind === 'roof' ? pick([0xffffff, 0xd8d0c8, 0xb89080, 0xa0b0c0, 0x90a890]) : pick([0xffffff, 0xc86050, 0x6a8ab0, 0x708a70]), trimC = pick(TRIMC), tile = Math.floor(r() * 24), t = 0.018, CELLd = 0.045;
+  const WMAT = Math.floor(r() * 4), COM = Math.floor(r() * 4), WIN = 1 + Math.floor(r() * 4), DOOR = 5 + Math.floor(r() * 4), litHouse = r() < 0.6, roofKind = r() < 0.72 ? 'roof' : 'roofMetal';
+  const wallC = pick([0xffffff, 0xf6f2ec, 0xeae6e0, 0xf2eee4]), roofC = roofKind === 'roof' ? pick([0xffffff, 0xd8d0c8, 0xb89080, 0xa0b0c0, 0x90a890]) : pick([0xffffff, 0xc86050, 0x6a8ab0, 0x708a70]), trimC = pick(TRIMC), tile = Math.floor(r() * 24), t = 0.018, CELLd = 0.045;
   // footprint of the main block decides the ground plinth
   let W = 0.24 + r() * 0.14, D = 0.2 + r() * 0.1;
   const blocks = [];
@@ -517,7 +534,7 @@ function buildHouse(x, z, rot, r) {
   const hw = W / 2 + 0.05, hd = D / 2 + (style === 'lshape' ? 0.2 : 0.08);
   const corners = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([a, b]) => Hd(x + a * Math.cos(rot) + b * Math.sin(rot), z - a * Math.sin(rot) + b * Math.cos(rot)));
   const y0 = Math.min(...corners), yF = Math.max(...corners) + 0.012, topMax = Math.max(...blocks.map(b => b.h + (b.rh || 0.03)));
-  const p = newProp('house', x, z, rot, Math.hypot(hw, hd) + 0.02, yF + topMax, { hw, hd, y0, walls: [] });
+  const p = newProp('house', x, z, rot, Math.hypot(hw, hd) + 0.02, yF + topMax, { hw, hd, y0, walls: [], style });
   const q0 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
   for (const B of blocks) {
     const q = q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), B.yaw)), { w, d, h } = B;
@@ -533,16 +550,22 @@ function buildHouse(x, z, rot, r) {
         if (B.big) return 'win'; return (pi + st + wi) % 2 === (panels > 2 ? 1 : 0) || panels === 1 ? 'win' : 'plain'; };
       for (let rr = 0; rr < rows; rr++) { grid.push([]); const st = Math.floor(rr / 3), sub = rr % 3; for (let c = 0; c < cols; c++) {
         const pi = Math.floor(c / 3), sc3 = c % 3, k = kind(pi, st), u = -wl.len / 2 + cw * (c + 0.5), [lx, lz] = wl.pos(u), ly = yF + rhh * (rr + 0.5);
-        const tileId = k === 'metal' ? 7 : MAT_ROW * 3 + (k === 'door' ? 0 : k === 'win' ? 1 : 2), lit = k === 'win' && litHouse ? 16 : 0;
-        const glass = k === 'win' && sc3 === 1 && sub === 1;
-        const sc = wl.ax === 'x' ? new THREE.Vector3(cw * 0.99, rhh * 0.99, t) : new THREE.Vector3(t, rhh * 0.99, cw * 0.99);
-        grid[rr].push(addChunk('facade', Wp(lx, ly, lz), q, sc, k === 'metal' ? 0xd0d4d8 : wallC, p, { wall: wi, row: rr, col: c, glass }, tileId + lit, [(sc3 + 0.5) / 3, (sub + 0.5) / 3]));
+        const tileId = k === 'metal' ? 6 : B.big ? 8 + COM + 4 * (k === 'door' ? 2 : k === 'win' ? ((st + pi) % 3 ? 1 : 0) : st === 0 ? 3 : 0) : WMAT,
+          lit = B.big && (k === 'win' || k === 'door') && litHouse ? 512 : 0, glass = B.big && k === 'win' && sc3 === 1 && sub === 1;
+        const sc = wl.ax === 'x' ? new THREE.Vector3(cw, rhh, t) : new THREE.Vector3(t, rhh, cw), dir = wi === 0 || wi === 2 ? 1 : -1;
+        grid[rr].push(addChunk('facade', Wp(lx, ly, lz), q, sc, k === 'metal' ? 0xd0d4d8 : wallC, p, { wall: wi, row: rr, col: c, glass }, tileId + lit, [dir * (c + 0.5) / 3, (rr + 0.5) / 3]));
       } }
+      // doors and windows: decal quads centred on their panels, just proud of the wall surface
+      if (!B.big && !B.garage) for (let st = 0; st < fl; st++) for (let pi = 0; pi < panels; pi++) { const k = kind(pi, st); if (k === 'plain') continue;
+        const op = k === 'door' ? DOOR - 1 : WIN - 1, O = OPEN_SZ[op], P = rhh * 3, u = -wl.len / 2 + cw * (pi * 3 + 1.5), [lx, lz] = wl.pos(u), nrm = [[0, 1], [0, -1], [1, 0], [-1, 0]][wi];
+        const qd = q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), [0, Math.PI, Math.PI / 2, -Math.PI / 2][wi])), e = t / 2 + 0.0015;
+        addChunk('decal', Wp(lx + nrm[0] * e, yF + P * (st + O.cy), lz + nrm[1] * e), qd, new THREE.Vector3(Math.min(O.w * P, cw * 2.9), O.h * P, 1), 0xffffff, p, { wall: wi, decal: true, glass: k === 'win' }, op + (k === 'win' && litHouse ? 16 : 0));
+      }
       p.walls.push(grid);
     });
     const top = yF + h;
     if (B.roof === 'gable') { const rh = B.rh, slope = Math.atan2(rh, d / 2), slen = Math.hypot(rh, d / 2) + 0.02, nx = Math.max(3, Math.round((w + 0.05) / 0.06)), ns = 3, tw = (w + 0.05) / nx;
-      for (const sx of [1, -1]) for (let k = 0; k < 3; k++) { const gh = rh / 3, gw = d * (1 - (k + 0.5) / 3) * 0.98; addChunk('facade', Wp(sx * w / 2, top + gh * (k + 0.5), 0), q, new THREE.Vector3(t, gh * 0.98, gw), wallC, p, { gable: true }, MAT_ROW * 3 + 2, [0.5, (k + 0.5) / 3]); }
+      for (const sx of [1, -1]) for (let k = 0; k < 3; k++) { const gh = rh / 3, gw = d * (1 - (k + 0.5) / 3) * 0.98; addChunk('facade', Wp(sx * w / 2, top + gh * (k + 0.5), 0), q, new THREE.Vector3(t, gh * 0.98, gw), wallC, p, { gable: true }, WMAT, [0.5, (k + 0.5) / 3]); }
       for (const sz of [1, -1]) { const qs = q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), sz * slope));
         for (let i = 0; i < nx; i++) for (let j = 0; j < ns; j++) { const along = (j + 0.5) / ns, lz = sz * (d / 2 + 0.02) * along, ly = top + rh * (1 - along) + 0.008;
           addChunk(roofKind, Wp(-(w + 0.05) / 2 + tw * (i + 0.5), ly, lz), qs, new THREE.Vector3(tw * 0.97, 0.012, slen / ns * 0.97), roofC, p, { roof: true }); } }
@@ -3768,7 +3791,7 @@ const Battle = {
   tanks, TANK_BUILD, queueTank, get tankError() { return TANK_ERR; }, _makeTank: (team, x, z, yaw) => makeTank(team, x, z, yaw), warehouseAt2D: (xw, zw) => { const x = wm(xw / S), z = wm(zw / S); return warehouses.find(w => w.alive && inWhLot(w, x, z, 0)) || null; },
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
-  setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
+  _props: props, setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
   waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT, citizen, get focusPed() { return focusPed; }, set focusPed(v) { focusPed = v; },
   producerAt2D: (xw, zw) => producerAt2D(wm(xw / S), wm(zw / S)), setPickFlag, clearPickFlag: p => { p.pickFlag = null; p.obstructed = false; p.obstructT = 0; showFlag(p); }, FLAG_R,
   SFX,
