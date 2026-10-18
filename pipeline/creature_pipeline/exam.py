@@ -49,7 +49,9 @@ def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3, refine_2d=False, sigma
         from .refine import refine
         opts = dict(refine_opts or CLIP_REFINE)
         if opts.pop("use_limits", False):
+            from .limits import smoothing_scale
             opts["limits"] = skel.limits
+            opts.setdefault("rot_smooth_scale", smoothing_scale(skel))
         local, root = refine(skel, cams, kp, local, root, sigma=sigma, **opts)
     return local, root, report
 

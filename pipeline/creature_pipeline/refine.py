@@ -71,7 +71,8 @@ def _forward(parents, offsets, local_q, root):
 
 
 def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.01, huber=8.0, min_conf=0.05, lr=0.02,
-           rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, limits=None, log=None):
+           rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, limits=None, rot_smooth_scale=None,
+           log=None):
     """kp (V, T, J, 3) detections; local (T, J, 4), root (T, 3) initial solve. Returns refined (local, root).
 
     ``sigma`` (V, J) is the detector's measured pixel noise per view and joint (see calibrate);
@@ -87,7 +88,8 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
     ``limits`` (J, 3, 2) radians (e.g. skel.limits after limits.apply) makes every non-root
     joint a hard-limited Euler XYZ rotation: each angle is squashed into its range, so a jaw
     cannot swing sideways and a knee cannot twist, however noisy the detections. The root
-    stays free so the creature can rear up and turn.
+    stays free so the creature can rear up and turn. A range with min == max locks that axis.
+    ``rot_smooth_scale`` (J,) multiplies the rotational smoothing per joint.
     """
     dt = torch.float64
     parents = [int(p) for p in skel.parents]
@@ -119,7 +121,15 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
         return q
 
     def rot_params():
-        return r if lim is None else torch.cat([r[:, [i for i in root_idx]], lo + (hi - lo) * torch.sigmoid(raw)], 1)
+        """Per-joint rotation parameters (T, J, 3): rotation vectors, or Euler angles when limited."""
+        if lim is None:
+            return r
+        e = lo + (hi - lo) * torch.sigmoid(raw)
+        e = e.clone()
+        e[:, root_idx] = r[:, root_idx]
+        return e
+    js = torch.ones(len(parents), dtype=dt) if rot_smooth_scale is None else \
+        torch.tensor(np.asarray(rot_smooth_scale, float), dtype=dt)
     t = torch.tensor(root, dtype=dt, requires_grad=True)
     scale = float(np.mean([c.K[0, 0] for c in cams]))
     h = skel.height()
@@ -144,7 +154,7 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
         if rot_smooth_weight and len(X) > 2:
             rp = rot_params()
             racc = rp[2:] - 2 * rp[1:-1] + rp[:-2]
-            loss = loss + rot_smooth_weight * (racc * 100).pow(2).sum(-1).mean()
+            loss = loss + rot_smooth_weight * ((racc * 100).pow(2).sum(-1) * js).mean()
         if feet and (floor_weight or contact_weight):
             fy = X[:, feet, 1]
             below = (floor_y - fy).clamp(min=0) * px_per_m

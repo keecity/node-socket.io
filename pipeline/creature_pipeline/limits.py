@@ -11,9 +11,9 @@ import numpy as np
 
 RULES = [
     # end-of-chain markers only carry tips; they should not rotate
-    (("nub",), [[-2, 2], [-2, 2], [-2, 2]]),
-    # jaw: a hinge that opens down, no sideways chew or twist
-    (("jaw",), [[-3, 35], [-2, 2], [-2, 2]]),
+    (("nub",), [[0, 0], [0, 0], [0, 0]]),
+    # jaw: a pure hinge that opens down; locked sideways and in roll
+    (("jaw",), [[-3, 35], [0, 0], [0, 0]]),
     (("head",), [[-30, 30], [-30, 30], [-8, 8]]),
     (("neck",), [[-30, 30], [-30, 30], [-8, 8]]),
     (("spine",), [[-20, 20], [-20, 20], [-8, 8]]),
@@ -31,6 +31,23 @@ RULES = [
     (("shoulder",), [[-45, 45], [-10, 10], [-15, 15]]),
     (("thigh",), [[-45, 45], [-10, 10], [-15, 15]]),
 ]
+
+
+# Extra rotational smoothing for joints whose noise shows most on screen. The jaw rides on the
+# head, so a jittery head nod reads as a loose jaw.
+SMOOTHING = [(("jaw",), 40.0), (("head",), 40.0), (("neck",), 10.0)]
+
+
+def smoothing_scale(skel):
+    """Per-joint multiplier for the solver's rotational smoothing, from bone names."""
+    out = np.ones(len(skel))
+    for i, j in enumerate(skel.joints):
+        name = j.name.lower()
+        for keys, k in SMOOTHING:
+            if all(key in name for key in keys) and "nub" not in name:
+                out[i] = k
+                break
+    return out
 
 
 def anatomical_limits(skel):
