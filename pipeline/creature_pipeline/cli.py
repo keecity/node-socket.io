@@ -80,10 +80,12 @@ def cmd_exam(a):
         render_motion(skel, a.rig, local, root, frames_dir, size=cams[0].width, cams=cams)
         det = Detector(a.detector)
         kp = _detect_dir(det, frames_dir, len(cams), cams[0].width)
+        refine_2d = True
     else:
         cams = stereo_rig(skel.extent(), 448, 448, center=skel.center())
         kp = None
-    result = run_exam(skel, cams, local, root, keypoints=kp, rng=rng, pass_pct_height=a.pass_pct)
+        refine_2d = False
+    result = run_exam(skel, cams, local, root, keypoints=kp, rng=rng, pass_pct_height=a.pass_pct, refine_2d=refine_2d)
     print(json.dumps(result, indent=2))
     sys.exit(0 if result["passed"] else 1)
 
@@ -107,7 +109,7 @@ def cmd_solve(a):
     views = split_views(frames, layout, cams[0].width)
     det = Detector(a.detector)
     kp = np.stack([det(v) for v in views])
-    local, root, report = solve(skel, cams, kp, sigma_frames=a.smooth)
+    local, root, report = solve(skel, cams, kp, sigma_frames=a.smooth, refine_2d=not a.no_refine)
     report["frames"] = len(frames)
     report["fps"] = fps
     print(json.dumps(report, indent=2))
@@ -184,6 +186,7 @@ def main(argv=None):
     s.add_argument("--name")
     s.add_argument("--fps", type=float)
     s.add_argument("--smooth", type=float, default=1.0, help="temporal smoothing sigma in frames")
+    s.add_argument("--no-refine", action="store_true", help="skip fitting the rig directly to the 2D detections")
     s.add_argument("--target", help="model the game plays the clip on; for an .fbx the root track is written in its units/axes")
     s.add_argument("--keypoints", help="also save raw detections (.npy)")
     s.add_argument("--force", action="store_true")

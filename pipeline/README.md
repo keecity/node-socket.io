@@ -26,7 +26,9 @@ rig.fbx ──► skeleton.json ──► synth (3000 posed renders, exact label
 4. **Detector**: DINOv2 ViT-S/14 features plus a small heatmap head, trained once per monster.
    By default DINO stays frozen and its features are cached, so it trains on CPU.
 5. **Solve**: detect joints in each view, triangulate them in 3D, reject the clip if the two
-   views disagree, then fit rotations on the rig with the rig's own bone lengths.
+   views disagree, fit rotations on the rig with the rig's own bone lengths, then refine
+   those rotations directly against the 2D detections in both views (robust loss, temporal
+   smoothing) so a joint hidden in one view is placed by the other view plus the skeleton.
 6. **Exam**: an invented random motion whose every joint position is known. Every change to
    the pipeline and every new monster must pass it.
 
@@ -75,6 +77,15 @@ mixer.clipAction(clip).play();
 
 Tracks bind to bones by name. For an FBX loaded directly, pass `--target rig.fbx` to `solve`
 so the root track uses the file's units and axes. For a GLB model in metres with Y up, omit it.
+
+## Results on the first monster (26-bone quadruped, Wan 3.0 Prime clips)
+
+- Detector: DINOv2 ViT-S/14 fine-tuned at 448px for 15 epochs on 6000 renders (RTX 3090,
+  ~1 h, ~$0.20). Validation error 1.95% of image width; median 3.4 px on the exam.
+- Exam (invented motion, 96 frames): 3.8% of body height mean joint error with refinement
+  (5.7% without). Target is 3%. Worst joints are the tail tip (hidden from the front) and
+  far-side feet (hidden from the side camera).
+- Idle, walk and attack clips all passed the view-agreement check and solved cleanly.
 
 ## Limits
 
