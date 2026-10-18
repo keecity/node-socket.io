@@ -21,7 +21,17 @@ STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
 
 def load_backbone(name="dinov2_vits14"):
-    return torch.hub.load("facebookresearch/dinov2", name)
+    """DINOv2 via torch.hub, from a local clone when available (set DINOV2_REPO, or it is cloned
+    into ~/.cache/creature_pipeline/dinov2); falls back to downloading the hub archive."""
+    repo = os.environ.get("DINOV2_REPO", os.path.expanduser("~/.cache/creature_pipeline/dinov2"))
+    if not os.path.isdir(repo):
+        import subprocess
+        try:
+            subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/facebookresearch/dinov2.git", repo],
+                           check=True)
+        except (OSError, subprocess.CalledProcessError):
+            return torch.hub.load("facebookresearch/dinov2:main", name, trust_repo=True)
+    return torch.hub.load(repo, name, source="local")
 
 
 class HeatmapHead(nn.Module):

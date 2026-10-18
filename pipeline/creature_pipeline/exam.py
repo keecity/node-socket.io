@@ -9,7 +9,7 @@ that video, and pass its keypoints here.
 import numpy as np
 
 from .retarget import solve_rotations
-from .triangulate import check_view_agreement, fill_gaps, smooth, triangulate
+from .triangulate import body_size_px, check_view_agreement, fill_gaps, smooth, triangulate
 
 
 def simulate_detections(cams, X, rng, noise_px=1.5, dropout=0.03):
@@ -26,7 +26,7 @@ def simulate_detections(cams, X, rng, noise_px=1.5, dropout=0.03):
 
 def solve(skel, cams, kp, sigma_frames=1.0, min_conf=0.3):
     X, err, valid = triangulate(cams, kp, min_conf=min_conf)
-    report = check_view_agreement(err, valid)
+    report = check_view_agreement(err, valid, body_size_px(skel, cams))
     X = smooth(fill_gaps(X), sigma_frames)
     local, root = solve_rotations(skel, X)
     return local, root, report

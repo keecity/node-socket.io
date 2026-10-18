@@ -36,22 +36,33 @@ def triangulate(cams, kp, min_conf=0.3):
     return X, err, valid
 
 
-def check_view_agreement(err, valid, max_median_px=6.0, max_bad_fraction=0.15, bad_px=15.0):
+def body_size_px(skel, cams):
+    """How many pixels the creature's largest rest extent spans, averaged over the cameras."""
+    return float(np.mean([skel.extent() * c.K[0, 0] / np.linalg.norm(c.center - skel.center()) for c in cams]))
+
+
+def check_view_agreement(err, valid, body_px, max_median=0.01, bad=0.04, max_bad_fraction=0.1):
     """Reject clips where the two halves show different motions.
 
-    If the video model drew two different moves, the rays from the two cameras stop
-    meeting and the reprojection error blows up. Regenerating the clip is cheaper than
-    repairing it, so this gate runs before any solving.
+    If the video model drew two different moves, the rays from the two cameras stop meeting
+    and the reprojection error grows. With a front and a side camera only the vertical
+    coordinate is seen twice, so this catches height mismatches (legs lifted at different
+    times, a head up in one view and down in the other); it cannot see a left/right swap.
+    Errors are measured relative to the creature's size on screen (``body_px``); with ~2px
+    detector noise matching views sit near 0.5% and mismatched ones above 1.3%.
+    Regenerating a bad clip is cheaper than repairing it, so this gate runs before solving.
     """
-    e = err[valid]
+    e = err[valid] / body_px
     if e.size == 0:
-        return {"ok": False, "reason": "no joint seen in two views", "median_px": None, "bad_fraction": 1.0}
+        return {"ok": False, "reason": "no joint seen in two views", "median": None, "bad_fraction": 1.0}
     median = float(np.median(e))
-    bad = float(np.mean(e > bad_px))
+    bad_fraction = float(np.mean(e > bad))
     coverage = float(valid.mean())
-    ok = median <= max_median_px and bad <= max_bad_fraction and coverage >= 0.8
-    reason = "ok" if ok else ("views disagree" if median > max_median_px or bad > max_bad_fraction else "low coverage")
-    return {"ok": ok, "reason": reason, "median_px": median, "bad_fraction": bad, "coverage": coverage}
+    disagree = median > max_median or bad_fraction > max_bad_fraction
+    ok = not disagree and coverage >= 0.8
+    reason = "ok" if ok else ("views disagree" if disagree else "low coverage")
+    return {"ok": ok, "reason": reason, "median": median, "median_px": median * body_px,
+            "bad_fraction": bad_fraction, "coverage": coverage}
 
 
 def fill_gaps(X):
