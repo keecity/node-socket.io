@@ -2310,8 +2310,9 @@ const AQ_STEPS = [
   ['low resolution', () => { renderer.setPixelRatio(0.7); renderer.setSize(innerWidth, innerHeight); }],
   ['shadows off', () => { if (window.sunL) sunL.castShadow = false; }]];
 function autoQuality(now) { const A = AQ; if (!A.start) A.start = now; const prog = renderer.info.programs.length, compiled = prog !== A.prog; A.prog = prog;
-  if (A.last && !compiled && now - A.start > 20000) { const ft = now - A.last; if (ft < 20000) { A.n++; A.t0 += ft; } } A.last = now;   // skip the first 20 s and frames that compiled shaders
-  if (A.n < 2 || A.t0 < 2500 || now < A.wait) return; const avg = A.t0 / A.n; A.n = 0; A.t0 = 0;   // judged every ~3 s of play, however few frames that is
+  if (document.hidden) { A.last = 0; A.n = 0; A.t0 = 0; return; }   // background tab: the browser throttles frames, that says nothing about speed
+  if (A.last && !compiled && now - A.start > 20000) { const ft = now - A.last; if (ft < 1500) { A.n++; A.t0 += ft; } } A.last = now;   // gaps over 1.5 s are stalls (tab switch, loading), not frame speed   // skip the first 20 s and frames that compiled shaders
+  if (A.n < 20 || A.t0 < 4000 || now < A.wait) return; const avg = A.t0 / A.n; A.n = 0; A.t0 = 0;   // judged every ~3 s of play, however few frames that is
   if (avg > 70 && A.level < AQ_STEPS.length) { if (avg > 400) { while (A.level < AQ_STEPS.length - 1) AQ_STEPS[A.level++][1](); }   // very slow: go straight to the lightest settings
     const [name, fn] = AQ_STEPS[A.level++]; fn(); A.wait = now + 4000; REC.event('performance mode: ' + name); feedMsg('Performance mode: ' + name + ' (' + Math.round(1000 / avg) + ' fps)'); } }
 // ---- flight recorder: every frame's timings go into a ring buffer; when the frame rate collapses, a snapshot of the last
@@ -2620,7 +2621,7 @@ function updateShadows(now) {
   if (now - shadowScan > 700 && window.Battle && Battle.root) { shadowScan = now;
     Battle.root.traverse(o => { if (!o.isMesh || o.userData.shadowSet) return; o.userData.shadowSet = true; const m = Array.isArray(o.material) ? o.material[0] : o.material;
       if (!m || m.transparent || m.isShaderMaterial || m.isMeshBasicMaterial || m.blending === THREE.AdditiveBlending) return; o.castShadow = o.receiveShadow = true; }); }
-  if (L.shadow.map) { SHADOW.map.value = L.shadow.map.texture; SHADOW.mat.value = L.shadow.matrix; SHADOW.on.value = 1; }
+  if (L.castShadow && L.shadow.map) { SHADOW.map.value = L.shadow.map.texture; SHADOW.mat.value = L.shadow.matrix; SHADOW.on.value = 1; } else SHADOW.on.value = 0;   // never sample a stale map (shadows off / map being rebuilt)
   // near trees (built around the camera position) cast live shadows; the baked ones fade out over the same area
   TREE_SH.nearC.value.set(cam.x, cam.z); TREE_SH.nearR.value = 0;
 }
