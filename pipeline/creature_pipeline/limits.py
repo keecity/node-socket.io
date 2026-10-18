@@ -20,6 +20,12 @@ RULES = [
     (("spine",), [[-20, 20], [-20, 20], [-8, 8]]),
     (("chest",), [[-15, 15], [-15, 15], [-6, 6]]),
     (("tail",), [[-30, 30], [-35, 35], [-4, 4]]),
+    # rear legs: their bones sit at an angle (hock), so natural swing also shows on Y and Z.
+    # Ranges cover what this rig's clips use (lower leg ~+-21 Y, ~-6..19 Z; foot ~+-15 Y, ~+-20 Z).
+    (("back", "lower", "leg"), [[-65, 65], [-25, 25], [-25, 25]]),
+    (("back", "upper", "leg"), [[-50, 50], [-12, 12], [-20, 20]]),
+    (("back", "foot"), [[-50, 50], [-20, 20], [-25, 25]]),
+    (("hind",), [[-65, 65], [-25, 25], [-25, 25]]),
     # legs: lower segments are near-hinges, upper segments swing and splay a little
     (("lower", "leg"), [[-60, 60], [-5, 5], [-5, 5]]),
     (("upper", "leg"), [[-45, 45], [-10, 10], [-15, 15]]),

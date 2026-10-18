@@ -95,7 +95,7 @@ def _forward(parents, offsets, local_q, root):
 
 def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.01, huber=8.0, min_conf=0.05, lr=0.02,
            rot_smooth_weight=0.0, floor_weight=0.0, contact_weight=0.0, limits=None, rot_smooth_scale=None,
-           key_every=None, keys_only=False, log=None):
+           key_every=None, keys_only=False, contact_height=0.03, log=None):
     """kp (V, T, J, 3) detections; local (T, J, 4), root (T, 3) initial solve. Returns refined (local, root).
 
     ``sigma`` (V, J) is the detector's measured pixel noise per view and joint (see calibrate);
@@ -197,7 +197,8 @@ def refine(skel, cams, kp, local, root, sigma=None, iters=400, smooth_weight=0.0
             below = (floor_y - fy).clamp(min=0) * px_per_m
             loss = loss + floor_weight * below.pow(2).mean()
             if contact_weight and len(X) > 1:
-                on_ground = torch.sigmoid((floor_y + 0.03 * h - fy.detach()) / (0.01 * h))
+                # A foot counts as planted within ``contact_height`` (fraction of body height) of the floor.
+                on_ground = torch.sigmoid((floor_y + contact_height * h - fy.detach()) / (0.25 * contact_height * h))
                 step = (X[1:, feet][..., [0, 2]] - X[:-1, feet][..., [0, 2]]).norm(dim=-1) * px_per_m
                 loss = loss + contact_weight * (on_ground[1:] * on_ground[:-1] * step.pow(2)).mean()
         loss.backward()

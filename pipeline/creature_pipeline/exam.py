@@ -27,7 +27,8 @@ def simulate_detections(cams, X, rng, noise_px=1.5, dropout=0.03):
 # Solver terms for generated clips, tuned on idle/walk/attack: remove floor penetration and
 # most frame-to-frame jitter. ``contact_weight`` assumes planted feet do not slide.
 # ``use_limits`` holds every joint inside the skeleton's limits (see limits.py).
-CLIP_REFINE = dict(smooth_weight=0.1, rot_smooth_weight=0.2, floor_weight=5.0, contact_weight=1.0, iters=1500,
+CLIP_REFINE = dict(smooth_weight=0.1, rot_smooth_weight=0.2, floor_weight=5.0, contact_weight=1.0, contact_height=0.01,
+                   iters=1500,
                    use_limits=True)
 # The exam's random motion slides its feet along the floor, so it is solved without the contact lock.
 EXAM_REFINE = dict(CLIP_REFINE, contact_weight=0.0)
