@@ -209,16 +209,11 @@ def loop_window(m):
     if best is None:
         raise ValueError("gait has no regular footfalls to loop on")
     regular, td, j = best
-    # among footfall pairs, the longest loop whose feet all line up at the wrap (within 3% of the
-    # body's size); failing that, the pair with the closest match
+    # all of the running: from the first footfall to the last one in the clip, nothing trimmed
     feet = m["feet_idx"]
     size = np.ptp(m["rel"][td[0]], axis=0).max()
-    def mismatch(p, q):
-        return max(np.linalg.norm(m["rel"][p, f] - m["rel"][q, f]) for f in feet) / size
-    pairs = [(td[q] - td[p], mismatch(td[p], td[q]), td[p], td[q]) for p in range(len(td)) for q in range(p + 2, len(td))]
-    good = [x for x in pairs if x[1] <= 0.03]
-    _, worst, a, b = max(good) if good else min(pairs, key=lambda x: x[1])
-    td = [t for t in td if a <= t <= b]
+    a, b = td[0], td[-1]
+    worst = max(np.linalg.norm(m["rel"][a, f] - m["rel"][b, f]) for f in feet) / size
     F = m["rel"].reshape(T, -1)
     seam = float(worst)
     return int(a), int(b), {"period_s": round(float(np.mean(np.diff(td))) / fps, 3), "cycles": len(td) - 1,
