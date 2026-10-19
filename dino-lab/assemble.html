@@ -170,7 +170,7 @@ const deformer = (Lc, k) => { const S = PROP[k], n = Lc.length / 3, K = 48, ax =
   if (!S.auto && k === 'arm') { const k1 = peak(0.2, 0.65); S.auto = [k1, peak(k1 + 0.12, 0.95)]; }
   if (!S.auto && k === 'leg') { // knee and ankle: sharpest bends above the foot; ball: where the leg turns forward into the foot; toes: half way along the foot
     let ball = 0; for (let j = 1; j <= K; j++) if (c[j*3+1] < legY0 + 0.01 && !ball) ball = j / K; ball = Math.max(ball || 0.75, 0.5);
-    const k1 = peak(0.15, ball - 0.25), k2 = peak(k1 + 0.1, ball - 0.05); S.auto = [k1, k2, ball, ball + 0.45 * (1 - ball)]; }
+    const k1 = peak(0.15, ball - 0.25), k2 = peak(k1 + 0.1, ball - 0.05); S.auto = [k1 - 0.06, k2, ball, ball + 0.45 * (1 - ball)]; }   // the calf starts just above the knee bend
   // parameter of a point: projection onto the centreline (legs) or position along the axis (everything else)
   const tOf = k === 'leg' ? (x, y, z) => { let bd = Infinity, bt = 0; for (let j = 0; j < K; j++) { const ax_ = c[j*3], ay = c[j*3+1], az = c[j*3+2], dx = c[j*3+3] - ax_, dy = c[j*3+4] - ay, dz = c[j*3+5] - az, l2 = dx*dx + dy*dy + dz*dz || 1;
       const f = Math.min(1, Math.max(0, ((x - ax_) * dx + (y - ay) * dy + (z - az) * dz) / l2)), d = (ax_ + dx*f - x) ** 2 + (ay + dy*f - y) ** 2 + (az + dz*f - z) ** 2; if (d < bd) { bd = d; bt = (j + f) / K; } } return bt; }
