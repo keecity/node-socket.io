@@ -120,7 +120,7 @@ const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] ||
   const q0 = ANCHOR[nm], bw = q0 && bodyDf ? bodyWarp : null, aw = q0 ? e.getWorldTransform().transformPoint(new pc.Vec3(...q0)) : null;
   for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z;
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
-    if (bw && dl.lengthSq() + 1) { const d2 = (v.x - aw.x) ** 2 + (v.y - aw.y) ** 2 + (v.z - aw.z) ** 2, f = Math.exp(-d2 / (0.16 * 0.16)); if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
+    if (bw) { const d = bodyDist(v.x, v.y, v.z), f = d < 0.3 ? Math.exp(-(d * d) / (0.14 * 0.14)) : 0; if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
   return P; };
 const instance = (nm, e, flip) => { const g = geo[nm], n = g.P.length / 3, P = placed(nm, e);
   const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
@@ -157,12 +157,19 @@ const anchorDelta = (nm, e) => { const d = new pc.Vec3(); if (nm === 'body' || !
   const w2 = ents.body.getWorldTransform().transformPoint(new pc.Vec3(...r)); return d.sub2(w2, w); };
 const headDf = Lc => { let x0 = Infinity; for (let i = 0; i < Lc.length; i += 3) x0 = Math.min(x0, Lc[i]); const S = props.head[0].g, W = props.head[0].w;
   return (x, y, z) => [x0 + (x - x0) * S, y * S, z * S * W]; };
+// distance from a point to the (unwarped) body surface: the falloff of the body's warp onto attached pieces starts there
+let bodyGrid = null; const BG = 0.1;
+const buildBodyGrid = () => { const M = ents.body.getWorldTransform(), g = geo.body.P, v = new pc.Vec3(), map = new Map(); for (let i = 0; i < g.length; i += 3) { v.set(g[i], g[i+1], g[i+2]); M.transformPoint(v, v);
+  const k = Math.floor(v.x / BG) + ',' + Math.floor(v.y / BG) + ',' + Math.floor(v.z / BG); if (!map.has(k)) map.set(k, []); map.get(k).push(v.x, v.y, v.z); } bodyGrid = map; };
+const bodyDist = (x, y, z) => { const cx = Math.floor(x / BG), cy = Math.floor(y / BG), cz = Math.floor(z / BG); let bd = Infinity;
+  for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) for (let dz = -3; dz <= 3; dz++) { const l = bodyGrid.get((cx+dx) + ',' + (cy+dy) + ',' + (cz+dz)); if (l) for (let i = 0; i < l.length; i += 3) bd = Math.min(bd, (l[i]-x)**2 + (l[i+1]-y)**2 + (l[i+2]-z)**2); }
+  return Math.sqrt(bd); };
 const bodyWarp = (x, y, z) => { const Mi = ents.body.getWorldTransform().clone().invert(), b = Mi.transformPoint(new pc.Vec3(x, y, z)), r = bodyDf(b.x, b.y, b.z), w = ents.body.getWorldTransform().transformPoint(new pc.Vec3(...r)); return [w.x, w.y, w.z]; };
 // live proportions: the fused mesh keeps its topology; each piece is re-placed (proportions applied to the base) and every
 // fused vertex moves with its source vertex, keeping the seam fillet's offset. No re-fuse while dragging.
 let liveState = null, liveQueued = false;
 const live = () => { if (liveQueued) return; liveQueued = true; requestAnimationFrame(() => { liveQueued = false; const S = liveState; if (!S || !fusedEnt || !fusedEnt.enabled) return;
-  bodyDf = deformer(geo.body.P, 'body'); const nr = Float32Array.from(S.raw);
+  bodyDf = deformer(geo.body.P, 'body'); buildBodyGrid(); const nr = Float32Array.from(S.raw);
   for (const L of S.list) { const Q = placed(L.nm, L.e); for (let i = 0; i < L.map.length; i++) { const w = (L.off + L.map[i]) * 3; nr[w] = Q[i*3]; nr[w+1] = Q[i*3+1]; nr[w+2] = Q[i*3+2]; } }
   const P = new Float32Array(S.P.length); for (let v = 0; v < P.length / 3; v++) { const u = S.src[v] >= 0 ? S.src[v] : v; for (let q = 0; q < 3; q++) P[v*3+q] = S.P[v*3+q] + nr[u*3+q] - S.raw[u*3+q]; }
   const N = vertexNormals(P, S.I);
@@ -174,7 +181,7 @@ const buildProps = () => { for (const k in PROP) { const box = document.createEl
     x.addEventListener('input', () => { props[k][i][key] = +x.value; if (k === 'neck') { bendNeck(); headFollow(); } json(); live(); }); box.appendChild(l); } });
   $('props').appendChild(box); } };
 const fuseNow = () => {
-  { const g = geo.body; bodyDf = deformer(g.P, 'body'); }
+  { const g = geo.body; bodyDf = deformer(g.P, 'body'); buildBodyGrid(); }
   const list = [instance('body', ents.body, false), instance('neck', ents.neck, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
   let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
   for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: L.nm === 'tail' ? 0.3 : 0.14, collar: 0.1 }, 0.08); if (J.joined) { P = J.P; I = J.I; } else { const Q = new Float32Array(P.length + L.WP.length); Q.set(P); Q.set(L.WP, P.length); P = Q; I = Array.from(I).concat(L.WI.map(v => v + L.off)); } }   // not touching the body: kept as is
