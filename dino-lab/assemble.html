@@ -176,38 +176,42 @@ const dualMats = new Map(), dualMat = (A, B) => { const k = A.id + ':' + B.id; i
   m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', `uniform sampler2D uA, uB;
 void getAlbedo() { vec3 a = texture(uA, vUv0).rgb, b = texture(uB, vUv1).rgb; float w = vVertexColor.a;
   // w: how far into the other piece's skin (0 own, 0.5 at the seam, 1 other); raised (brighter) scales of either skin sit on top
-  float m = smoothstep(0.42, 0.58, w + (dot(b, vec3(0.333)) - dot(a, vec3(0.333))) * 1.2); dAlbedo = mix(a, b, w > 0.001 ? m : 0.0); }
+  float m = smoothstep(0.42, 0.58, w + (dot(b, vec3(0.333)) - dot(a, vec3(0.333))) * 1.2); dAlbedo = mix(a, b, w < 0.001 ? 0.0 : w > 0.999 ? 1.0 : m); }
 `); m.shaderChunksVersion = '2.8'; m.setParameter('uA', A); m.setParameter('uB', B); m.update(); dualMats.set(k, m); } return dualMats.get(k); };
 const overlapBuild = (list, P, I, N, strip, mis) => {
-  const nv = P.length / 3, B0 = list[0], tex = L => L.e.findComponents('render')[0].meshInstances[0].material.diffuseMap, R = 0.08;
+  const nv = P.length / 3, R = 0.08, tex = L => L.e.findComponents('render')[0].meshInstances[0].material.diffuseMap, tk = (a, b, c) => [a, b, c].sort((x, y) => x - y).join(',');
   const own = new Int16Array(nv).fill(-1); list.forEach((L, k) => { for (let v = L.off; v < L.end; v++) own[v] = k; });
-  const ouv = new Float32Array(nv * 2); list.forEach(L => { for (let i = 0; i < L.map.length; i++) { const w = L.off + L.map[i]; ouv[w*2] = L.uv[i*2]; ouv[w*2+1] = L.uv[i*2+1]; } });
-  // seam points: vertices of strip triangles joining the body to part k
-  const sp = [], sk = []; for (let t = 0; t < strip.length; t += 3) { const tr = [strip[t], strip[t+1], strip[t+2]], k = tr.map(v => own[v]).find(o => o > 0); if (k === undefined) continue; for (const v of tr) { sp.push(v); sk.push(k); } }
-  const near = new Int16Array(nv).fill(-1), wgt = new Float32Array(nv), uvB = new Float32Array(nv * 2), uvA = new Float32Array(nv * 2);
-  for (let v = 0; v < nv; v++) { let bd = R * R, bk = -1; for (let i = 0; i < sp.length; i++) { const u = sp[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bk = sk[i]; } }
-    if (bk < 0) continue; near[v] = bk; wgt[v] = 0.5 * (1 - Math.sqrt(bd) / R);
-    const o = own[v] === 0 ? list[bk] : B0, uv = closestOn(o)(P[v*3], P[v*3+1], P[v*3+2]);   // the other piece's skin at this point
-    if (own[v] === 0) { uvA[v*2] = ouv[v*2]; uvA[v*2+1] = ouv[v*2+1]; uvB[v*2] = uv[0]; uvB[v*2+1] = uv[1]; }        // body: own = body, other = part
-    else { uvA[v*2] = uv[0]; uvA[v*2+1] = uv[1]; uvB[v*2] = ouv[v*2]; uvB[v*2+1] = ouv[v*2+1]; wgt[v] = 1 - wgt[v]; } // part: written in body space, w toward part
-  }
-  const kept = list.map(() => []), groups = new Map(); // groups: part k -> body-space triangles around its joint (body + strip)
-  for (let t = 0; t < I.length; t += 3) { const tr = [I[t], I[t+1], I[t+2]], o = own[tr[0]];
-    const k = tr.map(v => near[v]).find(x => x > 0), allSame = tr.every(v => own[v] === o) && o >= 0;
-    if (allSame && (o > 0 || k === undefined)) kept[o].push(t); else { const g = k ?? tr.map(v => own[v]).find(x => x > 0) ?? 0; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); } }
-  const mesh = (vs, idx, uv0, uv1, w, mat) => { const loc = new Map(); vs.forEach((v, i) => loc.set(v, i)); const n = vs.length, pos = new Float32Array(n*3), nrm = new Float32Array(n*3), a = new Float32Array(n*2), b = new Float32Array(n*2), c = new Float32Array(n*4);
-    vs.forEach((v, i) => { for (let q = 0; q < 3; q++) { pos[i*3+q] = P[v*3+q]; nrm[i*3+q] = N[v*3+q]; } a[i*2] = uv0(v, 0); a[i*2+1] = uv0(v, 1); b[i*2] = uv1(v, 0); b[i*2+1] = uv1(v, 1); c[i*4+3] = w(v); });
-    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, a); m.setUvs(1, b); m.setColors(c); m.setIndices(idx.map(v => loc.get(v))); m.update(); const mi = new pc.MeshInstance(m, mat); mi.cull = false; mis.push(mi); };
-  // body away from the joints and the parts: split vertices (texture seams kept); parts carry the body skin near the joint
-  list.forEach((L, k) => { const keep = new Set(kept[k].map(t => [I[t], I[t+1], I[t+2]].sort((x, y) => x - y).join(','))), n = L.map.length, idx = [];
-    for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (keep.has([a, b, c].sort((x, y) => x - y).join(','))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
-    if (!idx.length) return; const W = i => L.off + L.map[i];
-    const pos = new Float32Array(n*3), nrm = new Float32Array(n*3), u1 = new Float32Array(n*2), c = new Float32Array(n*4);
-    for (let i = 0; i < n; i++) { const w = W(i); for (let q = 0; q < 3; q++) { pos[i*3+q] = P[w*3+q]; nrm[i*3+q] = N[w*3+q]; } if (k > 0) { u1[i*2] = uvA[w*2]; u1[i*2+1] = uvA[w*2+1]; c[i*4+3] = near[w] > 0 ? 1 - wgt[w] : 0; } }
-    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, L.uv); m.setUvs(1, u1); m.setColors(c); m.setIndices(idx); m.update();
-    const mi = new pc.MeshInstance(m, dualMat(tex(L), tex(B0))); mi.cull = false; mis.push(mi); });
-  for (const [k, ts] of groups) { const idx = []; for (const t of ts) idx.push(I[t], I[t+1], I[t+2]); const vs = [...new Set(idx)];
-    mesh(vs, idx, (v, q) => uvA[v*2+q] || ouv[v*2+q], (v, q) => uvB[v*2+q], v => near[v] > 0 ? (own[v] === 0 ? wgt[v] : wgt[v]) : 0, dualMat(tex(B0), tex(list[k]))); }
+  const ouv = new Float32Array(nv * 2), corner = new Map();   // corner: welded triangle -> exact texture coords of its corners (texture seams kept)
+  list.forEach(L => { for (let i = 0; i < L.map.length; i++) { const w = L.off + L.map[i]; ouv[w*2] = L.uv[i*2]; ouv[w*2+1] = L.uv[i*2+1]; }
+    for (let t = 0; t < L.I.length; t += 3) { const c = {}; for (let e = 0; e < 3; e++) { const i = L.I[t+e]; c[L.off + L.map[i]] = [L.uv[i*2], L.uv[i*2+1]]; } corner.set(tk(...Object.keys(c).map(Number)), c); } });
+  // seams: strip triangles joining two pieces, as pairs (a < b)
+  const pairs = [], pid = new Map(), sp = [], spp = [];
+  for (let t = 0; t < strip.length; t += 3) { const tr = [strip[t], strip[t+1], strip[t+2]], o = [...new Set(tr.map(v => own[v]).filter(x => x >= 0))].sort((x, y) => x - y); if (o.length !== 2) continue;
+    const key = o.join('-'); if (!pid.has(key)) { pid.set(key, pairs.length); pairs.push(o); } for (const v of tr) { sp.push(v); spp.push(pid.get(key)); } }
+  const near = new Int16Array(nv).fill(-1), dist = new Float32Array(nv);
+  for (let v = 0; v < nv; v++) { let bd = R * R, bp = -1; for (let i = 0; i < sp.length; i++) { const u = sp[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bp = spp[i]; } } near[v] = bp; dist[v] = Math.sqrt(bd); }
+  const groups = new Map(), kept = list.map(() => new Set());
+  for (let t = 0; t < I.length; t += 3) { const tr = [I[t], I[t+1], I[t+2]], g = tr.map(v => near[v]).find(x => x >= 0), o = own[tr[0]];
+    if (g === undefined && tr.every(v => own[v] === o) && o >= 0) { kept[o].add(tk(...tr)); continue; }
+    const gg = g ?? 0; if (!groups.has(gg)) groups.set(gg, []); groups.get(gg).push(t); }
+  // away from the joints: each piece as it is (split vertices, own texture only)
+  list.forEach((L, k) => { const n = L.map.length, idx = []; for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
+    if (!idx.length) return; const pos = new Float32Array(n*3), nrm = new Float32Array(n*3);
+    for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let q = 0; q < 3; q++) { pos[i*3+q] = P[w*3+q]; nrm[i*3+q] = N[w*3+q]; } }
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, L.uv); m.setUvs(1, L.uv); m.setColors(new Float32Array(n*4)); m.setIndices(idx); m.update();
+    const mi = new pc.MeshInstance(m, dualMat(tex(L), tex(L))); mi.cull = false; mis.push(mi); });
+  // around each joint (a, b): every corner carries a's skin in uv0 and b's in uv1 (its own exact, the other projected); w runs 0 (a) -> 1 (b)
+  for (const [g, ts] of groups) { if (!pairs[g]) continue; const [a, b] = pairs[g], n = ts.length * 3, pos = new Float32Array(n*3), nrm = new Float32Array(n*3), u0 = new Float32Array(n*2), u1 = new Float32Array(n*2), c = new Float32Array(n*4);
+    const span = (u, o) => Math.max(Math.hypot(u[o]-u[o+2], u[o+1]-u[o+3]), Math.hypot(u[o]-u[o+4], u[o+1]-u[o+5]), Math.hypot(u[o+2]-u[o+4], u[o+3]-u[o+5]));
+    ts.forEach((t, q) => { const tr = [I[t], I[t+1], I[t+2]], cu = corner.get(tk(...tr)); const proj = [];
+      tr.forEach((v, e) => { const o = (q*3+e), x = P[v*3], y = P[v*3+1], z = P[v*3+2], mine = cu?.[v] || [ouv[v*2], ouv[v*2+1]], f = near[v] === g ? 0.5 * (1 - dist[v] / R) : 0;
+        for (let k = 0; k < 3; k++) { pos[o*3+k] = P[v*3+k]; nrm[o*3+k] = N[v*3+k]; }
+        let A, B, w; if (own[v] === a) { A = mine; B = closestOn(list[b])(x, y, z); w = f; } else if (own[v] === b) { B = mine; A = closestOn(list[a])(x, y, z); w = 1 - f; } else { A = closestOn(list[a])(x, y, z); B = closestOn(list[b])(x, y, z); w = 0.5; }
+        u0[o*2] = A[0]; u0[o*2+1] = A[1]; u1[o*2] = B[0]; u1[o*2+1] = B[1]; c[o*4+3] = w; proj.push(own[v]); });
+      // a projected skin that jumps between texture islands across this triangle would tear: keep each corner's own skin there
+      if (span(u0, q*6) > 0.08 || span(u1, q*6) > 0.08) for (let e = 0; e < 3; e++) c[(q*3+e)*4+3] = proj[e] === b ? 1 : 0; });
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, u0); m.setUvs(1, u1); m.setColors(c); m.setIndices([...Array(n).keys()]); m.update();
+    const mi = new pc.MeshInstance(m, dualMat(tex(list[a]), tex(list[b]))); mi.cull = false; mis.push(mi); }
 };
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
 $('overlap').onchange = refuse; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
