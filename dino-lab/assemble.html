@@ -22,6 +22,7 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="overlap" checked> Overlap joints (skins dissolve into each other)</label>
+<h2>Proportions</h2><div id="props"></div>
 <h2>Neck</h2>
 <label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Length</span><input id="nlen" type="range" min="0.3" max="2.5" step="0.01" value="1" style="flex:1"></label>
 <label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Base</span><input id="nbase" type="range" min="1" max="3.5" step="0.01" value="2.2" style="flex:1"></label>
@@ -85,7 +86,7 @@ const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t =
 const make = res => { const e = res.instantiateRenderEntity(); e.findComponents('render').forEach(r => r.meshInstances.forEach(m => { m.material.cull = pc.CULLFACE_NONE; m.material.update(); })); return e; };
 let part = 'body', mode = 'move', gz = null, layer = null;
 const json = () => { const o = {}; for (const k in ents) { const e = ents[k], p = e.getLocalPosition(), r = e.getLocalEulerAngles(), s = e.getLocalScale(), f = x => +x.toFixed(4);
-  o[k] = { p: [f(p.x), f(p.y), f(p.z)], r: [f(r.x), f(r.y), f(r.z)], s: [f(s.x), f(s.y), f(s.z)] }; if (k === 'neck') { o[k].len = neck.len; o[k].bend = neck.bend; o[k].base = neck.base; } } $('out').value = JSON.stringify(o); };
+  o[k] = { p: [f(p.x), f(p.y), f(p.z)], r: [f(r.x), f(r.y), f(r.z)], s: [f(s.x), f(s.y), f(s.z)] }; if (k === 'neck') { o[k].len = neck.len; o[k].bend = neck.bend; o[k].base = neck.base; } } o.props = props; $('out').value = JSON.stringify(o); };
 const syncMirrors = () => { for (const k in mirrors) { const e = ents[k], m = mirrors[k], p = e.getLocalPosition(), q = e.getLocalRotation(), s = e.getLocalScale();
   m.setLocalPosition(p.x, p.y, -p.z); m.setLocalRotation(new pc.Quat(-q.x, -q.y, q.z, q.w)); m.setLocalScale(s.x, s.y, -s.z); } };
 const show = () => {
@@ -114,11 +115,47 @@ const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m
   const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
 const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
 const instance = (nm, e, flip) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
-  for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
+  const Lc = new Float32Array(g.P.length); for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); Lc[i*3] = x; Lc[i*3+1] = y; Lc[i*3+2] = z; }
+  const df = PROP[nm] && nm !== 'neck' ? deformer(Lc, nm) : null, dl = anchorDelta(nm, e);
+  for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z; }
   const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
   const I = new Uint32Array(g.I.length); for (let t = 0; t < I.length; t += 3) { I[t] = g.I[t]; I[t+1] = flip ? g.I[t+2] : g.I[t+1]; I[t+2] = flip ? g.I[t+1] : g.I[t+2]; }
   const WI = Array.from(I, x => map[x]); return { nm, e, I, map, WP: Float32Array.from(WP), WI, uv: g.UV }; };
+// proportions (MetaHuman-style): every piece is split into regions along its length; each region has a length and a size.
+// The piece's centreline is sampled in slices; region lengths stretch the centreline (bends are kept), sizes scale the
+// cross-section around it. The body's change also carries the attachment points of the limbs, neck and tail.
+const PROP = { body: { label: 'Body', axis: 0, sign: 1, pin: 0.5, cuts: [0.33, 0.66], bands: ['Lower (hips)', 'Mid', 'Upper (chest)'] },
+  neck: { label: 'Neck', cuts: [0.33, 0.66], bands: ['Lower', 'Mid', 'Upper'] },
+  tail: { label: 'Tail', axis: 0, sign: 1, pin: 0, cuts: [], bands: ['Tail'] },
+  leg: { label: 'Legs', axis: 1, sign: -1, pin: 0, cuts: [0.42, 0.8], bands: ['Thigh', 'Calf', 'Foot'] },
+  arm: { label: 'Arms', axis: 1, sign: -1, pin: 0, cuts: [0.4, 0.75], bands: ['Upper arm', 'Forearm', 'Hand'] } };
+const props = PARTS.props || {}; for (const k in PROP) props[k] = props[k] || PROP[k].bands.map(() => ({ l: 1, g: 1 }));
+const bandF = (k, t, key) => { const c = PROP[k].cuts, v = props[k].map(b => b[key]); let out = v[0];
+  for (let i = 0; i < c.length; i++) { const f = Math.min(1, Math.max(0, (t - c[i] + 0.06) / 0.12)), sm = f * f * (3 - 2 * f); out += (v[i+1] - v[i]) * sm; } return out; };
+const deformer = (Lc, k) => { const S = PROP[k], n = Lc.length / 3, K = 48, ax = i => S.sign * Lc[i*3+S.axis];
+  let lo = Infinity, hi = -Infinity; for (let i = 0; i < n; i++) { lo = Math.min(lo, ax(i)); hi = Math.max(hi, ax(i)); }
+  const c = new Float32Array((K+1)*3), cnt = new Float32Array(K+1);
+  for (let i = 0; i < n; i++) { const j = Math.round((ax(i) - lo) / (hi - lo) * K); for (let q = 0; q < 3; q++) c[j*3+q] += Lc[i*3+q]; cnt[j]++; }
+  for (let j = 0; j <= K; j++) if (cnt[j]) for (let q = 0; q < 3; q++) c[j*3+q] /= cnt[j];
+  for (let j = 0; j <= K; j++) if (!cnt[j]) { let a = j, b = j; while (a > 0 && !cnt[a]) a--; while (b < K && !cnt[b]) b++; for (let q = 0; q < 3; q++) c[j*3+q] = cnt[a] && cnt[b] && a !== b ? c[a*3+q] + (c[b*3+q] - c[a*3+q]) * (j - a) / (b - a) : cnt[a] ? c[a*3+q] : c[b*3+q]; }
+  for (let it = 0; it < 2; it++) for (let j = 1; j < K; j++) for (let q = 0; q < 3; q++) c[j*3+q] = (c[(j-1)*3+q] + 2 * c[j*3+q] + c[(j+1)*3+q]) / 4;
+  const c2 = new Float32Array(c.length); c2.set(c.subarray(0, 3)); for (let j = 0; j < K; j++) { const L = bandF(k, (j + 0.5) / K, 'l'); for (let q = 0; q < 3; q++) c2[(j+1)*3+q] = c2[j*3+q] + (c[(j+1)*3+q] - c[j*3+q]) * L; }
+  const jp = Math.round(S.pin * K), sh = [0, 1, 2].map(q => c[jp*3+q] - c2[jp*3+q]); for (let j = 0; j <= K; j++) for (let q = 0; q < 3; q++) c2[j*3+q] += sh[q];
+  return (x, y, z) => { const p = [x, y, z], t = Math.min(1, Math.max(0, (S.sign * p[S.axis] - lo) / (hi - lo))), u = t * K, j = Math.min(K - 1, Math.floor(u)), f = u - j, G = bandF(k, t, 'g');
+    return [0, 1, 2].map(q => { const a = c[j*3+q] + (c[(j+1)*3+q] - c[j*3+q]) * f, b = c2[j*3+q] + (c2[(j+1)*3+q] - c2[j*3+q]) * f; return b + (p[q] - a) * G; }); }; };
+// how far the body's proportions move a piece's attachment point (world space)
+let bodyDf = null;
+const ANCHOR = { neck: [-0.5, 0, 0], tail: [-0.5, 0, 0], arm: [0, 0, 0], leg: [0, 0, 0] };
+const anchorDelta = (nm, e) => { const d = new pc.Vec3(); if (nm === 'body' || !bodyDf) return d; const src = nm === 'head' ? ents.neck : e, q = ANCHOR[nm === 'head' ? 'neck' : nm]; if (!q) return d;
+  const w = src.getWorldTransform().transformPoint(new pc.Vec3(...q)), Mi = ents.body.getWorldTransform().clone().invert(), b = Mi.transformPoint(w, new pc.Vec3()), r = bodyDf(b.x, b.y, b.z);
+  const w2 = ents.body.getWorldTransform().transformPoint(new pc.Vec3(...r)); return d.sub2(w2, w); };
+const buildProps = () => { for (const k in PROP) { const box = document.createElement('div'); box.innerHTML = '<h3 style="font-size:12px;margin:10px 0 4px">' + PROP[k].label + '</h3>';
+  PROP[k].bands.forEach((nm, i) => { for (const [key, lab] of [['l', 'length'], ['g', 'size']]) { const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:12px';
+    l.innerHTML = '<span style="width:120px">' + nm + ' ' + lab + '</span><input type="range" min="0.4" max="2" step="0.01" value="' + props[k][i][key] + '" style="flex:1">'; const x = l.querySelector('input');
+    x.addEventListener('change', () => { props[k][i][key] = +x.value; if (k === 'neck') { bendNeck(); headFollow(); } json(); refuse(); }); box.appendChild(l); } });
+  $('props').appendChild(box); } };
 const fuseNow = () => {
+  { const g = geo.body; bodyDf = deformer(g.P, 'body'); }
   const list = [instance('body', ents.body, false), instance('neck', ents.neck, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
   let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
   for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: L.nm === 'tail' ? 0.3 : 0.14, collar: 0.1 }, 0.08); if (J.joined) { P = J.P; I = J.I; } else { const Q = new Float32Array(P.length + L.WP.length); Q.set(P); Q.set(L.WP, P.length); P = Q; I = Array.from(I).concat(L.WI.map(v => v + L.off)); } }   // not touching the body: kept as is
@@ -218,11 +255,13 @@ $('overlap').onchange = refuse; $('fuse').onchange = () => $('fuse').checked ? r
 // neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
 // along the arc, Bend curls it upward; the head rides on the arc's end
 const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, base: PARTS.neck.base || 2.2, rel: null, mesh: null };
-const neckEnd = () => { const L = neck.len, b = neck.bend * Math.PI / 180, cx = Math.abs(b) < 1e-4 ? L : L / b * Math.sin(b), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(b));
+const neckU = () => { let U = 0; for (let j = 0; j < 48; j++) U += bandF('neck', (j + 0.5) / 48, 'l') / 48; return U; };
+const neckEnd = () => { const L = neck.len * neckU(), b = neck.bend * Math.PI / 180, cx = Math.abs(b) < 1e-4 ? L : L / b * Math.sin(b), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(b));
   return new pc.Mat4().setTRS(new pc.Vec3(-0.5 + cx, cy, 0), new pc.Quat().setFromEulerAngles(0, 0, neck.bend), pc.Vec3.ONE); };
 const bendNeck = () => { const g = geo.neck, n = g.P.length / 3, B = g.B || (g.B = new Float32Array(g.P.length)), L = neck.len, b = neck.bend * Math.PI / 180;
-  for (let i = 0; i < n; i++) { const u = g.P[i*3] + 0.5, s_ = u * L, th = b * u, fl = 1 + (neck.base - 1) * Math.max(0, 1 - u / 0.45) ** 2, y = g.P[i*3+1] * fl;   // base flares into the body
-    const cx = Math.abs(b) < 1e-4 ? s_ : L / b * Math.sin(th), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(th));
+  const cum = new Float32Array(49); for (let j = 0; j < 48; j++) cum[j+1] = cum[j] + bandF('neck', (j + 0.5) / 48, 'l') / 48; const U = cum[48], LL = L * U;
+  for (let i = 0; i < n; i++) { const u = g.P[i*3] + 0.5, uj = Math.min(47, Math.floor(u * 48)), uu = cum[uj] + (cum[uj+1] - cum[uj]) * (u * 48 - uj), s_ = uu * L, th = b * uu / U, fl = (1 + (neck.base - 1) * Math.max(0, 1 - u / 0.45) ** 2) * bandF('neck', u, 'g'), y = g.P[i*3+1] * fl;   // base flares into the body
+    const cx = Math.abs(b) < 1e-4 ? s_ : LL / b * Math.sin(th), cy = Math.abs(b) < 1e-4 ? 0 : LL / b * (1 - Math.cos(th));
     B[i*3] = -0.5 + cx - y * Math.sin(th); B[i*3+1] = cy + y * Math.cos(th); B[i*3+2] = g.P[i*3+2] * fl; }
   if (!neck.mesh) { const r = ents.neck.findComponents('render')[0], mat = r.meshInstances[0].material; r.enabled = false;
     const m = new pc.Mesh(app.graphicsDevice); m.setUvs(0, g.UV); m.setIndices(g.I); const mi = new pc.MeshInstance(m, mat); mi.cull = false; const c = new pc.Entity(); c.addComponent('render', { meshInstances: [mi] }); ents.neck.addChild(c); neck.mesh = m; }
@@ -234,13 +273,13 @@ const neckInput = () => { neck.len = +$('nlen').value; neck.bend = +$('nbend').v
 $('nlen').addEventListener('input', neckInput); $('nbase').addEventListener('input', neckInput); $('nbase').addEventListener('change', refuse); $('nbend').addEventListener('input', neckInput);
 $('nlen').addEventListener('change', refuse); $('nbend').addEventListener('change', refuse);
 $('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
-Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
+Promise.all(Object.keys(PARTS).filter(k => k !== 'props').map(nm => load(nm).then(res => {
   const e = make(res); e.setLocalPosition(...PARTS[nm].p); e.setLocalEulerAngles(...PARTS[nm].r); e.setLocalScale(...PARTS[nm].s); app.root.addChild(e); ents[nm] = e;
   if (nm === 'arm' || nm === 'leg') { const m = make(res); app.root.addChild(m); mirrors[nm] = m; }
 }))).then(() => {
-  for (const nm of Object.keys(PARTS)) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
+  for (const nm of Object.keys(PARTS).filter(k => k !== 'props')) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
   $('nlen').value = neck.len; $('nbend').value = neck.bend; $('nbase').value = neck.base; bendNeck(); headCapture();
-  syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend);
+  buildProps(); syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend);
 }).catch(e => { $('stat').textContent = 'Could not load parts: ' + e.message; });
 app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
   cam.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.target); });
