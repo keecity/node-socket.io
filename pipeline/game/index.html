@@ -920,8 +920,10 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
-function frame() {
-  const raw = Math.min(clock.getDelta(), 0.05);
+// Test harness hook: with window.arenaManual set, frames advance only through arenaTick(dt),
+// so a recording plays at true game speed however slow the machine renders.
+function frame(manualDt) {
+  const raw = manualDt ?? Math.min(clock.getDelta(), 0.05);
   let dt = paused ? 0 : raw * speed;
   if (hitStop > 0) { hitStop -= dt; dt *= 0.08; }   // freeze a beat on impact
   gameTime += dt;
@@ -954,8 +956,15 @@ function frame() {
     p.material.opacity = along > 0 && along < 1 ? THREE.MathUtils.clamp((miss - 0.6) / 1.4, 0.08, 1) : 1;
   });
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
+  if (!window.arenaManual) requestAnimationFrame(() => frame());
 }
+window.arenaTick = (dt) => frame(dt);
+window.arenaProbe = () => A ? [A, B].map((m) => {
+  const g = m.ground(), r = m.root.position;
+  return { name: m.name, hip: [+g.x.toFixed(3), +g.z.toFixed(3)], root: [+r.x.toFixed(3), +r.z.toFixed(3)],
+    act: m.act ? m.act.clipName : null, loco: m.loco, hurt: m.hurtT > 0, plan: m.plan, faint: m.fainted,
+    clip: m.current ? m.current.getClip().name : null, rate: m.current ? +m.current.timeScale.toFixed(2) : 0 };
+}) : null;
 
 // ---------- controls ----------
 const btnPause = document.getElementById('btnPause'), btnSpeed = document.getElementById('btnSpeed');
