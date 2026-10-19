@@ -9,7 +9,7 @@ from PIL import Image
 from wrap import wrap, prefit, sample
 from partcut import load, comps, glb
 import json, struct
-TS=1024
+TS=2048
 def variants(fn,lift):
     V,T,F,img,mime=load(fn);R=comps(V,F);u,c=np.unique(R,return_counts=True);o=u[np.argsort(-c)];big=[k for k in o if (R==k).sum()>=200]
     TEX=np.asarray(Image.open(io.BytesIO(img)).convert('RGB')).astype(np.float32);out=[]
@@ -42,6 +42,8 @@ for typ,src,lift in [('head','heads',False),('arm','arm',True),('leg','leg',True
     b=H[0];W=[b['Q']]
     for h in H[1:]: X,e=fit(b,h);W.append(X);print(typ,'variant',len(W)-1,'fit error %.4f'%e,flush=True)
     # bake: every texel of the base layout -> point on the base -> same point on variant k's wrap -> nearest sculpt point's paint
+    # repack: the base part used only its corner of the shared sheet; stretch its layout over the whole texture
+    UV0=b['UV'].copy();lo=UV0.min(0);b['UV']=((UV0-lo)/(UV0.max(0)-lo).max()*0.998+0.001).astype(np.float32)
     UVb=b['UV'][b['I']];ys,xs=np.mgrid[0:TS,0:TS];pix=np.c_[(xs.ravel()+0.5)/TS,(ys.ravel()+0.5)/TS];owner=-np.ones(TS*TS,int);bary=np.zeros((TS*TS,3))
     for t in range(len(UVb)):
         a,b_,c=UVb[t];lo=np.floor(np.minimum.reduce([a,b_,c])*TS).astype(int);hi=np.ceil(np.maximum.reduce([a,b_,c])*TS).astype(int)
@@ -54,7 +56,7 @@ for typ,src,lift in [('head','heads',False),('arm','arm',True),('leg','leg',True
     hit=owner>=0
     for k,h in enumerate(H):
         out=np.zeros((TS*TS,3),np.float32)
-        if k==0: out[hit]=texlook(h['TEX'],pix[hit])
+        if k==0: out[hit]=texlook(h['TEX'],(UV0[b['I'][owner[hit]]]*bary[hit][:,:,None]).sum(1))
         else:
             P3=(W[k][b['I'][owner[hit]]]*bary[hit][:,:,None]).sum(1);pts,uvs=surf_uv(h);_,ii=cKDTree(pts).query(P3,workers=-1);out[hit]=texlook(h['TEX'],uvs[ii])
         im=out.reshape(TS,TS,3);_,idx=ndi.distance_transform_edt(~hit.reshape(TS,TS),return_indices=True);im=im[idx[0],idx[1]]

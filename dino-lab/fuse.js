@@ -178,7 +178,7 @@ function joinParts(PB, IB, part, rCollar, key) {
     for (const v of A) { let best = Infinity; for (const u of B) best = Math.min(best,d2(v,u)); sum += best; }
     return sum/A.length;
   };
-  const limit = Math.max(0.015,rCollar*0.8);
+  const limit = part.limit || Math.max(0.015,rCollar*0.8);
   for (let a = 0; a < bl.length; a++) for (let b = 0; b < nl.length; b++) {
     const distance = Math.max(loopDistance(bl[a],nl[b]),loopDistance(nl[b],bl[a]));
     if (distance < limit*limit) candidates.push({a,b,distance});
@@ -207,7 +207,7 @@ function joinParts(PB, IB, part, rCollar, key) {
   const nv = P.length / 3, adj = Array.from({ length: nv }, () => []);
   for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const a = I[t+e], b = I[t+(e+1)%3]; adj[a].push(b); adj[b].push(a); }
   const seam = [...new Set(bodyEdge.concat(...nl))], neckJoin = key === 'body-neck' || key?.startsWith('head-body');
-  const R = Math.min(1.8 * rCollar, neckJoin ? 1.8 * rCollar : 0.045), sel = [], wts = [];
+  const R = part.collar || Math.min(1.8 * rCollar, neckJoin ? 1.8 * rCollar : 0.045), sel = [], wts = [];
   const gs = new Map(), ck = (x, y, z) => Math.floor(x / R) + ',' + Math.floor(y / R) + ',' + Math.floor(z / R);
   for (const u of seam) { const k = ck(P[u*3], P[u*3+1], P[u*3+2]); if (!gs.has(k)) gs.set(k, []); gs.get(k).push(u); }
   for (let v = 0; v < nv; v++) {

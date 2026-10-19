@@ -55,17 +55,17 @@ const setupBlend = nm => {
   $('blend').appendChild(box);
   const imgs = [...Array(n)].map((_, k) => new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = 'part_' + nm + '_tex' + k + '.jpg'; }));
   Promise.all(imgs).then(im => {
-    const S = 512, cv = document.createElement('canvas'); cv.width = cv.height = S; const cx = cv.getContext('2d', { willReadFrequently: true });
+    const S = 2048, cv = document.createElement('canvas'); cv.width = cv.height = S; const cx = cv.getContext('2d', { willReadFrequently: true });
     const px = im.map(i => { cx.drawImage(i, 0, 0, S, S); return cx.getImageData(0, 0, S, S).data; }), out = cx.createImageData(S, S);
-    const tex = new pc.Texture(app.graphicsDevice, { width: S, height: S, format: pc.PIXELFORMAT_RGBA8, mipmaps: true });
+    const tex = new pc.Texture(app.graphicsDevice, { width: S, height: S, format: pc.PIXELFORMAT_SRGBA8, mipmaps: true, anisotropy: 8 });
     const mis = [ents[nm], mirrors[nm]].filter(Boolean).flatMap(e => e.findComponents('render').flatMap(r => r.meshInstances));
     mis.forEach(m => { m.material.diffuseMap = tex; m.material.update(); });
-    const upd = () => { const w = sl.map(x => +x.value), t = w.reduce((a, b) => a + b, 0) || 1;
+    const upd = paint => { const w = sl.map(x => +x.value), t = w.reduce((a, b) => a + b, 0) || 1;
       blendW[nm] = w.slice(1).map(x => x / t); refuse();
       mis.forEach(m => { if (m.morphInstance) for (let k = 1; k < n; k++) m.morphInstance.setWeight(k - 1, w[k] / t); });
-      const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
+      if (paint === false) return; const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
       cx.putImageData(out, 0, 0); tex.setSource(cv); };
-    sl.forEach(x => x.addEventListener('input', upd)); upd();
+    sl.forEach(x => { x.addEventListener('input', () => upd(false)); x.addEventListener('change', () => { upd(); refuse(); }); }); upd();
   });
 };
 const geo = {}, blendW = {};
@@ -96,6 +96,9 @@ document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode
 // fuse: every part (blended, in world space) is welded by position, cut where it enters the body and zipped to the body's hole
 // (joinParts from the main viewer); each part keeps its own texture, the seam strip takes the body's paint
 let fusedEnt = null, fuseTimer = null;
+const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = src.diffuseMap; m.gloss = 0.25;
+  m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex;\nvoid getAlbedo() { vec3 t = texture(uFTex, vUv0).rgb; dAlbedo = mix(t, vVertexColor.rgb, vVertexColor.a); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
+  const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
 const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
 const instance = (nm, e, flip) => { const g = geo[nm], w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
   for (let i = 0; i < n; i++) { let x = g.P[i*3], y = g.P[i*3+1], z = g.P[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
@@ -105,21 +108,32 @@ const instance = (nm, e, flip) => { const g = geo[nm], w = blendW[nm] || [], n =
 const fuseNow = () => {
   const list = [instance('body', ents.body, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
   let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
-  for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI }, 0.08); P = J.P; I = J.I; }
+  for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: 0.14, collar: 0.1 }, 0.08); P = J.P; I = J.I; }
   const N = vertexNormals(P, I), owner = v => { for (const L of list) if (v >= L.off && v < L.end) return L; return null; };
   const kept = list.map(() => new Set()), strip = [], tk = (a, b, c) => [a, b, c].sort((x, y) => x - y).join(',');
   for (let t = 0; t < I.length; t += 3) { const o = owner(I[t]); if (o && owner(I[t+1]) === o && owner(I[t+2]) === o) kept[list.indexOf(o)].add(tk(I[t], I[t+1], I[t+2])); else strip.push(I[t], I[t+1], I[t+2]); }
+  // paint blend at the joins: every seam vertex takes the average paint of the seam around it (both sides), and vertices
+  // near a seam fade toward that colour (vertex colour rgb = seam paint, a = fade), mixed in the shader over the texture
+  const nv = P.length / 3, col = new Float32Array(nv * 4), mat0 = L => L.e.findComponents('render')[0].meshInstances[0].material;
+  const lin = c => Math.pow(c / 255, 2.2), samplers = new Map(), pix = L => { const t = mat0(L).diffuseMap; if (!samplers.has(t)) { const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d'); x.drawImage(t.getSource(), 0, 0, S, S); samplers.set(t, { S, d: x.getImageData(0, 0, S, S).data }); } return samplers.get(t); };
+  const vc = new Float32Array(nv * 3), has = new Uint8Array(nv);
+  for (const L of list) { const sm = pix(L); for (let i = 0; i < L.map.length; i++) { const w = L.off + L.map[i]; if (has[w]) continue; has[w] = 1; const x = Math.min(sm.S - 1, Math.max(0, Math.floor((L.uv[i*2] % 1) * sm.S))), y = Math.min(sm.S - 1, Math.max(0, Math.floor((L.uv[i*2+1] % 1) * sm.S))), o = (y * sm.S + x) * 4; vc[w*3] = lin(sm.d[o]); vc[w*3+1] = lin(sm.d[o+1]); vc[w*3+2] = lin(sm.d[o+2]); } }
+  const seam = [...new Set(strip)].filter(v => has[v]), sc = new Float32Array(seam.length * 3), FADE = 0.07, MIX = 0.06;
+  seam.forEach((v, i) => { let n = 0; for (const u of seam) { if ((P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2 < MIX * MIX) { sc[i*3] += vc[u*3]; sc[i*3+1] += vc[u*3+1]; sc[i*3+2] += vc[u*3+2]; n++; } } sc[i*3] /= n; sc[i*3+1] /= n; sc[i*3+2] /= n; });
+  for (let v = 0; v < nv; v++) { let bd = Infinity, bi = -1; for (let i = 0; i < seam.length; i++) { const u = seam[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = i; } }
+    if (bi < 0) continue; const d = Math.sqrt(bd), f = d < FADE ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE) : 0; col[v*4] = sc[bi*3]; col[v*4+1] = sc[bi*3+1]; col[v*4+2] = sc[bi*3+2]; col[v*4+3] = 0.9 * f; }
   if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
-  const meshOf = (pos, nrm, uv, idx, mat) => { const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, mat); mi.cull = false; mis.push(mi); };
+  const meshOf = (pos, nrm, uv, idx, src, wv) => { const c = new Float32Array(wv.length * 4); wv.forEach((w, i) => c.set(col.subarray(w*4, w*4+4), i*4));
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, seamMat(src)); mi.cull = false; mis.push(mi); };
   list.forEach((L, k) => { const n = L.map.length, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = [];
     for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let c = 0; c < 3; c++) { pos[i*3+c] = P[w*3+c]; nrm[i*3+c] = N[w*3+c]; } }
     for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
-    meshOf(pos, nrm, L.uv, idx, L.e.findComponents('render')[0].meshInstances[0].material); });
+    meshOf(pos, nrm, L.uv, idx, mat0(L), Array.from(L.map, x => L.off + x)); });
   if (strip.length) { const B = list[0], used = [...new Set(strip)], loc = new Map(used.map((v, i) => [v, i])), pos = new Float32Array(used.length * 3), nrm = new Float32Array(used.length * 3), uv = new Float32Array(used.length * 2), buv = new Float32Array(B.WP.length / 3 * 2);
     for (let i = 0; i < B.map.length; i++) { buv[B.map[i]*2] = B.uv[i*2]; buv[B.map[i]*2+1] = B.uv[i*2+1]; }
     used.forEach((v, i) => { let best = 0, bd = Infinity; for (let u = 0; u < B.WP.length / 3; u++) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; best = u; } }
       for (let c = 0; c < 3; c++) { pos[i*3+c] = P[v*3+c]; nrm[i*3+c] = N[v*3+c]; } uv[i*2] = buv[best*2]; uv[i*2+1] = buv[best*2+1]; });
-    meshOf(pos, nrm, uv, strip.map(v => loc.get(v)), B.e.findComponents('render')[0].meshInstances[0].material); }
+    meshOf(pos, nrm, uv, strip.map(v => loc.get(v)), mat0(B), used); }
   fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true);
 };
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
