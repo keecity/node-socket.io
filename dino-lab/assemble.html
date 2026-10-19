@@ -22,6 +22,7 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="rest" checked> Rest pose (limbs under the body)</label>
+<label style="display:flex;gap:8px;align-items:center;margin-top:4px"><span>Stance width</span><input id="stance" type="range" min="0" max="0.5" step="0.01" value="0.18" style="flex:1"></label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="anim"> Animate (walk)</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="skel"> Show skeleton</label>
 <label style="display:block;margin-top:4px">Bone weights <select id="wbone"><option value="">off</option></select></label>
@@ -270,8 +271,8 @@ const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc
     else if (b.key === 'head') a = -4 * Math.sin(2 * w * tau + 3);
     q.setFromAxisAngle(ax, a);
     if (b.s === 0 && (b.key.startsWith('leg') || b.key.startsWith('arm')) && $('rest').checked) {   // rest: swing the limb in about the forward axis so its end sits under its root
-      if (b.rest == null) { const c = R.bones.filter(o => o.key === b.key), e = c[c.length - 1].t, dy = e[1] - b.h[1], dz = e[2] - b.h[2]; b.rest = Math.atan(-dz / (dy || -1e-6)) * 180 / Math.PI * (b.key.startsWith('arm') ? 0.7 : 1); }
-      q.copy(new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), b.rest).mul(q)); }
+      if (b.rest == null) { const c = R.bones.filter(o => o.key === b.key), e = c[c.length - 1].t, dy = e[1] - b.h[1], dz = e[2] - b.h[2]; b.rest = Math.atan(-dz / (dy || -1e-6)) * 180 / Math.PI; }
+      q.copy(new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), b.rest * (1 - +$('stance').value * (b.key.startsWith('arm') ? 0.6 : 1))).mul(q)); }
     const h = new pc.Vec3(...b.h), L = new pc.Mat4().setTRS(h, q, pc.Vec3.ONE).mul(new pc.Mat4().setTranslate(-h.x, -h.y, -h.z));
     const M = b.parent >= 0 ? mats[b.parent].clone().mul(L) : new pc.Mat4().setTranslate(0, 0.012 * Math.sin(2 * w * tau), 0).mul(L); mats.push(M); }
   return mats; };
@@ -400,7 +401,7 @@ const overlapBuild = (list, P, I, N, strip, mis) => {
     const mi = new pc.MeshInstance(m, dualMat(tex(list[a]), tex(list[b]))); mi.cull = false; mi._wv = Uint32Array.from(ts.flatMap(t => [I[t], I[t+1], I[t+2]])); mi._col = c; mis.push(mi); }
 };
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); rig = rigBuild(); rig.posed = false; if ($('wbone').value) showWeights(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
-$('overlap').onchange = refuse; $('wbone').onchange = () => { if (!rig || rigDirty) rig = rigBuild(); showWeights(); }; $('anim').onchange = () => { if (!$('anim').checked) { tau = 0; if (rig) rig.posed = null; } }; $('rest').onchange = () => { if (!$('rest').checked && rig) { rig.posed = true; } }; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
+$('overlap').onchange = refuse; $('wbone').onchange = () => { if (!rig || rigDirty) rig = rigBuild(); showWeights(); }; $('anim').onchange = () => { if (!$('anim').checked) { tau = 0; if (rig) rig.posed = null; } }; $('stance').oninput = () => { if (rig) rig.posed = null; }; $('rest').onchange = () => { if (!$('rest').checked && rig) { rig.posed = true; } }; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
 // neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
 // along the arc, Bend curls it upward; the head rides on the arc's end
 const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, base: PARTS.neck.base || 2.2, rel: null, mesh: null };
