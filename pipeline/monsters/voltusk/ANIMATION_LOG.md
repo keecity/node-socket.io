@@ -14,11 +14,11 @@ Detector: DINOv2 ViT-S/14 + heatmap head, 448 px, fine-tuned on 11,000 renders i
 | Role | Source | Status | Length (at rate) | Rate | Key moment | Measured |
 |---|---|---|---|---|---|---|
 | idle | idle [0–179] | used | 5.97 s (5.97 s) | 1× | - | - |
-| walk | walk [85–119] | used | 1.13 s (1.13 s) | 1× | - | gait 0.38 m/s at -6°, loop 2×0.57 s (seam 3.7%); airborne 0.03–0.10, 1.13–1.17 |
-| run | run [85–127] | used | 1.40 s (1.40 s) | 1× | - | gait 0.46 m/s at +11°, loop 3×0.47 s (seam 4.7%); airborne 0.13–0.20, 0.57–0.67 |
+| walk | walk [110–161] | used | 1.70 s (1.70 s) | 1× | - | gait 0.39 m/s at -4°, loop 3×0.57 s (seam 4.2%); airborne 0.30–0.37, 0.83–0.93, 1.40–1.47 |
+| run | run [32–144] | used | 3.73 s (3.73 s) | 1× | - | gait 0.51 m/s at +2°, loop 8×0.47 s (seam 3.6%); airborne 0.00–0.07, 0.43–0.57, 0.90–1.07, 1.40–1.53, 1.90–1.97, 2.33–2.43, 3.27–3.40, 3.73–3.77 |
 | walk_back | walk_back | **rejected**: travels at 3 deg, 0.12 m/s; needs 180 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
-| strafe_left | strafe_left | **rejected**: travels at -29 deg, 0.33 m/s; needs 90 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
-| strafe_right | strafe_right | **rejected**: travels at -7 deg, 0.22 m/s; needs -90 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
+| strafe_left | strafe_left | **rejected**: travels at -25 deg, 0.34 m/s; needs 90 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
+| strafe_right | strafe_right | **rejected**: travels at -7 deg, 0.23 m/s; needs -90 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
 | horn | attack [61–120] | used | 1.97 s (1.31 s) | 1.5× | 1.13 s (peak_speed) | travel 0.14 m; strike reach 0.67 m |
 | bite | bite [75–110] | used | 1.17 s (0.78 s) | 1.5× | 0.47 s (peak_speed) | strike reach 0.60 m |
 | leap | jump [30–119] | used | 2.97 s (1.98 s) | 1.5× | 2.40 s (landing) | travel 0.03 m |
@@ -142,6 +142,6 @@ Detector: DINOv2 ViT-S/14 + heatmap head, 448 px, fine-tuned on 11,000 renders i
 ## To redo
 
 - `walk_back`: travels at 3 deg, 0.12 m/s; needs 180 deg. Regenerate this clip.
-- `strafe_left`: travels at -29 deg, 0.33 m/s; needs 90 deg. Regenerate this clip.
-- `strafe_right`: travels at -7 deg, 0.22 m/s; needs -90 deg. Regenerate this clip.
+- `strafe_left`: travels at -25 deg, 0.34 m/s; needs 90 deg. Regenerate this clip.
+- `strafe_right`: travels at -7 deg, 0.23 m/s; needs -90 deg. Regenerate this clip.
 - `roar`: not generated

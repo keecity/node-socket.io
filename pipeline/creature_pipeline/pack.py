@@ -188,26 +188,46 @@ def active_window(m, pad_before=0.15, pad_after=0.3):
     return int(s), int(t)
 
 
-def loop_window(m, min_seconds=1.0):
-    """A seamless loop: whole gait cycles from the steady middle of a cyclic clip."""
+def loop_window(m, seam_tolerance=0.05):
+    """The longest seamless loop the clip offers: as many whole gait cycles of its steady part as
+    still close (end pose within seam_tolerance of the start pose, relative). Keeping as much of
+    the generated motion as possible avoids a short loop that visibly repeats."""
     fps, T = m["fps"], m["T"]
     F = m["rel"].reshape(T, -1)
     e = m["energy"]
     steady = np.flatnonzero(e > 0.5 * np.median(e[int(0.5 * fps): T - int(0.5 * fps)]))
-    lo, hi = max(steady[0], int(0.5 * fps)), min(steady[-1], T - int(0.3 * fps))
+    lo, hi = max(steady[0], int(0.3 * fps)), min(steady[-1], T - 2)
     lags = range(int(0.35 * fps), min(int(2.5 * fps), (hi - lo) // 2))
     d = np.array([np.linalg.norm(F[lo:hi - k] - F[lo + k:hi], axis=1).mean() for k in lags])
-    # the first clear minimum is one cycle
-    k0 = list(lags)[_first_min(d)]
-    n = max(1, int(np.ceil(min_seconds * fps / k0)))
-    L = n * k0
-    if hi - lo <= L:
-        L, n = k0, 1
-    starts = range(lo, hi - L)
-    err = [np.linalg.norm(F[a] - F[a + L]) for a in starts]
-    a = list(starts)[int(np.argmin(err))]
-    seam = float(np.min(err) / np.linalg.norm(F[a]) )
-    return int(a), int(a + L), {"period_s": round(k0 / fps, 3), "cycles": n, "seam_error": round(seam, 4)}
+    k0 = list(lags)[_first_min(d)]                       # one gait cycle, in frames
+    best = None
+    for n in range(1, (hi - lo) // k0 + 1):
+        L = n * k0
+        err = [(np.linalg.norm(F[a] - F[a + L]) / np.linalg.norm(F[a]), a) for a in range(lo, hi - L + 1)]
+        if not err:
+            break
+        seam, a = min(err)
+        if best is None or seam <= seam_tolerance or seam < best[0] * 0.8:
+            if best is None or seam <= seam_tolerance or n == 1:
+                best = (seam, a, L, n)
+    seam, a, L, n = best
+    return int(a), int(a + L), {"period_s": round(k0 / fps, 3), "cycles": n, "seam_error": round(float(seam), 4)}
+
+
+def blend_loop_seam(local, root, frames):
+    """Ease the last `frames` frames of a loop into its first frame, so the wrap is invisible."""
+    from . import quat
+    local, root = local.copy(), root.copy()
+    T = len(local)
+    for i in range(frames):
+        t = T - frames + i
+        w = (i + 1) / (frames + 1)
+        w = w * w * (3 - 2 * w)                                       # smoothstep
+        q0, q1 = local[t], local[0]
+        q1 = np.where((np.sum(q0 * q1, -1) < 0)[:, None], -q1, q1)     # same hemisphere
+        local[t] = quat.normalize(q0 * (1 - w) + q1 * w)
+        root[t] = root[t] * (1 - w) + root[0] * w
+    return local, root
 
 
 def _first_min(d):
@@ -372,6 +392,8 @@ def pack(skel, animset, motions, out_dir, root_space=None, rig_path=None):
         # in-place GLB of the segment: the game supplies floor travel from root_motion
         lr = local[seg].copy()
         rr = root[seg].copy()
+        if kind == "loop":                                # the last frame wraps onto the first
+            lr, rr = blend_loop_seam(lr, rr, max(2, int(0.2 * fps)))
         rr[:, 0] = skel.rest_positions[0, 0]
         rr[:, 2] = skel.rest_positions[0, 2]
         write_animation_glb(os.path.join(out_dir, "clips", f"{name}.glb"), skel, lr, rr, fps,
