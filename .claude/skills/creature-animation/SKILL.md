@@ -58,9 +58,10 @@ $P synth --rig rig.fbx --skeleton skeleton.json -o data --poses 3000   # --acrob
 
 Training at `--input-size 448 --finetune` needs a GPU. Use Vast.ai through its REST API.
 
-**Key**: ask the user for their Vast API key in chat. Save it only to `$SCRATCH/.vast_key`
-(chmod 600). Never commit it, print it, or put it in a URL; send it only as
-`Authorization: Bearer $K` to `console.vast.ai`. Tell the user to revoke it when done.
+**Key**: if the environment has a Vast network secret (Authorization: Bearer added automatically
+to requests for `console.vast.ai`), call the API with no auth header and `K` unset. Otherwise ask
+the user to add one (environment settings, Network secrets: host `console.vast.ai`, header
+`Authorization`, prefix `Bearer`); never ask for the key in chat, never commit or print it.
 Do not touch instances you did not create in this session (list first; leave the others alone).
 
 **Moving files** (the GPU host cannot reach this container):
@@ -88,8 +89,7 @@ curl -sS -X PUT -H "Content-Type: application/zip" --data-binary @result.zip "$R
 **Find an offer** (single RTX 3090/4090/A5000, reliable, driver <= 560 — newer drivers have
 failed with the pytorch 2.5.1 / CUDA 12.4 image):
 ```bash
-K=$(cat $SCRATCH/.vast_key)
-curl -sS -G -H "Authorization: Bearer $K" https://console.vast.ai/api/v0/bundles/ --data-urlencode \
+curl -sS -G https://console.vast.ai/api/v0/bundles/ --data-urlencode \
  'q={"rentable":{"eq":true},"num_gpus":{"eq":1},"gpu_name":{"in":["RTX 4090","RTX 3090","RTX A5000"]},"reliability2":{"gte":0.99},"inet_down":{"gte":300},"disk_space":{"gte":40},"driver_version":{"lte":"560.99.99"},"order":[["dph_total","asc"]],"type":"on-demand","limit":6}'
 ```
 Check credit first: `GET /api/v0/users/current/` (field `credit`). Tell the user the hourly price.
