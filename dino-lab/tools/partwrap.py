@@ -39,6 +39,9 @@ def surf_uv(h,n=300000):
     return (P[tri]*w[:,:,None]).sum(1),(T[tri]*w[:,:,None]).sum(1)
 for typ,src,lift in [('head','heads',False),('arm','arm',True),('leg','leg',True)]:
     H,img,mime=variants(f'../parts_src/{src}.glb',lift)
+    if typ=='head':   # line every head up on its back end (where the neck attaches), not on its bounding box
+        def back(q): x0=q[:,0].min();m=q[:,0]<x0+0.1*np.ptp(q[:,0]);return np.r_[x0,q[m,1].mean(),q[m,2].mean()]
+        for h in H[1:]: h['Q']=h['Q']+(back(H[0]['Q'])-back(h['Q']))
     b=H[0];W=[b['Q']]
     for h in H[1:]: X,e=fit(b,h);W.append(X);print(typ,'variant',len(W)-1,'fit error %.4f'%e,flush=True)
     # bake: every texel of the base layout -> point on the base -> same point on variant k's wrap -> nearest sculpt point's paint
