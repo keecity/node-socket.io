@@ -122,7 +122,7 @@ const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] ||
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
     if (bw) { const d = bodyDist(v.x, v.y, v.z), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
   if (nm === 'body') for (const [k, en] of [['neck', ents.neck], ['tail', ents.tail], ['arm', ents.arm], ['arm', mirrors.arm], ['leg', ents.leg], ['leg', mirrors.leg]]) {
-    if (!en) continue; const Mk = en.getWorldTransform(), Mki = Mk.clone().invert(), dk = deformer(geo[k].P, k), root = Mk.transformPoint(new pc.Vec3(...ANCHOR[k])), a = new pc.Vec3(), R = 0.6;
+    if (!en) continue; const Mk = en.getWorldTransform(), Mki = Mk.clone().invert(), dk = deformer(geo[k].P, k), root = Mk.transformPoint(new pc.Vec3(...dk.c0)), a = new pc.Vec3(), R = 1.6 * dk.r0 * Mk.getScale().x;   // spread ~1.6 root radii past the joint
     for (let i = 0; i < n; i++) { const d = Math.hypot(P[i*3] - root.x, P[i*3+1] - root.y, P[i*3+2] - root.z); if (d >= R) continue; const x = d / R, f = 1 - x * x * (3 - 2 * x);
       a.set(P[i*3], P[i*3+1], P[i*3+2]); Mki.transformPoint(a, a); const q = dk(a.x, a.y, a.z); a.set(q[0], q[1], q[2]); Mk.transformPoint(a, a);
       P[i*3] += f * (a.x - P[i*3]); P[i*3+1] += f * (a.y - P[i*3+1]); P[i*3+2] += f * (a.z - P[i*3+2]); } }
@@ -156,8 +156,9 @@ const deformer = (Lc, k) => { const S = PROP[k], n = Lc.length / 3, K = 48, ax =
     const k1 = peak(0.2, 0.65), k2 = peak(k1 + 0.12, 0.95); S.auto = [k1, k2]; }
   const c2 = new Float32Array(c.length); c2.set(c.subarray(0, 3)); for (let j = 0; j < K; j++) { const tt = (j + 0.5) / K, ez = k === 'body' ? 1 : (x => x * x * (3 - 2 * x))(Math.min(1, tt / 0.3)), L = 1 + (bandF(k, tt, 'l') - 1) * ez;   /* attached pieces: the joint does not slide */ for (let q = 0; q < 3; q++) c2[(j+1)*3+q] = c2[j*3+q] + (c[(j+1)*3+q] - c[j*3+q]) * L; }
   const jp = Math.round(S.pin * K), sh = [0, 1, 2].map(q => c[jp*3+q] - c2[jp*3+q]); for (let j = 0; j <= K; j++) for (let q = 0; q < 3; q++) c2[j*3+q] += sh[q];
-  return (x, y, z) => { const p = [x, y, z], t = Math.min(1, Math.max(0, (S.sign * p[S.axis] - lo) / (hi - lo))), u = t * K, j = Math.min(K - 1, Math.floor(u)), f = u - j, G = bandF(k, t, 'g'), W = bandF(k, t, 'w');
-    return [0, 1, 2].map(q => { const a = c[j*3+q] + (c[(j+1)*3+q] - c[j*3+q]) * f, b = c2[j*3+q] + (c2[(j+1)*3+q] - c2[j*3+q]) * f; return b + (p[q] - a) * G * (q === 2 ? W : 1); }); }; };
+  let r0 = 0, rn = 0; for (let i = 0; i < n; i++) if ((ax(i) - lo) / (hi - lo) < 0.12) { r0 += Math.hypot(Lc[i*3] - c[0], Lc[i*3+1] - c[1], Lc[i*3+2] - c[2]); rn++; }
+  const fn = (x, y, z) => { const p = [x, y, z], t = Math.min(1, Math.max(0, (S.sign * p[S.axis] - lo) / (hi - lo))), u = t * K, j = Math.min(K - 1, Math.floor(u)), f = u - j, G = bandF(k, t, 'g'), W = bandF(k, t, 'w');
+    return [0, 1, 2].map(q => { const a = c[j*3+q] + (c[(j+1)*3+q] - c[j*3+q]) * f, b = c2[j*3+q] + (c2[(j+1)*3+q] - c2[j*3+q]) * f; return b + (p[q] - a) * G * (q === 2 ? W : 1); }); }; fn.r0 = rn ? r0 / rn : 0.1; fn.c0 = [c[0], c[1], c[2]]; return fn; };
 // how far the body's proportions move a piece's attachment point (world space)
 let bodyDf = null;
 const ANCHOR = { neck: [-0.5, 0, 0], tail: [-0.5, 0, 0], arm: [0, 0, 0], leg: [0, 0, 0] };
