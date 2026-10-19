@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Higgsfield__generate_video_batch",
+      "mcp__Higgsfield__generate_video",
+      "mcp__Higgsfield__jobs_wait",
+      "mcp__Higgsfield__media_upload",
+      "mcp__Higgsfield__media_confirm",
+      "mcp__Higgsfield__balance"
+    ]
+  }
+}
