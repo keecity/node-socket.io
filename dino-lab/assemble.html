@@ -21,6 +21,7 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
+<label style="display:block;margin-top:4px"><input type="checkbox" id="overlap" checked> Overlap joints (skins dissolve into each other)</label>
 <h2>Neck</h2>
 <label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Length</span><input id="nlen" type="range" min="0.3" max="2.5" step="0.01" value="1" style="flex:1"></label>
 <label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Base</span><input id="nbase" type="range" min="1" max="3.5" step="0.01" value="2.2" style="flex:1"></label>
@@ -100,6 +101,14 @@ document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode
 // fuse: every part (blended, in world space) is welded by position, cut where it enters the body and zipped to the body's hole
 // (joinParts from the main viewer); each part keeps its own texture, the seam strip takes the body's paint
 let fusedEnt = null, fuseTimer = null;
+const overlapMats = new Map(), overlapMat = src => { if (!overlapMats.has(src)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = src.diffuseMap; m.gloss = 0.25;
+  m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', `uniform sampler2D uFTex;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void getAlbedo() { vec3 a = texture(uFTex, vUv0).rgb; float lum = dot(a, vec3(0.333)) / 0.35, n = hash(floor(vUv0 * 2048.0)) * 0.15;
+  // visibility rises with height above the body; bright (raised) scales hold on longer than the dark grooves between them
+  if (vVertexColor.a + (lum - 1.0) * 0.45 + n < 0.55) discard; dAlbedo = a; }
+`); m.shaderChunksVersion = '2.8'; m.update(); overlapMats.set(src, m); }
+  const m = overlapMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
 const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = src.diffuseMap; m.gloss = 0.25;
   m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex;\nvoid getAlbedo() { vec3 t = texture(uFTex, vUv0).rgb; dAlbedo = mix(t, vVertexColor.rgb, vVertexColor.a); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
   const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
@@ -127,8 +136,9 @@ const fuseNow = () => {
   for (let v = 0; v < nv; v++) { let bd = Infinity, bi = -1; for (let i = 0; i < seam.length; i++) { const u = seam[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = i; } }
     if (bi < 0) continue; const d = Math.sqrt(bd), f = d < FADE ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE) : 0; col[v*4] = sc[bi*3]; col[v*4+1] = sc[bi*3+1]; col[v*4+2] = sc[bi*3+2]; col[v*4+3] = 0.9 * f; }
   if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
+  if ($('overlap').checked) { overlapBuild(list, P, I, N, strip, mis); fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true); return; }
   const meshOf = (pos, nrm, uv, idx, src, wv) => { const c = new Float32Array(wv.length * 4); wv.forEach((w, i) => c.set(col.subarray(w*4, w*4+4), i*4));
-    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, seamMat(src)); mi.cull = false; mis.push(mi); };
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, $('overlap').checked ? overlapMat(src) : seamMat(src)); mi.cull = false; mis.push(mi); };
   list.forEach((L, k) => { const n = L.map.length, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = [];
     for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let c = 0; c < 3; c++) { pos[i*3+c] = P[w*3+c]; nrm[i*3+c] = N[w*3+c]; } }
     for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
@@ -140,8 +150,67 @@ const fuseNow = () => {
     meshOf(pos, nrm, uv, strip.map(v => loc.get(v)), mat0(B), used); }
   fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true);
 };
+// overlap joints: the fused shape is kept, but around every body joint each side carries both skins: its own texture and the
+// other piece's, found by projecting onto the closest point of that piece's original (uncut) surface, which still runs
+// under the joint with an unbroken texture layout. The shader picks per pixel which skin lies on top from the scale detail.
+const closestOn = L => { // closest point on an instance's original triangles -> its texture coords (hash grid over triangles)
+  if (L.grid) return L.grid; const P = L.WP, I = L.WI, uv = new Float32Array(P.length / 3 * 2), cell = 0.04, g = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
+  for (let i = 0; i < L.map.length; i++) { uv[L.map[i]*2] = L.uv[i*2]; uv[L.map[i]*2+1] = L.uv[i*2+1]; }
+  for (let t = 0; t < I.length; t += 3) { const lo = [0,1,2].map(k => Math.floor(Math.min(P[I[t]*3+k], P[I[t+1]*3+k], P[I[t+2]*3+k]) / cell)), hi = [0,1,2].map(k => Math.floor(Math.max(P[I[t]*3+k], P[I[t+1]*3+k], P[I[t+2]*3+k]) / cell));
+    for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) { const k = key(x, y, z); if (!g.has(k)) g.set(k, []); g.get(k).push(t); } }
+  const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]], dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2], V = i => [P[i*3], P[i*3+1], P[i*3+2]];
+  const tri = (p, a, b, c) => { // Ericson, closest point barycentrics
+    const ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), d1 = dot(ab, ap), d2 = dot(ac, ap); if (d1 <= 0 && d2 <= 0) return [1, 0, 0];
+    const bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp); if (d3 >= 0 && d4 <= d3) return [0, 1, 0];
+    const vc = d1*d4 - d3*d2; if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return [1-v, v, 0]; }
+    const cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp); if (d6 >= 0 && d5 <= d6) return [0, 0, 1];
+    const vb = d5*d2 - d1*d6; if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return [1-w, 0, w]; }
+    const va = d3*d6 - d5*d4; if (va <= 0 && d4-d3 >= 0 && d5-d6 >= 0) { const w = (d4-d3) / ((d4-d3) + (d5-d6)); return [0, 1-w, w]; }
+    const den = 1 / (va + vb + vc), v = vb * den, w = vc * den; return [1-v-w, v, w]; };
+  return L.grid = (x, y, z) => { const p = [x, y, z], cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell); let best = Infinity, out = [0, 0];
+    for (let r = 1; r <= 3 && best === Infinity; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) { const l = g.get(key(cx+dx, cy+dy, cz+dz)); if (!l) continue;
+      for (const t of l) { const a = I[t], b = I[t+1], c = I[t+2], w = tri(p, V(a), V(b), V(c)), q = [0,1,2].map(k => w[0]*P[a*3+k] + w[1]*P[b*3+k] + w[2]*P[c*3+k]), d = (q[0]-x)**2 + (q[1]-y)**2 + (q[2]-z)**2;
+        if (d < best) { best = d; out = [w[0]*uv[a*2] + w[1]*uv[b*2] + w[2]*uv[c*2], w[0]*uv[a*2+1] + w[1]*uv[b*2+1] + w[2]*uv[c*2+1]]; } } }
+    return out; }; };
+const dualMats = new Map(), dualMat = (A, B) => { const k = A.id + ':' + B.id; if (!dualMats.has(k)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = A; m.emissiveMap = B; m.emissiveMapUv = 1; m.emissive = new pc.Color(0, 0, 0); m.gloss = 0.25;
+  m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', `uniform sampler2D uA, uB;
+void getAlbedo() { vec3 a = texture(uA, vUv0).rgb, b = texture(uB, vUv1).rgb; float w = vVertexColor.a;
+  // w: how far into the other piece's skin (0 own, 0.5 at the seam, 1 other); raised (brighter) scales of either skin sit on top
+  float m = smoothstep(0.42, 0.58, w + (dot(b, vec3(0.333)) - dot(a, vec3(0.333))) * 1.2); dAlbedo = mix(a, b, w > 0.001 ? m : 0.0); }
+`); m.shaderChunksVersion = '2.8'; m.setParameter('uA', A); m.setParameter('uB', B); m.update(); dualMats.set(k, m); } return dualMats.get(k); };
+const overlapBuild = (list, P, I, N, strip, mis) => {
+  const nv = P.length / 3, B0 = list[0], tex = L => L.e.findComponents('render')[0].meshInstances[0].material.diffuseMap, R = 0.08;
+  const own = new Int16Array(nv).fill(-1); list.forEach((L, k) => { for (let v = L.off; v < L.end; v++) own[v] = k; });
+  const ouv = new Float32Array(nv * 2); list.forEach(L => { for (let i = 0; i < L.map.length; i++) { const w = L.off + L.map[i]; ouv[w*2] = L.uv[i*2]; ouv[w*2+1] = L.uv[i*2+1]; } });
+  // seam points: vertices of strip triangles joining the body to part k
+  const sp = [], sk = []; for (let t = 0; t < strip.length; t += 3) { const tr = [strip[t], strip[t+1], strip[t+2]], k = tr.map(v => own[v]).find(o => o > 0); if (k === undefined) continue; for (const v of tr) { sp.push(v); sk.push(k); } }
+  const near = new Int16Array(nv).fill(-1), wgt = new Float32Array(nv), uvB = new Float32Array(nv * 2), uvA = new Float32Array(nv * 2);
+  for (let v = 0; v < nv; v++) { let bd = R * R, bk = -1; for (let i = 0; i < sp.length; i++) { const u = sp[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bk = sk[i]; } }
+    if (bk < 0) continue; near[v] = bk; wgt[v] = 0.5 * (1 - Math.sqrt(bd) / R);
+    const o = own[v] === 0 ? list[bk] : B0, uv = closestOn(o)(P[v*3], P[v*3+1], P[v*3+2]);   // the other piece's skin at this point
+    if (own[v] === 0) { uvA[v*2] = ouv[v*2]; uvA[v*2+1] = ouv[v*2+1]; uvB[v*2] = uv[0]; uvB[v*2+1] = uv[1]; }        // body: own = body, other = part
+    else { uvA[v*2] = uv[0]; uvA[v*2+1] = uv[1]; uvB[v*2] = ouv[v*2]; uvB[v*2+1] = ouv[v*2+1]; wgt[v] = 1 - wgt[v]; } // part: written in body space, w toward part
+  }
+  const kept = list.map(() => []), groups = new Map(); // groups: part k -> body-space triangles around its joint (body + strip)
+  for (let t = 0; t < I.length; t += 3) { const tr = [I[t], I[t+1], I[t+2]], o = own[tr[0]];
+    const k = tr.map(v => near[v]).find(x => x > 0), allSame = tr.every(v => own[v] === o) && o >= 0;
+    if (allSame && (o > 0 || k === undefined)) kept[o].push(t); else { const g = k ?? tr.map(v => own[v]).find(x => x > 0) ?? 0; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); } }
+  const mesh = (vs, idx, uv0, uv1, w, mat) => { const loc = new Map(); vs.forEach((v, i) => loc.set(v, i)); const n = vs.length, pos = new Float32Array(n*3), nrm = new Float32Array(n*3), a = new Float32Array(n*2), b = new Float32Array(n*2), c = new Float32Array(n*4);
+    vs.forEach((v, i) => { for (let q = 0; q < 3; q++) { pos[i*3+q] = P[v*3+q]; nrm[i*3+q] = N[v*3+q]; } a[i*2] = uv0(v, 0); a[i*2+1] = uv0(v, 1); b[i*2] = uv1(v, 0); b[i*2+1] = uv1(v, 1); c[i*4+3] = w(v); });
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, a); m.setUvs(1, b); m.setColors(c); m.setIndices(idx.map(v => loc.get(v))); m.update(); const mi = new pc.MeshInstance(m, mat); mi.cull = false; mis.push(mi); };
+  // body away from the joints and the parts: split vertices (texture seams kept); parts carry the body skin near the joint
+  list.forEach((L, k) => { const keep = new Set(kept[k].map(t => [I[t], I[t+1], I[t+2]].sort((x, y) => x - y).join(','))), n = L.map.length, idx = [];
+    for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (keep.has([a, b, c].sort((x, y) => x - y).join(','))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
+    if (!idx.length) return; const W = i => L.off + L.map[i];
+    const pos = new Float32Array(n*3), nrm = new Float32Array(n*3), u1 = new Float32Array(n*2), c = new Float32Array(n*4);
+    for (let i = 0; i < n; i++) { const w = W(i); for (let q = 0; q < 3; q++) { pos[i*3+q] = P[w*3+q]; nrm[i*3+q] = N[w*3+q]; } if (k > 0) { u1[i*2] = uvA[w*2]; u1[i*2+1] = uvA[w*2+1]; c[i*4+3] = near[w] > 0 ? 1 - wgt[w] : 0; } }
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, L.uv); m.setUvs(1, u1); m.setColors(c); m.setIndices(idx); m.update();
+    const mi = new pc.MeshInstance(m, dualMat(tex(L), tex(B0))); mi.cull = false; mis.push(mi); });
+  for (const [k, ts] of groups) { const idx = []; for (const t of ts) idx.push(I[t], I[t+1], I[t+2]); const vs = [...new Set(idx)];
+    mesh(vs, idx, (v, q) => uvA[v*2+q] || ouv[v*2+q], (v, q) => uvB[v*2+q], v => near[v] > 0 ? (own[v] === 0 ? wgt[v] : wgt[v]) : 0, dualMat(tex(B0), tex(list[k]))); }
+};
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
-$('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
+$('overlap').onchange = refuse; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
 // neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
 // along the arc, Bend curls it upward; the head rides on the arc's end
 const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, base: PARTS.neck.base || 2.2, rel: null, mesh: null };
