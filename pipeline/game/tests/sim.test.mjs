@@ -30,7 +30,7 @@ function runMatch(seed, maxSeconds = 240) {
   const fs = roster.fighters.map((r, i) => new Fighter(world, packs[r.monster], { id: i, name: r.name, side: i ? 1 : -1, stats: r.stats, look: r.look }));
   world.setup(fs[0], fs[1]);
   const t = { maxSpeed: [0, 0], maxStep: 0, maxOverlap: 0, overlapSteps: 0, steps: 0, minRate: Infinity, outside: 0,
-    moving: [0, 0], clips: new Set(), events: {}, moves: {}, hits: {} };
+    wrongWay: 0, turnTooFast: 0, stalled: 0, belowWalk: 0, prevYaw: null, moving: [0, 0], clips: new Set(), events: {}, moves: {}, hits: {} };
   let prev = fs.map((f) => [f.x, f.z]);
   while (world.phase !== 'over' && world.time < maxSeconds) {
     world.step(STEP);
@@ -45,8 +45,22 @@ function runMatch(seed, maxSeconds = 240) {
       const rate = f.act ? f.act.rate : f.loco.rate * (f.mon.clips[f.loco.clip].rate || 1);
       t.minRate = Math.min(t.minRate, rate);
       if (Math.hypot(f.x, f.z) > world.arena + 1e-6) t.outside++;
+      // locomotion: limited turning while moving, never slower than the walk, never stuck
+      if (!f.act && f.loco && t.prevYaw) {
+        const dy = Math.abs(Math.atan2(Math.sin(f.yaw - t.prevYaw[i]), Math.cos(f.yaw - t.prevYaw[i])));
+        if (dy > 2.6 * STEP + 1e-9) t.turnTooFast++;
+        if (f.speed > 0 && f.speed < Math.min(...f.gaits().map((c) => c.speed)) - 1e-9) t.belowWalk++;
+        if (f.nav && !f.nav.arrived && f.speed === 0 && world.phase === 'fight') t.stalled++;
+      }
+      // a gait must carry the body the way its legs go (no backwards run, no sideways walk)
+      if (!f.act && f.lastV && Math.hypot(...f.lastV) > 1e-6) {
+        const c = f.mon.clips[f.loco.clip];
+        const travel = Math.atan2(f.lastV[0], f.lastV[1]) - f.yaw - (c.heading_deg || 0) * Math.PI / 180;
+        if (c.kind !== 'loop' || Math.abs(Math.atan2(Math.sin(travel), Math.cos(travel))) > Math.PI / 4) t.wrongWay++;
+      }
     });
     prev = fs.map((f) => [f.x, f.z]);
+    t.prevYaw = fs.map((f) => f.yaw);
     const ov = -fs[0].gapTo(fs[1]);
     if (ov > 0) { t.maxOverlap = Math.max(t.maxOverlap, ov); if (ov > 0.15 * fs[0].mon.capsule.r) t.overlapSteps++; }
     for (const e of world.events) {
@@ -85,6 +99,18 @@ test('bodies do not sink into each other', () => {
     const r = fs[0].mon.capsule.r;
     assert.ok(t.maxOverlap < 0.25 * r, `overlap ${t.maxOverlap.toFixed(3)} (radius ${r.toFixed(3)})`);
     assert.ok(t.overlapSteps / t.steps < 0.02, `overlapping ${(100 * t.overlapSteps / t.steps).toFixed(1)}% of the time`);
+  }
+});
+
+test('bodies only travel the way the playing gait goes', () => {
+  for (const { t } of results) assert.equal(t.wrongWay, 0, `${t.wrongWay} steps moved against the gait`);
+});
+
+test('movement: turns are arcs at a limited rate, speed never below the walk, never stalled', () => {
+  for (const { t } of results) {
+    assert.equal(t.turnTooFast, 0, `${t.turnTooFast} steps turned faster than allowed`);
+    assert.equal(t.belowWalk, 0, `${t.belowWalk} steps moved slower than the walk clip`);
+    assert.ok(t.stalled / t.steps < 0.01, `stalled ${(100 * t.stalled / t.steps).toFixed(1)}% of the fight`);
   }
 });
 

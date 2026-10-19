@@ -13,6 +13,9 @@ const MAX_RATE = 1.8;           // locomotion clips play between 1x and this
 const REACTION = 0.18;          // s: fastest a fighter can respond to something it sees
 const LUNGE_SPEED = 1.5;        // body lengths/s: melee homing during a wind-up
 const LUNGE_MAX = 0.4;          // body lengths: most a melee wind-up may home in
+const TURN_WALK = 2.6;          // rad/s turning while walking (tight arcs)
+const TURN_RUN = 1.6;           // rad/s turning while running (wide arcs)
+const ACCEL = 2.5;              // body lengths/s^2 between walk and run speeds
 
 // ---------- maths ----------
 export const rot = (x, z, yaw) => [x * Math.cos(yaw) + z * Math.sin(yaw), -x * Math.sin(yaw) + z * Math.cos(yaw)];
@@ -96,8 +99,8 @@ export class Fighter {
     this.state = 'move'; this.act = null; this.ko = false;
     this.loco = { clip: 'idle', phase: 0, rate: 1 };
     this.cd = {}; for (const k of Object.keys(this.mon.moves)) this.cd[k] = 0.5 + this.world.random();
-    this.ai = { plan: 'press', planT: 0, think: 0, strafe: 1, goal: null, seen: new Set(), evadeAt: null };
-    this.wantV = [0, 0]; this.faceAt = null;
+    this.ai = { plan: 'press', planT: 0, think: 0, strafe: 1, goal: null, seen: new Set(), react: null };
+    this.nav = null; this.speed = 0; this.lastV = [0, 0];
   }
   // what the renderer needs: which clip, at what time, blended how
   pose() {
@@ -150,7 +153,7 @@ export class Fighter {
     const dx = this.x - from.x, dz = this.z - from.z, d = len(dx, dz) || 1;
     this.vx += dx / d * knock * this.mon.BL; this.vz += dz / d * knock * this.mon.BL;
     if (hc) this.act = { key: 'hurt', mv: { type: 'hurt' }, clip: hc, t: 0, rate: hc.rate || 1, yaw0: this.yaw, rm0: [0, 0], ends: hc.duration * 0.8 };
-    this.ai.planT = 0; this.ai.reason = 'hit'; this.ai.evadeAt = null;
+    this.ai.planT = 0; this.ai.reason = 'hit'; this.ai.react = null;
   }
   knockOut() {
     this.ko = true; this.hp = 0;
@@ -167,10 +170,12 @@ export class Fighter {
     this.x += this.vx * dt; this.z += this.vz * dt;
     const decay = Math.exp(-6 * dt); this.vx *= decay; this.vz *= decay;
 
+    this.lastV = [0, 0];
     if (this.act) this.stepAction(dt, foe);
     else if (!this.ko) {
       if (!this.world.frozen) this.think(dt, foe);
-      this.locomote(dt);
+      if (this.act) this.speed = 0;                   // an action took over this step
+      else { if (this.world.frozen) this.nav = null; this.locomote(dt); }
     }
   }
 
@@ -225,36 +230,55 @@ export class Fighter {
     }
   }
 
-  // Move with a gait clip at a speed that clip can actually show: from its natural speed (1x) up
-  // to MAX_RATE times that, never slower. The gait is picked by the direction of travel relative
-  // to facing (forward, backward, sidestep), so circling and backing off use the right steps.
+  // ----- locomotion -----
+  // The body moves only the way it faces, at the speed of the forward gait it is playing
+  // (between that gait's natural speed and MAX_RATE times it, never slower). It turns while
+  // moving, at a limited rate, so changes of direction are arcs; a sharp turn drops to the walk
+  // for a tighter arc. There is no sliding, no sidestepping and no turning on the spot.
+  gaits() {
+    if (!this._gaits) this._gaits = this.mon.loops.filter((c) => Math.abs(c.heading_deg) < 45).sort((a, b) => a.speed - b.speed);
+    return this._gaits;
+  }
   locomote(dt) {
-    let [vx, vz] = this.wantV;
-    const want = len(vx, vz);
-    let clip = this.mon.clips.idle, rate = 1;
-    if (want > 1e-3 && this.mon.loops.length) {
-      const [lx, lz] = rot(vx, vz, -this.yaw);
-      const dir = Math.atan2(lx, lz) * 180 / Math.PI;            // + is toward the creature's left
-      let pool = this.mon.loops.filter((c) => Math.abs(wrap((dir - c.heading_deg) * Math.PI / 180)) < Math.PI / 4);
-      const directional = pool.length > 0;
-      if (!directional) pool = this.mon.loops.filter((c) => Math.abs(c.heading_deg) < 30);   // forward gaits
-      pool.sort((p, q) => p.speed - q.speed);
-      const pick = pool.find((c) => c.speed * MAX_RATE >= want) || pool[pool.length - 1];
-      if (want >= pick.speed * 0.5 || pick !== pool[0]) {
-        clip = pick;
-        rate = clamp(want / pick.speed, 1, MAX_RATE);
-        const v = pick.speed * rate / want;
-        vx *= v; vz *= v;
-      }
-      // with no gait for this direction, the body turns to walk forward along it
-      if (!directional) this.faceAt = [this.x + vx, this.z + vz];
+    const nav = this.nav, gaits = this.gaits();
+    let target = 0;                                   // wanted forward speed
+    let err = 0;
+    if (nav && gaits.length) {
+      const wp = nav.path[0];
+      err = wrap(Math.atan2(wp[0] - this.x, wp[1] - this.z) - this.yaw);
+      const walk = gaits[0], fast = gaits[gaits.length - 1];
+      target = nav.pace === 'run' ? fast.speed * MAX_RATE : walk.speed;
+      if (Math.abs(err) > Math.PI / 3) target = walk.speed;          // sharp turn: walk it
+      if (nav.arrived) target = Math.abs(nav.alignErr || 0) > 0.5 ? walk.speed : 0;   // only step to line up
     }
-    if (this.faceAt) this.turnToward(this.faceAt[0], this.faceAt[1], dt);
-    if (clip === this.mon.clips.idle) { vx = 0; vz = 0; }
+    // speed changes smoothly between gaits; starting and stopping happen at the walk
+    const walkV = gaits.length ? gaits[0].speed : 0;
+    if (target === 0) this.speed = this.speed > walkV * 1.05 ? Math.max(walkV, this.speed - ACCEL * this.mon.BL * dt) : 0;
+    else if (this.speed < walkV) this.speed = walkV;
+    else this.speed += clamp(target - this.speed, -ACCEL * this.mon.BL * dt, ACCEL * this.mon.BL * dt);
+    let clip = this.mon.clips.idle, rate = 1;
+    if (this.speed > 0) {
+      clip = gaits.find((c) => c.speed * MAX_RATE >= this.speed - 1e-9) || gaits[gaits.length - 1];
+      rate = clamp(this.speed / clip.speed, 1, MAX_RATE);
+      this.speed = clip.speed * rate;
+      // turn toward the path while moving; slower turns at higher speed
+      const turn = (clip === gaits[0] ? TURN_WALK : TURN_RUN) * dt;
+      const steer = nav?.arrived && nav.alignErr != null ? nav.alignErr : err;
+      this.turnBy(clamp(steer, -turn, turn));
+    }
+    const [fx, fz] = this.facing();
+    const vx = fx * this.speed, vz = fz * this.speed;
     if (clip.key !== this.loco.clip) this.loco = { clip: clip.key, phase: 0, rate };
     this.loco.rate = rate;
     this.loco.phase = (this.loco.phase + dt * rate * (clip.rate || 1) / clip.duration) % 1;
+    this.lastV = [vx, vz];
     this.x += vx * dt; this.z += vz * dt;
+  }
+  turnBy(a) {
+    const before = this.yaw, other = this.world.fighters?.find((f) => f !== this);
+    const gap0 = other ? this.gapTo(other) : Infinity;
+    this.yaw = wrap(this.yaw + a);
+    if (other) { const g = this.gapTo(other); if (g < 0 && g < gap0) this.yaw = before; }   // can't swing through a body
   }
 
   // ----- brain: utility AI over what the manifest says this monster can do -----
@@ -267,20 +291,27 @@ export class Fighter {
     const facingErr = Math.acos(clamp(fx * toX + fz * toZ, -1, 1));
     const slow = this.paralyzed > 0 ? 0.6 : 1;
 
-    // react to danger first: start an evade so its invulnerable time covers the impact
-    if (ai.evadeAt != null) {
-      ai.evadeAt -= dt;
-      if (ai.evadeAt <= 0) { ai.evadeAt = null; const ev = this.pickEvade(); if (ev) return this.start(ev, foe); }
-    }
-    for (const hz of W.hazardsFor(this)) {
+    // React to danger. Each attack is read (or missed) once, by skill. A read threat is then
+    // tracked every step, and the evade starts when the impact is due to land in the middle of
+    // its invulnerable / airborne time - so moving about during a long wind-up doesn't spoil it.
+    const hazards = W.hazardsFor(this);
+    for (const hz of hazards) {
       if (ai.seen.has(hz.id)) continue;
       ai.seen.add(hz.id);
+      if (ai.react && ai.react.source === hz.source && ai.react.kind === hz.kind) continue;   // same attack, new phase
+      const read = hz.kind === 'wave' ? this.skill : this.skill * 0.6;   // a big wind-up is easier to read
+      if (this.pickEvade() && this.paralyzed <= 0 && W.random() <= read) ai.react = { source: hz.source, kind: hz.kind, seenAt: W.time };
+    }
+    if (ai.react) {
+      const hz = hazards.find((h) => h.source === ai.react.source && h.kind === ai.react.kind);
       const ev = this.pickEvade();
-      if (!ev || this.paralyzed > 0 || W.random() > this.skill) continue;
-      const evc = this.mon.moves[ev].clipData, rate = evc.rate || 1;
-      const lead = ((evc.airborne?.[0]?.[0] ?? 0.1) + 0.05) / rate;          // time to be safe after starting
-      const when = hz.eta - lead;
-      if (when >= REACTION) ai.evadeAt = when;
+      if (!hz || !ev) ai.react = null;
+      else {
+        const c = this.mon.moves[ev].clipData, rate = c.rate || 1;
+        const win = c.airborne?.length ? c.airborne[0] : [0.1, c.duration * 0.8];
+        const safeIn = (win[0] + win[1]) / 2 / rate;                  // start -> middle of the safe window
+        if (hz.eta <= safeIn && W.time - ai.react.seenAt >= REACTION) { ai.react = null; return this.start(ev, foe); }
+      }
     }
 
     // replan movement
@@ -289,7 +320,7 @@ export class Fighter {
 
     // attack choice
     ai.think -= dt;
-    if (ai.think <= 0 && ai.evadeAt == null) {
+    if (ai.think <= 0 && !ai.react) {
       ai.think = (0.12 + W.random() * 0.18) / slow;
       const opts = [];
       for (const mv of Object.values(this.mon.moves)) {
@@ -369,13 +400,13 @@ export class Fighter {
     // foe has its big move charged). Plans are short, so fighters keep moving about.
     const ai = this.ai, W = this.world, r = W.random();
     const low = this.hp < this.maxHp * 0.35, foeCharged = Object.values(foe.mon.moves).some((m) => m.energy && foe.energy >= m.energy);
-    if (ai.reason === 'hit') ai.plan = r < 0.45 ? 'retreat' : r < 0.75 ? 'flank' : 'press';
-    else if (ai.reason === 'swung') ai.plan = r < 0.4 ? 'circle' : r < 0.7 ? 'flank' : 'press';
+    if (ai.reason === 'hit') ai.plan = r < 0.3 ? 'retreat' : r < 0.55 ? 'flank' : 'press';
+    else if (ai.reason === 'swung') ai.plan = r < 0.25 ? 'circle' : r < 0.45 ? 'flank' : 'press';
     else if (foeCharged && r < 0.3) ai.plan = 'retreat';
     else if (low && r < 0.3) ai.plan = 'poke';
     else {
-      const a = this.aggression * 0.7;
-      ai.plan = r < a ? 'press' : r < a + 0.2 ? 'flank' : r < 0.85 ? 'circle' : 'poke';
+      const a = 0.35 + this.aggression * 0.4;              // mostly engage; reposition in between
+      ai.plan = r < a ? 'press' : r < a + 0.2 ? 'flank' : r < a + 0.35 ? 'circle' : 'poke';
     }
     ai.reason = null;
     ai.planT = ai.plan === 'retreat' ? 0.8 + W.random() * 0.8 : 1.2 + W.random() * 1.4;
@@ -386,47 +417,43 @@ export class Fighter {
       ai.goal = W.clampToArena(foe.x + Math.sin(ang) * rr, foe.z + Math.cos(ang) * rr, this.mon.capsule.front);
     }
   }
+  // Plans pick a destination and a pace; the path goes around the foe's body and stays inside
+  // the arena. Pressing heads straight for the foe and stops at striking distance.
   steer(foe, s) {
-    const ai = this.ai, BL = this.mon.BL;
-    const fast = 99, walk = 0.01;      // "as fast as a gait allows" / "slowest step"
-    let vx = 0, vz = 0, speed = 0;
-    const sideX = s.toZ * ai.strafe, sideZ = -s.toX * ai.strafe;
+    const ai = this.ai, BL = this.mon.BL, W = this.world;
     const melee = Object.values(this.mon.moves).filter((m) => m.type === 'melee').map((m) => this.meleeGap(m));
-    const want = melee.length ? Math.min(...melee) * 0.7 : 0.2 * BL;
+    const strike = melee.length ? Math.min(...melee) * 0.7 : 0.2 * BL;
+    const around = Math.atan2(this.x - foe.x, this.z - foe.z);       // our bearing from the foe
+    let goal, pace = 'walk', avoid = true, stopAt = 0.3 * BL;
     if (ai.plan === 'press') {
-      if (s.gap > want) { vx = s.toX; vz = s.toZ; speed = s.gap > 2 * BL ? fast : walk; }
-      else { vx = sideX; vz = sideZ; speed = walk; }
-    } else if (ai.plan === 'poke') {
-      if (s.dist < 3 * BL) { vx = -s.toX; vz = -s.toZ; speed = walk; }
-      else if (s.dist > 5 * BL) { vx = s.toX; vz = s.toZ; speed = walk; }
-      else { vx = sideX; vz = sideZ; speed = walk; }
+      goal = [foe.x, foe.z]; avoid = false; pace = s.gap > 2 * BL ? 'run' : 'walk';
     } else if (ai.plan === 'circle') {
-      const k = s.gap > 1.5 * BL ? 0.35 : -0.4;
-      vx = sideX + s.toX * k; vz = sideZ + s.toZ * k; speed = walk;
+      const r = clamp(s.dist, 2.2 * BL, 3.5 * BL), a = around + ai.strafe * 0.9;
+      goal = [foe.x + Math.sin(a) * r, foe.z + Math.cos(a) * r];
     } else if (ai.plan === 'flank' && ai.goal) {
-      const gx = ai.goal[0] - this.x, gz = ai.goal[1] - this.z, gl = len(gx, gz);
-      if (gl < 0.3 * BL) ai.planT = 0;
-      vx = gx; vz = gz; speed = gl > BL ? fast : walk;
-    } else if (ai.plan === 'retreat') {
-      vx = -s.toX + sideX * 0.7; vz = -s.toZ + sideZ * 0.7; speed = walk;
+      goal = ai.goal; pace = len(goal[0] - this.x, goal[1] - this.z) > 1.5 * BL ? 'run' : 'walk';
+    } else if (ai.plan === 'poke') {
+      const r = 4 * BL, a = around + ai.strafe * 0.4;
+      goal = [foe.x + Math.sin(a) * r, foe.z + Math.cos(a) * r];
+    } else {                                                           // retreat
+      const r = 4 * BL, a = around + ai.strafe * 0.5;
+      goal = [foe.x + Math.sin(a) * r, foe.z + Math.cos(a) * r]; pace = 'run';
     }
-    // never push into the foe's body
-    const into = vx * s.toX + vz * s.toZ;
-    if (s.gap < 0.05 * BL && into > 0) { vx -= s.toX * into; vz -= s.toZ * into; }
-    // steer off the wall
-    const r = len(this.x, this.z), lim = this.world.arena - this.mon.capsule.front - 0.5 * BL;
-    if (r > lim) { vx -= this.x / r * (r - lim) * 2; vz -= this.z / r * (r - lim) * 2; }
-    const l = len(vx, vz);
-    if (l < 1e-6) { this.wantV = [0, 0]; }
-    else {
-      // "walk" means the slowest gait at 1x, "fast" the fastest gait at full rate
-      const gaits = this.mon.loops.map((c) => c.speed);
-      const v = speed === fast ? Math.max(...gaits) * MAX_RATE : Math.min(...gaits);
-      this.wantV = [vx / l * v * s.slow, vz / l * v * s.slow];
-    }
-    // circling, pressing and backing off keep eyes on the foe; flanking at speed looks ahead
-    this.faceAt = ai.plan === 'flank' && speed === fast ? null : [foe.x, foe.z];
+    goal = W.clampToArena(goal[0], goal[1], this.mon.capsule.front + 0.6 * BL);
+    const path = avoid ? W.planPath(this, [this.x, this.z], goal, foe) : [goal];
+    const d = len(goal[0] - this.x, goal[1] - this.z);
+    let arrived = ai.plan === 'press' ? s.gap <= strike : d <= stopAt;
+    // a destination inside our turning circle can't be reached on an arc (we would orbit it):
+    // treat it as reached and move on rather than loop around
+    const g = this.gaits()[0], rTurn = g ? g.speed / TURN_WALK : 0;
+    const bearing = Math.abs(wrap(Math.atan2(goal[0] - this.x, goal[1] - this.z) - this.yaw));
+    if (ai.plan !== 'press' && d < 2.2 * rTurn && bearing > Math.PI / 3) arrived = true;
+    if (arrived && ai.plan !== 'press') ai.planT = Math.min(ai.planT, 0.3);   // reached: pick the next plan soon
+    // at striking distance, line up on the foe (a step or two on an arc), then hold
+    const alignErr = ai.plan === 'press' ? wrap(Math.atan2(foe.x - this.x, foe.z - this.z) - this.yaw) : null;
+    this.nav = { goal, path, pace: s.slow < 1 ? 'walk' : pace, arrived, alignErr };
   }
+
 }
 
 // ---------- world ----------
@@ -497,6 +524,25 @@ export class World {
     b.x -= nx * total * (1 - shareA); b.z -= nz * total * (1 - shareA);
   }
 
+  // Path from `from` to `goal` around the other fighter's body (a circle that covers its length
+  // plus our own width), inside the arena. One detour waypoint at the tangent, shorter side.
+  planPath(me, from, goal, other) {
+    const c = other.capsule(), cx = (c[0][0] + c[1][0]) / 2, cz = (c[0][1] + c[1][1]) / 2;
+    const R = len(c[1][0] - c[0][0], c[1][1] - c[0][1]) / 2 + other.mon.capsule.r + me.mon.capsule.r + 0.1 * me.mon.BL;
+    const [ax, az] = from, [bx, bz] = goal;
+    const q = closestOnSegment(ax, az, bx, bz, cx, cz);
+    if (len(q[0] - cx, q[1] - cz) >= R || len(ax - cx, az - cz) < R) return [goal];   // clear, or already beside it
+    const d = len(ax - cx, az - cz), base = Math.atan2(ax - cx, az - cz), spread = Math.acos(clamp(R / d, -1, 1));
+    let best = null;
+    for (const side of [1, -1]) {
+      const a = base + side * spread, m = 1.15;                           // a little outside the circle
+      const t = this.clampToArena(cx + Math.sin(a) * R * m, cz + Math.cos(a) * R * m, me.mon.capsule.r);
+      const cost = len(t[0] - ax, t[1] - az) + len(bx - t[0], bz - t[1]);
+      if (!best || cost < best.cost) best = { t, cost };
+    }
+    return [best.t, goal];
+  }
+
   // things about to hit a fighter, with time to impact, for its evade decisions
   hazardsFor(f) {
     const out = [];
@@ -508,16 +554,16 @@ export class World {
       if (mv.type === 'wave') {
         // read from the wind-up: the wave leaves on the landing and travels to us
         eta += Math.max(0, f.distanceFrom(o.x, o.z)) / ((mv.wave_speed || 7) * o.mon.BL);
-        out.push({ id: `${o.id}:${o.act.key}:${Math.round((this.time - o.act.t / o.act.rate) * 60)}`, eta });
+        out.push({ id: `${o.id}:${o.act.key}:${Math.round((this.time - o.act.t / o.act.rate) * 60)}`, eta, kind: 'wave', source: o.id });
         continue;
       }
       const near = mv.type === 'dash_strike' || f.gapTo(o) < o.meleeGap(mv) + 0.5 * o.mon.BL;
-      if (near) out.push({ id: `${o.id}:${o.act.key}:${Math.round((this.time - o.act.t / o.act.rate) * 60)}`, eta });
+      if (near) out.push({ id: `${o.id}:${o.act.key}:${Math.round((this.time - o.act.t / o.act.rate) * 60)}`, eta, kind: mv.type, source: o.id });
     }
     for (const w of this.waves) {
       if (w.target !== f || w.hit) continue;
       const d = f.distanceFrom(w.x, w.z);
-      out.push({ id: `${w.owner.id}:wave:${w.id}`, eta: Math.max(0, d) / w.speed });
+      out.push({ id: `${w.owner.id}:wave:${w.id}`, eta: Math.max(0, d) / w.speed, kind: 'wave', source: w.owner.id });
     }
     return out;
   }

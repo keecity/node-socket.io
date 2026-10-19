@@ -3,7 +3,7 @@
   "name": "NEW_MONSTER",
   "type": "electric",
   "rig": "rig.fbx",
-  "display": { "length": 2.1 },
+  "display": { "length": 1.4 },
   "stats": { "hp": 120, "attack": 1.0, "defense": 1.0, "skill": 0.5, "aggression": 0.55 },
   "roles": {},
 
