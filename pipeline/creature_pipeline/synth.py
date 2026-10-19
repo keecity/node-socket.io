@@ -217,6 +217,10 @@ def generate(skel, model_path, out_dir, n_poses=3000, size=448, blur_fraction=0.
             m = margin * rng.uniform(1 - zoom_jitter, 1 + zoom_jitter)
             cams = stereo_rig(skel.extent(), size, size, margin=m, center=skel.center())
             subs = sample_pose(skel, rng, rng.random() < blur_fraction, acrobatic=acrobatic)
+            # a pose that pushes a joint through the floor is lifted onto it: the floor would hide
+            # that limb while its labels stay visible, and generated clips never show it
+            lift = max(0.0, ground_y + 0.01 * skel.height() - min(p[:, 1].min() for p, _, _ in subs))
+            subs = [(p + [0, lift, 0], g, root + [0, lift, 0]) for p, g, root in subs]
             label_pos = subs[len(subs) // 2][0]
             pngs = r.render(cams, [(g, root) for _, g, root in subs], random_look(rng, ground_y))
             for cam, png in zip(cams, pngs):
