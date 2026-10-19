@@ -262,6 +262,19 @@ const showWeights = () => { if (!fusedEnt || !rig) return; const k = $('wbone').
     const c = new Float32Array(wv.length * 4); for (let i = 0; i < wv.length; i++) { const h = W[wv[i]]; c[i*4] = 0.15 + 0.85 * h; c[i*4+1] = 0.2 + 0.3 * h * (1 - h) * 4; c[i*4+2] = 0.55 * (1 - h); c[i*4+3] = 1; }
     mi.mesh.setColors(c); mi.material = heatMat; mi.mesh.update(); } };
 // walk cycle: legs stride in opposition, arms swing a little, tail sways in a travelling wave, neck and head bob
+// rest pose (degrees per bone of a limb chain: [about the forward axis, about the side axis]).
+// Legs: the thigh swings in a little (40%), the knee takes the rest, so the ball of the foot lands under the hip, set
+// apart by the stance width; the thigh barely moves inside the body, so the hip skin does not pinch.
+// Arms: in at the shoulder, elbow and wrist bent forward so they are held, not hanging.
+const restAngles = (R, key) => { const st = +$('stance').value, ck = key + st; R.restC = R.restC || {}; if (R.restC[ck]) return R.restC[ck];
+  const c = R.bones.filter(o => o.key === key), hip = c[0].h, d = (a, b) => [a[1] - b[1], a[2] - b[2]], rot = (v, t) => [v[0] * Math.cos(t) - v[1] * Math.sin(t), v[0] * Math.sin(t) + v[1] * Math.cos(t)], D = 180 / Math.PI;
+  let out;
+  if (key.startsWith('leg')) { const knee = c[0].t, ball = c[2].t, [fy, fz] = d(ball, hip), full = Math.atan(-fz / (fy || -1e-6)), r1 = 0.4 * full;
+    const k1 = rot(d(knee, hip), r1), kz = hip[2] + k1[1], target = hip[2] + fz * st, v = d(ball, knee), Rv = Math.hypot(...v), a = Math.atan2(v[1], v[0]), x = Math.max(-1, Math.min(1, (target - kz) / Rv));
+    const opts = [Math.asin(x) - a, Math.PI - Math.asin(x) - a].map(t => Math.atan2(Math.sin(t), Math.cos(t))), tot = Math.abs(opts[0]) < Math.abs(opts[1]) ? opts[0] : opts[1];
+    out = [[r1 * D, 0], [(tot - r1) * D, 0]]; }
+  else { const e = c[c.length - 1].t, [fy, fz] = d(e, hip), full = Math.atan(-fz / (fy || -1e-6)) * D; out = [[full * (0.95 - 0.4 * st), 0], [0, 35], [0, 15]]; }
+  return R.restC[ck] = out; };
 const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc.Quat(), Z = new pc.Vec3(0, 0, 1), Y = new pc.Vec3(0, 1, 0);
   for (const b of R.bones) { const side = b.key.endsWith('R') ? Math.PI : 0, ph = w * tau + side; let ax = Z, a = 0;
     if (b.key.startsWith('leg')) a = [24 * Math.sin(ph), -18 * (0.5 + 0.5 * Math.sin(ph + 1.2)), 14 * Math.sin(ph + 2.2), -10 * Math.sin(ph + 2.6), 10 * Math.max(0, -Math.sin(ph + 3))][b.s];
@@ -270,9 +283,7 @@ const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc
     else if (b.key === 'neck') a = 3 * Math.sin(2 * w * tau + b.s);
     else if (b.key === 'head') a = -4 * Math.sin(2 * w * tau + 3);
     q.setFromAxisAngle(ax, a);
-    if (b.s === 0 && (b.key.startsWith('leg') || b.key.startsWith('arm')) && $('rest').checked) {   // rest: swing the limb in about the forward axis so its end sits under its root
-      if (b.rest == null) { const c = R.bones.filter(o => o.key === b.key), e = c[c.length - 1].t, dy = e[1] - b.h[1], dz = e[2] - b.h[2]; b.rest = Math.atan(-dz / (dy || -1e-6)) * 180 / Math.PI; }
-      q.copy(new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), b.rest * (1 - +$('stance').value * (b.key.startsWith('arm') ? 0.6 : 1))).mul(q)); }
+    if ((b.key.startsWith('leg') || b.key.startsWith('arm')) && $('rest').checked) { const r = restAngles(R, b.key)[b.s]; if (r) q.copy(new pc.Quat().setFromEulerAngles(r[0], 0, r[1]).mul(q)); }
     const h = new pc.Vec3(...b.h), L = new pc.Mat4().setTRS(h, q, pc.Vec3.ONE).mul(new pc.Mat4().setTranslate(-h.x, -h.y, -h.z));
     const M = b.parent >= 0 ? mats[b.parent].clone().mul(L) : new pc.Mat4().setTranslate(0, 0.012 * Math.sin(2 * w * tau), 0).mul(L); mats.push(M); }
   return mats; };
