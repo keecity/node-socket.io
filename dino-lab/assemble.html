@@ -131,7 +131,7 @@ const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] ||
   if (VW && viewSel.k === nm) for (let i = 0; i < n; i++) VW[i] = nm === 'head' ? 1 : nm === 'neck' ? bandM('neck', g.P[i*3] + 0.5, viewSel.i) : bandM(nm, df.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]), viewSel.i);
   for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z;
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
-    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (RG) { const r_ = Math.min(1, RG.t[i] / (nm === 'neck' || nm === 'tail' ? 0.08 : 0.12)); RG.fP[i] = 1 - r_ * r_ * (3 - 2 * r_); }   /* rig: hand over to the body only within ~8cm of its surface */ if (VW && viewSel.k === 'body' && f > 0.01) { bwV.set(v.x, v.y, v.z); bodyMi.transformPoint(bwV, bwV); VW[i] = f * bandM('body', bodyDf.t(bwV.x, bwV.y, bwV.z), viewSel.i); } if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
+    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (RG) { const r_ = nm === 'tail' ? 1 : Math.min(1, RG.t[i] / (nm === 'neck' ? 0.08 : 0.12)); RG.fP[i] = 1 - r_ * r_ * (3 - 2 * r_); }   /* rig: hand over to the body only within ~8cm of its surface */ if (VW && viewSel.k === 'body' && f > 0.01) { bwV.set(v.x, v.y, v.z); bodyMi.transformPoint(bwV, bwV); VW[i] = f * bandM('body', bodyDf.t(bwV.x, bwV.y, bwV.z), viewSel.i); } if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
   if (VW && nm === 'body' && viewSel.k === 'body') { const db = deformer(Lc, 'body'); for (let i = 0; i < n; i++) VW[i] = bandM('body', db.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]), viewSel.i); }
   if (nm === 'body') for (const [k, en, pk] of [['neck', ents.neck, 'neck'], ['tail', ents.tail, 'tail'], ['arm', ents.arm, 'armL'], ['arm', mirrors.arm, 'armR'], ['leg', ents.leg, 'legL'], ['leg', mirrors.leg, 'legR']]) {
     if (!en) continue; const Mk = en.getWorldTransform(), Mki = Mk.clone().invert(), dk = deformer(geo[k].P, k), root = Mk.transformPoint(new pc.Vec3(...dk.c0)), a = new pc.Vec3();
@@ -243,10 +243,13 @@ const rigBuild = () => { const S = liveState; if (!S) return null; rigCap = true
   S.list.forEach((L, k) => { if (k === 0 || L.nm === 'head') return; const key = pieceKey(L), js = JT[L.nm], pts = js.map(t => cen(k, t, 0.05)); chain[key] = [];
     for (let q = 0; q < js.length - 1; q++) { chain[key].push(bones.length); bones.push({ key, s: q, h: pts[q], t: pts[q+1], parent: q ? bones.length - 1 : 0, js }); } });
   { const k = S.list.findIndex(L => L.nm === 'head'), last = chain.neck[chain.neck.length - 1]; chain.head = [bones.length]; bones.push({ key: 'head', s: 0, h: bones[last].t, t: cen(k, 0, 2), parent: last }); }
+  // the first tail bone reaches forward through the hips: from the thighs (body) back to the tail base (tail)
+  const hipX = (bones[chain.legL[0]].h[0] + bones[chain.legR[0]].h[0]) / 2, tX = bones[chain.tail[0]].h[0], dirT = Math.sign(tX - hipX) || -1;
+  const tailF = x => { const u = Math.min(1, Math.max(0, (x - hipX) / (tX - hipX))); return u * u * (3 - 2 * u); };
   // weights: up to three influences per vertex
   const wb = new Int16Array(nv * 3), ww = new Float32Array(nv * 3);
   for (let v0 = 0; v0 < nv; v0++) { const v = own[v0] >= 0 ? v0 : S.src[v0] >= 0 ? S.src[v0] : v0, L = S.list[own[v]] || S.list[0], key = pieceKey(L), inf = new Map(), add = (b, w) => inf.set(b, (inf.get(b) || 0) + w);
-    if (own[v] <= 0) { add(0, 1 - fB[v]); if (fB[v] > 0 && kB[v]) add(chain[kB[v]][0], fB[v]); }
+    if (own[v] <= 0) { const ft = tailF(P[v*3]); if (ft > fB[v]) { add(0, 1 - ft); add(chain.tail[0], ft); } else { add(0, 1 - fB[v]); if (fB[v] > 0 && kB[v]) add(chain[kB[v]][0], fB[v]); } }
     else if (key === 'head') add(chain.head[0], 1);
     else { const c = chain[key], js = bones[c[0]].js, t = tW[v]; let q = 0; while (q < c.length - 1 && t > js[q+1]) q++; const W = 0.05, lo = t - js[q], hi = js[q+1] - t;
       let a = 1; const parts = [[c[q], 1]]; if (q > 0 && lo < W) parts.push([c[q-1], 0.5 * (1 - lo / W)]); if (q < c.length - 1 && hi < W) parts.push([c[q+1], 0.5 * (1 - hi / W)]);
