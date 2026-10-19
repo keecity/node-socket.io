@@ -21,6 +21,9 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
+<h2>Neck</h2>
+<label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Length</span><input id="nlen" type="range" min="0.3" max="2.5" step="0.01" value="1" style="flex:1"></label>
+<label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Bend</span><input id="nbend" type="range" min="-120" max="120" step="1" value="0" style="flex:1"></label>
 <div id="blend"></div>
 <h2>Placement data</h2><textarea id="out" readonly></textarea><div class="row"><button id="copy">Copy</button></div><p id="stat"></p></aside></div>
 <script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
@@ -45,7 +48,7 @@ window.addEventListener('pointerup', () => drag = null);
 canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.4, Math.min(12, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
 
 // parts and the placement aligned by hand (parts_layout.json); arm/leg pivots are at the top of the limb
-const PARTS = {"arm":{"p":[0.3742,1.1254,0.2615],"r":[41.7643,74.6067,46.0985],"s":[1,1,1]},"leg":{"p":[-0.0393,1.0196,0.1074],"r":[-41.2838,47.5512,-49.9566],"s":[1.2895,1.2895,1.2895]},"head":{"p":[0.8574,1.2574,0],"r":[0,0,0],"s":[1.4394,1.4394,1.4394]},"tail":{"p":[-0.889,0.8902,0],"r":[0,0,-172.782],"s":[1,1,1]},"body":{"p":[-0.0392,1,0],"r":[0,0.8407,6.733],"s":[1,1,1]}};
+const PARTS = {"neck":{"p":[0.56,1.15,0],"r":[0,0,35],"s":[0.4,0.4,0.4],"len":1,"bend":0},"arm":{"p":[0.3742,1.1254,0.2615],"r":[41.7643,74.6067,46.0985],"s":[1,1,1]},"leg":{"p":[-0.0393,1.0196,0.1074],"r":[-41.2838,47.5512,-49.9566],"s":[1.2895,1.2895,1.2895]},"head":{"p":[0.8574,1.2574,0],"r":[0,0,0],"s":[1.4394,1.4394,1.4394]},"tail":{"p":[-0.889,0.8902,0],"r":[0,0,-172.782],"s":[1,1,1]},"body":{"p":[-0.0392,1,0],"r":[0,0.8407,6.733],"s":[1,1,1]}};
 const ents = {}, mirrors = {}, VARIANTS = { head: 5, arm: 4, leg: 4 };
 // variant blending: shape through the part's morph targets (one per variant), paint by mixing the baked textures on a canvas
 const setupBlend = nm => {
@@ -80,7 +83,7 @@ const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t =
 const make = res => { const e = res.instantiateRenderEntity(); e.findComponents('render').forEach(r => r.meshInstances.forEach(m => { m.material.cull = pc.CULLFACE_NONE; m.material.update(); })); return e; };
 let part = 'body', mode = 'move', gz = null, layer = null;
 const json = () => { const o = {}; for (const k in ents) { const e = ents[k], p = e.getLocalPosition(), r = e.getLocalEulerAngles(), s = e.getLocalScale(), f = x => +x.toFixed(4);
-  o[k] = { p: [f(p.x), f(p.y), f(p.z)], r: [f(r.x), f(r.y), f(r.z)], s: [f(s.x), f(s.y), f(s.z)] }; } $('out').value = JSON.stringify(o); };
+  o[k] = { p: [f(p.x), f(p.y), f(p.z)], r: [f(r.x), f(r.y), f(r.z)], s: [f(s.x), f(s.y), f(s.z)] }; if (k === 'neck') { o[k].len = neck.len; o[k].bend = neck.bend; } } $('out').value = JSON.stringify(o); };
 const syncMirrors = () => { for (const k in mirrors) { const e = ents[k], m = mirrors[k], p = e.getLocalPosition(), q = e.getLocalRotation(), s = e.getLocalScale();
   m.setLocalPosition(p.x, p.y, -p.z); m.setLocalRotation(new pc.Quat(-q.x, -q.y, q.z, q.w)); m.setLocalScale(s.x, s.y, -s.z); } };
 const show = () => {
@@ -88,7 +91,7 @@ const show = () => {
   gz = new ({ move: pc.TranslateGizmo, rotate: pc.RotateGizmo, scale: pc.ScaleGizmo }[mode])(cam.camera, layer);
   if (mode === 'scale') gz.uniform = $('uni').checked;
   gz.coordSpace = 'local'; gz.attach([ents[part]]);
-  gz.on('transform:start', () => { busy = true; drag = null; showFused(false); }); gz.on('transform:move', () => { syncMirrors(); json(); }); gz.on('transform:end', () => { busy = false; syncMirrors(); json(); refuse(); });
+  gz.on('transform:start', () => { busy = true; drag = null; showFused(false); }); gz.on('transform:move', () => { if (part === 'neck') headFollow(); syncMirrors(); json(); }); gz.on('transform:end', () => { busy = false; if (part === 'head') headCapture(); syncMirrors(); json(); refuse(); });
   document.querySelectorAll('#parts button').forEach(b => b.classList.toggle('on', b.dataset.p === part));
   document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.g === mode));
 };
@@ -100,13 +103,13 @@ const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m
   m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex;\nvoid getAlbedo() { vec3 t = texture(uFTex, vUv0).rgb; dAlbedo = mix(t, vVertexColor.rgb, vVertexColor.a); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
   const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
 const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
-const instance = (nm, e, flip) => { const g = geo[nm], w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
-  for (let i = 0; i < n; i++) { let x = g.P[i*3], y = g.P[i*3+1], z = g.P[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
+const instance = (nm, e, flip) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
+  for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
   const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
   const I = new Uint32Array(g.I.length); for (let t = 0; t < I.length; t += 3) { I[t] = g.I[t]; I[t+1] = flip ? g.I[t+2] : g.I[t+1]; I[t+2] = flip ? g.I[t+1] : g.I[t+2]; }
   const WI = Array.from(I, x => map[x]); return { nm, e, I, map, WP: Float32Array.from(WP), WI, uv: g.UV }; };
 const fuseNow = () => {
-  const list = [instance('body', ents.body, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
+  const list = [instance('body', ents.body, false), instance('neck', ents.neck, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
   let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
   for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: L.nm === 'tail' ? 0.3 : 0.14, collar: 0.1 }, 0.08); if (J.joined) { P = J.P; I = J.I; } else { const Q = new Float32Array(P.length + L.WP.length); Q.set(P); Q.set(L.WP, P.length); P = Q; I = Array.from(I).concat(L.WI.map(v => v + L.off)); } }   // not touching the body: kept as is
   const N = vertexNormals(P, I), owner = v => { for (const L of list) if (v >= L.off && v < L.end) return L; return null; };
@@ -138,12 +141,31 @@ const fuseNow = () => {
 };
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
 $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
+// neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
+// along the arc, Bend curls it upward; the head rides on the arc's end
+const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, rel: null, mesh: null };
+const neckEnd = () => { const L = neck.len, b = neck.bend * Math.PI / 180, cx = Math.abs(b) < 1e-4 ? L : L / b * Math.sin(b), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(b));
+  return new pc.Mat4().setTRS(new pc.Vec3(-0.5 + cx, cy, 0), new pc.Quat().setFromEulerAngles(0, 0, neck.bend), pc.Vec3.ONE); };
+const bendNeck = () => { const g = geo.neck, n = g.P.length / 3, B = g.B || (g.B = new Float32Array(g.P.length)), L = neck.len, b = neck.bend * Math.PI / 180;
+  for (let i = 0; i < n; i++) { const u = g.P[i*3] + 0.5, s_ = u * L, th = b * u, y = g.P[i*3+1];
+    const cx = Math.abs(b) < 1e-4 ? s_ : L / b * Math.sin(th), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(th));
+    B[i*3] = -0.5 + cx - y * Math.sin(th); B[i*3+1] = cy + y * Math.cos(th); B[i*3+2] = g.P[i*3+2]; }
+  if (!neck.mesh) { const r = ents.neck.findComponents('render')[0], mat = r.meshInstances[0].material; r.enabled = false;
+    const m = new pc.Mesh(app.graphicsDevice); m.setUvs(0, g.UV); m.setIndices(g.I); const mi = new pc.MeshInstance(m, mat); mi.cull = false; const c = new pc.Entity(); c.addComponent('render', { meshInstances: [mi] }); ents.neck.addChild(c); neck.mesh = m; }
+  neck.mesh.setPositions(B); neck.mesh.setNormals(vertexNormals(B, g.I)); neck.mesh.update(); };
+const headFollow = () => { if (!neck.rel) return; const M = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).mul(neck.rel);
+  ents.head.setLocalPosition(M.getTranslation()); ents.head.setLocalEulerAngles(M.getEulerAngles()); ents.head.setLocalScale(M.getScale()); };
+const headCapture = () => { neck.rel = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).invert().mul(ents.head.getWorldTransform()); };
+const neckInput = () => { neck.len = +$('nlen').value; neck.bend = +$('nbend').value; bendNeck(); headFollow(); json(); };
+$('nlen').addEventListener('input', neckInput); $('nbend').addEventListener('input', neckInput);
+$('nlen').addEventListener('change', refuse); $('nbend').addEventListener('change', refuse);
 $('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
 Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
   const e = make(res); e.setLocalPosition(...PARTS[nm].p); e.setLocalEulerAngles(...PARTS[nm].r); e.setLocalScale(...PARTS[nm].s); app.root.addChild(e); ents[nm] = e;
   if (nm === 'arm' || nm === 'leg') { const m = make(res); app.root.addChild(m); mirrors[nm] = m; }
 }))).then(() => {
   for (const nm of Object.keys(PARTS)) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
+  $('nlen').value = neck.len; $('nbend').value = neck.bend; bendNeck(); headCapture();
   syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend);
 }).catch(e => { $('stat').textContent = 'Could not load parts: ' + e.message; });
 app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;

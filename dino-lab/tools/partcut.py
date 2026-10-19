@@ -39,7 +39,7 @@ def glb(V,T,F,img,mime):
     return b'glTF'+struct.pack('<II',2,12+8+len(js)+8+len(bin))+struct.pack('<I',len(js))+b'JSON'+js+struct.pack('<I',len(bin))+b'BIN\0'+bin
 if __name__=="__main__":
   out='../'
-  for nm,rank in [('body',0),('head',0),('arm',0),('leg',0),('tail',0)]:
+  for nm,rank in [('neck',0),('body',0),('head',0),('arm',0),('leg',0),('tail',0)]:
       V,T,F,img,mime=pick(f'../parts_src/{"heads" if nm=="head" else nm}.glb',rank)
       c=(V.min(0)+V.max(0))/2
       if nm in('arm','leg'): c[1]=V[:,1].max()   # pivot at the top (hip/shoulder)
