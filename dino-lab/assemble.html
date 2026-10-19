@@ -311,17 +311,18 @@ const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc
     q.setFromAxisAngle(ax, a);
     if ((b.key.startsWith('leg') || b.key.startsWith('arm')) && $('rest').checked) { const r = restAngles(R, b.key)[b.s]; if (r) q.copy(new pc.Quat().setFromEulerAngles(r[0], r[2] || 0, r[1]).mul(q)); }
     const h = new pc.Vec3(...b.h), L = new pc.Mat4().setTRS(h, q, pc.Vec3.ONE).mul(new pc.Mat4().setTranslate(-h.x, -h.y, -h.z));
-    const M = b.parent >= 0 ? mats[b.parent].clone().mul(L) : new pc.Mat4().setTranslate(0, 0.012 * Math.sin(2 * w * tau), 0).mul(L); mats.push(M); }
+    const M = b.parent >= 0 ? mats[b.parent].clone().mul(L) : new pc.Mat4().setTranslate(0, 0.012 * Math.sin(2 * w * tau) - (R.ground || 0), 0).mul(L); mats.push(M); }
   return mats; };
 const rigSkin = (R, mats) => { const P = R.P, out = new Float32Array(P.length), v = new pc.Vec3(), r = new pc.Vec3();
   for (let i = 0; i < P.length / 3; i++) { let x = 0, y = 0, z = 0; v.set(P[i*3], P[i*3+1], P[i*3+2]);
     for (let q = 0; q < 3; q++) { const w = R.ww[i*3+q]; if (!w) continue; mats[R.wb[i*3+q]].transformPoint(v, r); x += w * r.x; y += w * r.y; z += w * r.z; } out[i*3] = x; out[i*3+1] = y; out[i*3+2] = z; }
+  if (R.ground == null) { let m = Infinity; for (let i = 1; i < out.length; i += 3) m = Math.min(m, out[i]); R.ground = m - 0.002; for (let i = 1; i < out.length; i += 3) out[i] -= R.ground; }   // plant the feet on the ground
   const N = vertexNormals(out, R.I);
   for (const mi of fusedEnt.render.meshInstances) { const wv = mi._wv; if (!wv) continue; const pos = new Float32Array(wv.length * 3), nrm = new Float32Array(wv.length * 3);
     for (let i = 0; i < wv.length; i++) for (let k = 0; k < 3; k++) { pos[i*3+k] = out[wv[i]*3+k]; nrm[i*3+k] = N[wv[i]*3+k]; } mi.mesh.setPositions(pos); mi.mesh.setNormals(nrm); mi.mesh.update(); } };
 app.on('update', dt => { const anim = $('anim').checked, sk = $('skel').checked, rp = $('rest').checked; if ((!anim && !sk && !rp && !$('wbone').value) || !fusedEnt || !fusedEnt.enabled || busy) return;
   if (rigDirty || !rig) { rig = rigBuild(); if (!rig) return; if ($('wbone').value) showWeights(); }
-  const needs = anim || (rp && rig.posed !== rp) || (!rp && rig.posed); rig.posed = rp;
+  const needs = anim || (rp && rig.posed !== rp) || (!rp && rig.posed); if (rig.posed !== rp) rig.ground = null; rig.posed = rp;
   if (anim) tau += dt; const mats = rigPose(rig, anim ? tau : 0); if (needs) rigSkin(rig, mats);
   if (sk) { const a = new pc.Vec3(), b = new pc.Vec3(), col = new pc.Color(1, 0.85, 0.2);
     rig.bones.forEach((bn, k) => { mats[k].transformPoint(new pc.Vec3(...bn.h), a); mats[k].transformPoint(new pc.Vec3(...bn.t), b); app.drawLine(a, b, col, false); }); } });
