@@ -23,6 +23,7 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="anim"> Animate (walk)</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="skel"> Show skeleton</label>
+<label style="display:block;margin-top:4px">Bone weights <select id="wbone"><option value="">off</option></select></label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="overlap" checked> Overlap joints (skins dissolve into each other)</label>
 <h2>Proportions</h2><div id="props"></div>
 <h2>Neck</h2>
@@ -128,7 +129,7 @@ const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] ||
   if (VW && viewSel.k === nm) for (let i = 0; i < n; i++) VW[i] = nm === 'head' ? 1 : nm === 'neck' ? bandM('neck', g.P[i*3] + 0.5, viewSel.i) : bandM(nm, df.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]), viewSel.i);
   for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z;
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
-    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (RG) RG.fP[i] = f; if (VW && viewSel.k === 'body' && f > 0.01) { bwV.set(v.x, v.y, v.z); bodyMi.transformPoint(bwV, bwV); VW[i] = f * bandM('body', bodyDf.t(bwV.x, bwV.y, bwV.z), viewSel.i); } if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
+    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (RG) { const r_ = Math.min(1, RG.t[i] / (nm === 'neck' || nm === 'tail' ? 0.08 : 0.12)); RG.fP[i] = 1 - r_ * r_ * (3 - 2 * r_); }   /* rig: hand over to the body only within ~8cm of its surface */ if (VW && viewSel.k === 'body' && f > 0.01) { bwV.set(v.x, v.y, v.z); bodyMi.transformPoint(bwV, bwV); VW[i] = f * bandM('body', bodyDf.t(bwV.x, bwV.y, bwV.z), viewSel.i); } if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
   if (VW && nm === 'body' && viewSel.k === 'body') { const db = deformer(Lc, 'body'); for (let i = 0; i < n; i++) VW[i] = bandM('body', db.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]), viewSel.i); }
   if (nm === 'body') for (const [k, en, pk] of [['neck', ents.neck, 'neck'], ['tail', ents.tail, 'tail'], ['arm', ents.arm, 'armL'], ['arm', mirrors.arm, 'armR'], ['leg', ents.leg, 'legL'], ['leg', mirrors.leg, 'legR']]) {
     if (!en) continue; const Mk = en.getWorldTransform(), Mki = Mk.clone().invert(), dk = deformer(geo[k].P, k), root = Mk.transformPoint(new pc.Vec3(...dk.c0)), a = new pc.Vec3();
@@ -249,7 +250,15 @@ const rigBuild = () => { const S = liveState; if (!S) return null; rigCap = true
       let a = 1; const parts = [[c[q], 1]]; if (q > 0 && lo < W) parts.push([c[q-1], 0.5 * (1 - lo / W)]); if (q < c.length - 1 && hi < W) parts.push([c[q+1], 0.5 * (1 - hi / W)]);
       const sum = parts.reduce((x, p) => x + p[1], 0); for (const [b, w] of parts) add(b, (1 - fP[v]) * w / sum); if (fP[v] > 0) add(0, fP[v]); }
     const top = [...inf].sort((a, b) => b[1] - a[1]).slice(0, 3), tot = top.reduce((x, p) => x + p[1], 0) || 1; top.forEach(([b, w], q) => { wb[v0*3+q] = b; ww[v0*3+q] = w / tot; }); }
-  rigDirty = false; return { bones, wb, ww, P: Float32Array.from(P), I: S.I }; };
+  rigDirty = false; const R = { bones, wb, ww, P: Float32Array.from(P), I: S.I };
+  const sel = $('wbone'), cur = sel.value; sel.innerHTML = '<option value="">off</option>' + bones.map((b, k) => '<option value="' + k + '">' + b.key + ' ' + (b.key.startsWith('leg') ? ['thigh', 'calf', 'metatarsus', 'foot', 'toes'][b.s] : b.key.startsWith('arm') ? ['upper arm', 'forearm', 'hand'][b.s] : b.key === 'body' || b.key === 'head' ? '' : b.s + 1) + '</option>').join(''); sel.value = cur;
+  return R; };
+const showWeights = () => { if (!fusedEnt || !rig) return; const k = $('wbone').value, nv = rig.P.length / 3, W = new Float32Array(nv);
+  if (k !== '') for (let i = 0; i < nv; i++) for (let q = 0; q < 3; q++) if (rig.wb[i*3+q] === +k) W[i] += rig.ww[i*3+q];
+  for (const mi of fusedEnt.render.meshInstances) { const wv = mi._wv; if (!wv) continue; if (!mi._mat) mi._mat = mi.material;
+    if (k === '') { if (mi.material === heatMat) { mi.mesh.setColors(mi._col); mi.material = mi._mat; mi.mesh.update(); } continue; }
+    const c = new Float32Array(wv.length * 4); for (let i = 0; i < wv.length; i++) { const h = W[wv[i]]; c[i*4] = 0.15 + 0.85 * h; c[i*4+1] = 0.2 + 0.3 * h * (1 - h) * 4; c[i*4+2] = 0.55 * (1 - h); c[i*4+3] = 1; }
+    mi.mesh.setColors(c); mi.material = heatMat; mi.mesh.update(); } };
 // walk cycle: legs stride in opposition, arms swing a little, tail sways in a travelling wave, neck and head bob
 const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc.Quat(), Z = new pc.Vec3(0, 0, 1), Y = new pc.Vec3(0, 1, 0);
   for (const b of R.bones) { const side = b.key.endsWith('R') ? Math.PI : 0, ph = w * tau + side; let ax = Z, a = 0;
@@ -267,8 +276,8 @@ const rigSkin = (R, mats) => { const P = R.P, out = new Float32Array(P.length), 
   const N = vertexNormals(out, R.I);
   for (const mi of fusedEnt.render.meshInstances) { const wv = mi._wv; if (!wv) continue; const pos = new Float32Array(wv.length * 3), nrm = new Float32Array(wv.length * 3);
     for (let i = 0; i < wv.length; i++) for (let k = 0; k < 3; k++) { pos[i*3+k] = out[wv[i]*3+k]; nrm[i*3+k] = N[wv[i]*3+k]; } mi.mesh.setPositions(pos); mi.mesh.setNormals(nrm); mi.mesh.update(); } };
-app.on('update', dt => { const anim = $('anim').checked, sk = $('skel').checked; if ((!anim && !sk) || !fusedEnt || !fusedEnt.enabled || busy) return;
-  if (rigDirty || !rig) { rig = rigBuild(); if (!rig) return; }
+app.on('update', dt => { const anim = $('anim').checked, sk = $('skel').checked; if ((!anim && !sk && !$('wbone').value) || !fusedEnt || !fusedEnt.enabled || busy) return;
+  if (rigDirty || !rig) { rig = rigBuild(); if (!rig) return; if ($('wbone').value) showWeights(); }
   if (anim) tau += dt; const mats = rigPose(rig, anim ? tau : 0); if (anim) rigSkin(rig, mats);
   if (sk) { const a = new pc.Vec3(), b = new pc.Vec3(), col = new pc.Color(1, 0.85, 0.2);
     rig.bones.forEach((bn, k) => { mats[k].transformPoint(new pc.Vec3(...bn.h), a); mats[k].transformPoint(new pc.Vec3(...bn.t), b); app.drawLine(a, b, col, false); }); } });
@@ -384,8 +393,8 @@ const overlapBuild = (list, P, I, N, strip, mis) => {
     const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, u0); m.setUvs(1, u1); m.setColors(c); m.setIndices([...Array(n).keys()]); m.update();
     const mi = new pc.MeshInstance(m, dualMat(tex(list[a]), tex(list[b]))); mi.cull = false; mi._wv = Uint32Array.from(ts.flatMap(t => [I[t], I[t+1], I[t+2]])); mi._col = c; mis.push(mi); }
 };
-const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
-$('overlap').onchange = refuse; $('anim').onchange = () => { if (!$('anim').checked) { tau = 0; live(); } }; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
+const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); rig = rigBuild(); if ($('wbone').value) showWeights(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
+$('overlap').onchange = refuse; $('wbone').onchange = () => { if (!rig || rigDirty) rig = rigBuild(); showWeights(); }; $('anim').onchange = () => { if (!$('anim').checked) { tau = 0; live(); } }; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
 // neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
 // along the arc, Bend curls it upward; the head rides on the arc's end
 const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, base: PARTS.neck.base || 2.2, rel: null, mesh: null };
