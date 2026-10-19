@@ -273,7 +273,7 @@ const restAngles = (R, key) => { const st = +$('stance').value, ck = key + st; R
     const k1 = rot(d(knee, hip), r1), kz = hip[2] + k1[1], target = hip[2] + fz * st, v = d(ball, knee), Rv = Math.hypot(...v), a = Math.atan2(v[1], v[0]), x = Math.max(-1, Math.min(1, (target - kz) / Rv));
     const opts = [Math.asin(x) - a, Math.PI - Math.asin(x) - a].map(t => Math.atan2(Math.sin(t), Math.cos(t))), tot = Math.abs(opts[0]) < Math.abs(opts[1]) ? opts[0] : opts[1];
     out = [[r1 * D, 0], [(tot - r1) * D, 0]]; }
-  else { const e = c[c.length - 1].t, [fy, fz] = d(e, hip), full = Math.atan(-fz / (fy || -1e-6)) * D; out = [[full * (0.95 - 0.4 * st), 0], [0, 35], [0, 15]]; }
+  else { const e = c[c.length - 1].t, [fy, fz] = d(e, hip), full = Math.atan(-fz / (fy || -1e-6)) * D; out = [[full * 0.35, 0], [full * (1.7 - 0.4 * st), 40], [full * 0.3, 10]];   /* elbows stay out, forearms and hands turn in */ }
   return R.restC[ck] = out; };
 const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc.Quat(), Z = new pc.Vec3(0, 0, 1), Y = new pc.Vec3(0, 1, 0);
   for (const b of R.bones) { const side = b.key.endsWith('R') ? Math.PI : 0, ph = w * tau + side; let ax = Z, a = 0;
