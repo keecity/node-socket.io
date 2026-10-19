@@ -117,10 +117,11 @@ const showFused = on => { for (const e of [...Object.values(ents), ...Object.val
 const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
   const Lc = new Float32Array(g.P.length); for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); Lc[i*3] = x; Lc[i*3+1] = y; Lc[i*3+2] = z; }
   const df = nm === 'head' ? headDf(Lc) : PROP[nm] && nm !== 'neck' ? deformer(Lc, nm) : null, dl = anchorDelta(nm, e);
+  const bd_ = distCache.get(e), bdNew = bd_ ? null : new Float32Array(n); if (!bd_ && ANCHOR[nm] && bodyDf) distCache.set(e, bdNew);   // distances to the body: once per fuse
   const q0 = ANCHOR[nm], bw = q0 && bodyDf ? bodyWarp : null, aw = q0 ? e.getWorldTransform().transformPoint(new pc.Vec3(...q0)) : null;
   for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z;
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
-    if (bw) { const d = bodyDist(v.x, v.y, v.z), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
+    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
   if (nm === 'body') for (const [k, en] of [['neck', ents.neck], ['tail', ents.tail], ['arm', ents.arm], ['arm', mirrors.arm], ['leg', ents.leg], ['leg', mirrors.leg]]) {
     if (!en) continue; const Mk = en.getWorldTransform(), Mki = Mk.clone().invert(), dk = deformer(geo[k].P, k), root = Mk.transformPoint(new pc.Vec3(...dk.c0)), a = new pc.Vec3(), R = 1.6 * dk.r0 * Mk.getScale().x;   // spread ~1.6 root radii past the joint
     for (let i = 0; i < n; i++) { const d = Math.hypot(P[i*3] - root.x, P[i*3+1] - root.y, P[i*3+2] - root.z); if (d >= R) continue; const x = d / R, f = 1 - x * x * (3 - 2 * x);
@@ -168,13 +169,14 @@ const anchorDelta = (nm, e) => { const d = new pc.Vec3(); if (nm === 'body' || !
 const headDf = Lc => { let x0 = Infinity; for (let i = 0; i < Lc.length; i += 3) x0 = Math.min(x0, Lc[i]); const S = props.head[0].g, W = props.head[0].w;
   return (x, y, z) => [x0 + (x - x0) * S, y * S, z * S * W]; };
 // distance from a point to the (unwarped) body surface: the falloff of the body's warp onto attached pieces starts there
-let bodyGrid = null; const BG = 0.1;
-const buildBodyGrid = () => { const M = ents.body.getWorldTransform(), g = geo.body.P, v = new pc.Vec3(), map = new Map(); for (let i = 0; i < g.length; i += 3) { v.set(g[i], g[i+1], g[i+2]); M.transformPoint(v, v);
+let bodyGrid = null; const BG = 0.1, distCache = new Map();
+const buildBodyGrid = () => { bodyM = ents.body.getWorldTransform().clone(); bodyMi = bodyM.clone().invert(); const M = bodyM, g = geo.body.P, v = new pc.Vec3(), map = new Map(); for (let i = 0; i < g.length; i += 3) { v.set(g[i], g[i+1], g[i+2]); M.transformPoint(v, v);
   const k = Math.floor(v.x / BG) + ',' + Math.floor(v.y / BG) + ',' + Math.floor(v.z / BG); if (!map.has(k)) map.set(k, []); map.get(k).push(v.x, v.y, v.z); } bodyGrid = map; };
 const bodyDist = (x, y, z) => { const cx = Math.floor(x / BG), cy = Math.floor(y / BG), cz = Math.floor(z / BG); let bd = Infinity;
   for (let dx = -6; dx <= 6; dx++) for (let dy = -6; dy <= 6; dy++) for (let dz = -6; dz <= 6; dz++) { const l = bodyGrid.get((cx+dx) + ',' + (cy+dy) + ',' + (cz+dz)); if (l) for (let i = 0; i < l.length; i += 3) bd = Math.min(bd, (l[i]-x)**2 + (l[i+1]-y)**2 + (l[i+2]-z)**2); }
   return Math.sqrt(bd); };
-const bodyWarp = (x, y, z) => { const Mi = ents.body.getWorldTransform().clone().invert(), b = Mi.transformPoint(new pc.Vec3(x, y, z)), r = bodyDf(b.x, b.y, b.z), w = ents.body.getWorldTransform().transformPoint(new pc.Vec3(...r)); return [w.x, w.y, w.z]; };
+let bodyM = null, bodyMi = null; const bwV = new pc.Vec3();
+const bodyWarp = (x, y, z) => { bwV.set(x, y, z); bodyMi.transformPoint(bwV, bwV); const r = bodyDf(bwV.x, bwV.y, bwV.z); bwV.set(r[0], r[1], r[2]); bodyM.transformPoint(bwV, bwV); return [bwV.x, bwV.y, bwV.z]; };
 // live proportions: the fused mesh keeps its topology; each piece is re-placed (proportions applied to the base) and every
 // fused vertex moves with its source vertex, keeping the seam fillet's offset. No re-fuse while dragging.
 let liveState = null, liveQueued = false;
@@ -192,7 +194,7 @@ const buildProps0 = () => { for (const k in PROP) { const box = document.createE
     x.addEventListener('input', () => { props[k][i][key] = +x.value; if (k === 'neck') { bendNeck(); headFollow(); } json(); live(); }); box.appendChild(l); } });
   $('props').appendChild(box); } };
 const fuseNow = () => {
-  { const g = geo.body; bodyDf = deformer(g.P, 'body'); buildBodyGrid(); }
+  { const g = geo.body; bodyDf = deformer(g.P, 'body'); buildBodyGrid(); distCache.clear(); }
   const list = [instance('body', ents.body, false), instance('neck', ents.neck, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
   let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
   for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: L.nm === 'tail' ? 0.3 : 0.14, collar: 0.1 }, 0.08); if (J.joined) { P = J.P; I = J.I; } else { const Q = new Float32Array(P.length + L.WP.length); Q.set(P); Q.set(L.WP, P.length); P = Q; I = Array.from(I).concat(L.WI.map(v => v + L.off)); } }   // not touching the body: kept as is
