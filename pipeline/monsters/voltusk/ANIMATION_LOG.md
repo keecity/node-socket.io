@@ -19,11 +19,11 @@ Detector: DINOv2 ViT-S/14 + heatmap head, 448 px, fine-tuned on 11,000 renders i
 | walk_back | walk_back | **rejected**: travels at 3 deg, 0.12 m/s; needs 180 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
 | strafe_left | strafe_left | **rejected**: travels at -24 deg, 0.34 m/s; needs 90 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
 | strafe_right | strafe_right | **rejected**: travels at -7 deg, 0.23 m/s; needs -90 deg. Regenerate this clip. → plays `walk` | - | - | - | - |
-| horn | attack [61–120] | used | 1.97 s (1.31 s) | 1.5× | 1.13 s (peak_speed) | travel 0.14 m; strike reach 0.67 m |
-| bite | bite [75–110] | used | 1.17 s (0.78 s) | 1.5× | 0.47 s (peak_speed) | strike reach 0.60 m |
-| leap | jump [30–119] | used | 2.97 s (1.98 s) | 1.5× | 2.40 s (landing) | travel 0.03 m |
+| horn | attack [61–120] | used | 1.97 s (0.98 s) | 2× | 1.13 s (peak_speed) | travel 0.14 m; strike reach 0.67 m |
+| bite | bite [75–110] | used | 1.17 s (0.58 s) | 2× | 0.47 s (peak_speed) | strike reach 0.60 m |
+| leap | jump [30–119] | used | 2.97 s (1.48 s) | 2× | 2.40 s (landing) | travel 0.03 m |
 | victory | jump [30–119] | used | 2.97 s (2.47 s) | 1.2× | 2.40 s (landing) | travel 0.03 m |
-| spin | spin [45–104] | used | 1.97 s (1.31 s) | 1.5× | 1.60 s (landing) | airborne 0.30–1.10, 1.30–1.57; travel 0.06 m; strike reach 0.62 m |
+| spin | spin [45–104] | used | 1.97 s (0.98 s) | 2× | 1.60 s (landing) | airborne 0.30–1.10, 1.30–1.57; travel 0.06 m; strike reach 0.62 m |
 | dodge | dodge [62–98] | used | 1.20 s (0.92 s) | 1.3× | - | airborne 0.53–0.90; travel 0.11 m |
 | power | idle [0–179] | used | 5.97 s (4.26 s) | 1.4× | - | - |
 | hurt | hurt [33–79] | used | 1.53 s (1.18 s) | 1.3× | 0.87 s (peak_speed) | travel 0.13 m; strike reach 0.51 m |

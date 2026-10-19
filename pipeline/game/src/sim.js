@@ -10,12 +10,12 @@
 export const STEP = 1 / 60;
 const TURN_RATE = 7;            // rad/s a fighter can turn while acting on its own
 const MAX_RATE = 1.8;           // locomotion clips play between 1x and this
-const RUN_RATE = 2.0;           // movement always uses the run, at this playback rate
+const RUN_RATE = 1.0;           // the run plays at its generated speed
 const REACTION = 0.18;          // s: fastest a fighter can respond to something it sees
 const LUNGE_SPEED = 1.5;        // body lengths/s: melee homing during a wind-up
 const LUNGE_MAX = 0.8;          // body lengths: most a melee wind-up may home in
 const TURN_WALK = 2.6;          // rad/s turning while walking (tight arcs)
-const TURN_RUN = 3.2;           // rad/s turning while running
+const TURN_RUN = 2.0;           // rad/s turning while running
 const ACCEL = 2.5;              // body lengths/s^2 between walk and run speeds
 const STEER_GAIN = 5;           // 1/s: heading error closed per second (capped by TURN_RUN)
 const AVOID_LOOK = 0.8;         // s: how far ahead a runner checks for the other body and the wall

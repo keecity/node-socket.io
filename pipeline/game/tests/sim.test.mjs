@@ -14,7 +14,7 @@ for (const r of roster.fighters) packs[r.monster] ??= prepareMonster(JSON.parse(
 // rate, a clip's root motion at its rate, or a dash's warp) plus knockback. Being shoved by the
 // other body (a turning sweep, a lunge) is not allowed: contact stops the mover instead.
 function speedLimit(mon) {
-  const gait = Math.max(...mon.loops.map((c) => c.speed)) * 2.0;
+  const gait = Math.max(...mon.loops.map((c) => c.speed)) * 1.0;
   const clip = Math.max(...Object.values(mon.clips).map((c) => (c.max_speed || 0) * mon.scale * (c.rate || 1)));
   const dash = Math.max(0, ...Object.values(mon.moves).filter((m) => m.type === 'dash_strike').map((m) => {
     const c = m.clipData, air = c.event - (c.airborne?.length ? c.airborne[0][0] : 0);

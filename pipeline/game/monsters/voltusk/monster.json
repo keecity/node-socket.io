@@ -1933,7 +1933,7 @@
   "horn": {
    "kind": "oneshot",
    "source": "attack",
-   "rate": 1.5,
+   "rate": 2.0,
    "frames": [
     61,
     120
@@ -2496,7 +2496,7 @@
   "bite": {
    "kind": "oneshot",
    "source": "bite",
-   "rate": 1.5,
+   "rate": 2.0,
    "frames": [
     75,
     110
@@ -2843,7 +2843,7 @@
   "leap": {
    "kind": "oneshot",
    "source": "jump",
-   "rate": 1.5,
+   "rate": 2.0,
    "frames": [
     30,
     119
@@ -3601,7 +3601,7 @@
   "spin": {
    "kind": "oneshot",
    "source": "spin",
-   "rate": 1.5,
+   "rate": 2.0,
    "frames": [
     45,
     104

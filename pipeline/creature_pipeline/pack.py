@@ -382,8 +382,16 @@ def pack(skel, animset, motions, out_dir, root_space=None, rig_path=None):
         # in-place GLB of the segment: the game supplies floor travel from root_motion
         lr = local[seg].copy()
         rr = root[seg].copy()
-        rr[:, 0] = skel.rest_positions[0, 0]
-        rr[:, 2] = skel.rest_positions[0, 2]
+        if kind == "loop":
+            # a gait keeps its body motion within each stride (surge, sway); only the steady
+            # drift across the loop is removed, since the game supplies the travel
+            n = np.arange(len(rr)) / max(1, len(rr) - 1)
+            for k in (0, 2):
+                drift = rr[0, k] + (rr[-1, k] - rr[0, k]) * n
+                rr[:, k] = rr[:, k] - drift + skel.rest_positions[0, k]
+        else:
+            rr[:, 0] = skel.rest_positions[0, 0]
+            rr[:, 2] = skel.rest_positions[0, 2]
         write_animation_glb(os.path.join(out_dir, "clips", f"{name}.glb"), skel, lr, rr, fps,
                             clip_name=name, root_space=root_space)
         manifest["clips"][name] = info
