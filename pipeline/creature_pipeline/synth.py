@@ -127,7 +127,7 @@ class Renderer:
     def __enter__(self):
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
-        args = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
+        args = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--disable-dev-shm-usage"]
         self.browser = self._pw.chromium.launch(headless=self.headless, args=args)
         self.page = self.browser.new_page()
         self.page.on("pageerror", lambda e: print("page error:", e))
