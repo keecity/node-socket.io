@@ -17,6 +17,14 @@ const LUNGE_MAX = 0.8;          // body lengths: most a melee wind-up may home i
 const TURN_WALK = 2.6;          // rad/s turning while walking (tight arcs)
 const TURN_RUN = 3.2;           // rad/s turning while running
 const ACCEL = 2.5;              // body lengths/s^2 between walk and run speeds
+const STEER_GAIN = 5;           // 1/s: heading error closed per second (capped by TURN_RUN)
+const AVOID_LOOK = 0.8;         // s: how far ahead a runner checks for the other body and the wall
+const HEADING_EASE = 0.15;      // s: time constant for easing the wanted heading
+const WALL_MARGIN = 0.3;        // body lengths kept clear of the arena wall
+const TURN_INERTIA = 0.1;       // s: time constant of changes in turn rate
+const AVOID_RELEASE = 1.6;      // x look-ahead the wanted way must be clear for, to stop avoiding
+const YIELD_HOLD = 0.6;         // s: a boxed-in runner stands aside this long
+const AVOID_STICK = 0.3;        // tie-break bonus for keeping the previous avoidance heading (far below any clearance gain)
 
 // ---------- maths ----------
 export const rot = (x, z, yaw) => [x * Math.cos(yaw) + z * Math.sin(yaw), -x * Math.sin(yaw) + z * Math.cos(yaw)];
@@ -243,30 +251,43 @@ export class Fighter {
     return this._gaits;
   }
   locomote(dt) {
-    const nav = this.nav, gaits = this.gaits();
-    let target = 0;                                   // wanted forward speed
-    let err = 0;
-    if (nav && gaits.length) {
+    const nav = this.nav, gait = this.gaits()[0];
+    const other = this.world.fighters?.find((f) => f !== this);
+    let moving = !!(nav && gait && !nav.arrived);
+    let steer = 0;
+    if (moving) {
       const wp = nav.path[0];
-      err = wrap(Math.atan2(wp[0] - this.x, wp[1] - this.z) - this.yaw);
-      const walk = gaits[0], fast = gaits[gaits.length - 1];
-      target = fast.speed * RUN_RATE;
-      if (nav.arrived) target = 0;                                   // at the goal: stop
+      steer = wrap(Math.atan2(wp[0] - this.x, wp[1] - this.z) - this.yaw);
+      // Local avoidance: look ahead along the run; if the body would meet the other one, turn
+      // toward the clear side now instead of running into it (and being held there in place).
+      // the wanted heading toward the path is eased (time constant HEADING_EASE), so a jump in it
+      // (a new detour point, coming out of an avoidance turn) is a smooth change, not a wobble
+      const want = this.yaw + steer;
+      this.headingCmd = this.headingCmd == null ? want
+        : this.headingCmd + wrap(want - this.headingCmd) * Math.min(1, STEP / HEADING_EASE);
+      steer = wrap(this.headingCmd - this.yaw);
+      // avoidance is urgent: it overrides at once
+      const avoided = this.avoidSteer(other, gait.speed * RUN_RATE, steer);
+      if (avoided !== steer) { steer = avoided; this.headingCmd = this.yaw + avoided; }
+      // Boxed in (no clear heading) next to the other body: one of the two yields - stands still
+      // for a moment - so the other can turn away and leave. No turning on the spot exists to
+      // escape otherwise. The yield is held YIELD_HOLD seconds so it doesn't flicker.
+      if (this.yieldT > 0) this.yieldT -= STEP;
+      const boxed = this.avoidClear < AVOID_LOOK * 0.5 && other && this.gapTo(other) < 0.4 * this.mon.BL;
+      if (boxed && this.id > other.id && !(other.yieldT > 0)) this.yieldT = YIELD_HOLD;
+      if (this.yieldT > 0) moving = false;
     }
-    // speed changes smoothly between gaits; starting and stopping happen at the walk
-    const walkV = gaits.length ? gaits[0].speed * RUN_RATE : 0;
-    if (target === 0) this.speed = this.speed > walkV * 1.05 ? Math.max(walkV, this.speed - ACCEL * this.mon.BL * dt) : 0;
-    else if (this.speed < walkV) this.speed = walkV;
-    else this.speed += clamp(target - this.speed, -ACCEL * this.mon.BL * dt, ACCEL * this.mon.BL * dt);
+    if (!moving) { this.headingCmd = null; this.yawRate = 0; }
     let clip = this.mon.clips.idle, rate = 1;
-    if (this.speed > 0) {
-      clip = gaits[0];
-      rate = RUN_RATE;
-      this.speed = clip.speed * rate;
-      // turn toward the path while moving; slower turns at higher speed
-      const turn = TURN_RUN * dt;
-      const steer = nav?.arrived && nav.alignErr != null ? nav.alignErr : err;
-      this.turnBy(clamp(steer, -turn, turn));
+    this.speed = 0;
+    if (moving) {
+      clip = gait; rate = RUN_RATE; this.speed = gait.speed * rate;
+      // proportional steering, capped at the turn rate: heading settles instead of see-sawing
+      const want = Math.abs(steer) < 0.01 ? 0 : clamp(steer * STEER_GAIN, -TURN_RUN, TURN_RUN);   // rad/s
+      // angular inertia: the turn rate changes over TURN_INERTIA seconds, so a body can't flick
+      // its heading back and forth from one step to the next
+      this.yawRate = (this.yawRate || 0) + (want - (this.yawRate || 0)) * Math.min(1, dt / TURN_INERTIA);
+      this.turnBy(this.yawRate * dt);
     }
     const [fx, fz] = this.facing();
     const vx = fx * this.speed, vz = fz * this.speed;
@@ -275,6 +296,49 @@ export class Fighter {
     this.loco.phase = (this.loco.phase + dt * rate * (clip.rate || 1) / clip.duration) % 1;
     this.lastV = [vx, vz];
     this.x += vx * dt; this.z += vz * dt;
+  }
+  // Sampled avoidance. Candidate headings fan out around the one we want; each is run forward
+  // AVOID_LOOK seconds and scored by how soon it would meet the other body or the arena wall.
+  // We take the clear heading closest to the wanted one (keeping last step's choice when it is
+  // still clear, so the runner commits). Returns the heading change to steer by.
+  avoidSteer(other, speed, steer) {
+    const x0 = this.x, z0 = this.z, y0 = this.yaw, BL = this.mon.BL;
+    const lim = this.world.arena - this.mon.capsule.r - WALL_MARGIN * BL;
+    const r0 = len(x0, z0), g0 = other ? this.gapTo(other) : Infinity;
+    const clearFor = (dh, look = AVOID_LOOK) => {                     // seconds until blocked (look = clear)
+      this.yaw = y0 + dh;
+      const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+      let t = look;
+      for (let k = 1; k <= 6; k++) {
+        const tk = look * k / 6;
+        this.x = x0 + fx * speed * tk; this.z = z0 + fz * speed * tk;
+        // blocked = inside the clearance zone AND closer than we are now (moving away is fine)
+        const r = len(this.x, this.z), g = other ? this.gapTo(other) : Infinity;
+        // (a body inside our clearance must actually be getting further away)
+        if ((r > lim && r > r0 + 1e-6) || (g < 0.15 * BL && g < g0 + 0.05 * BL * k / 6)) { t = tk; break; }
+      }
+      this.x = x0; this.z = z0; this.yaw = y0;
+      return t;
+    };
+    this.avoidClear = AVOID_LOOK;
+    // hysteresis: while avoiding, only let go when the wanted way is clear with room to spare
+    const look = this.avoidPick != null ? AVOID_LOOK * AVOID_RELEASE : AVOID_LOOK;
+    if (clearFor(steer, look) >= look) { this.avoidPick = null; return steer; }       // the wanted way is clear
+    // the previous pick is kept unless a heading is clearly safer (commitment, no see-saw);
+    // it is held in world terms, so turning toward it doesn't move the target
+    const prev = this.avoidPick != null ? wrap(this.avoidPick - y0) : null;
+    const prevClear = prev != null ? clearFor(prev) : -1;
+    let best = prev != null ? { dh: prev, score: prevClear * 10 - Math.abs(wrap(prev - steer)) + AVOID_STICK } : null;
+    for (const d of [0.4, 0.8, 1.2, 1.6, 2.0, 2.4, 2.8, Math.PI]) {
+      for (const sgn of [1, -1]) {
+        const dh = wrap(steer + sgn * d), clear = clearFor(dh);
+        const score = clear * 10 - Math.abs(wrap(dh - steer));       // clear first, then closest to wanted
+        if (!best || score > best.score) best = { dh, score };
+      }
+    }
+    this.avoidPick = wrap(y0 + best.dh);
+    this.avoidClear = clearFor(best.dh);
+    return best.dh;
   }
   turnBy(a) {
     const before = this.yaw, other = this.world.fighters?.find((f) => f !== this);
@@ -292,6 +356,11 @@ export class Fighter {
     const toX = (foe.x - this.x) / (dist || 1), toZ = (foe.z - this.z) / (dist || 1);
     const facingErr = Math.acos(clamp(fx * toX + fz * toZ, -1, 1));
     const slow = this.paralyzed > 0 ? 0.6 : 1;
+    if (!W.combat) {                                   // movement only: roam the arena around the other
+      ai.planT -= dt;
+      if (ai.planT <= 0) this.chooseRoam(foe);
+      return this.steer(foe, { gap, dist, toX, toZ, slow });
+    }
 
     // React to danger. Each attack is read (or missed) once, by skill. A read threat is then
     // tracked every step, and the evade starts when the impact is due to land in the middle of
@@ -396,6 +465,15 @@ export class Fighter {
     const evs = Object.values(this.mon.moves).filter((m) => m.type === 'evade' && this.cd[m.key] <= 0);
     return evs.length ? evs[0].key : null;
   }
+  // Movement-only plans: run to a random free spot, or circle the other at a distance.
+  chooseRoam(foe) {
+    const ai = this.ai, W = this.world, BL = this.mon.BL;
+    ai.plan = W.random() < 0.5 ? 'flank' : 'circle';
+    ai.strafe = W.random() < 0.5 ? 1 : -1;
+    ai.planT = 2 + W.random() * 2;
+    const a = W.random() * Math.PI * 2, r = W.random() * (W.arena - 2 * BL);
+    ai.goal = W.clampToArena(Math.sin(a) * r, Math.cos(a) * r, this.mon.capsule.front + BL);
+  }
   choosePlan(foe) {
     // press: get to melee range. flank: run to a spot beside or behind the foe. circle: strafe
     // round it. poke: hold mid range (waves, dash). retreat: back off (after a hit, or when the
@@ -450,6 +528,7 @@ export class Fighter {
     const g = this.gaits()[0], rTurn = g ? g.speed * RUN_RATE / TURN_RUN : 0;
     const bearing = Math.abs(wrap(Math.atan2(goal[0] - this.x, goal[1] - this.z) - this.yaw));
     if (ai.plan !== 'press' && d < 2.2 * rTurn && bearing > Math.PI / 3) arrived = true;
+    if (arrived && !W.combat) { this.chooseRoam(foe); return this.steer(foe, s); }   // roaming: straight on to the next spot
     if (arrived && ai.plan !== 'press') ai.planT = Math.min(ai.planT, 0.3);   // reached: pick the next plan soon
     // at striking distance, line up on the foe (a step or two on an arc), then hold
     const alignErr = ai.plan === 'press' ? wrap(Math.atan2(foe.x - this.x, foe.z - this.z) - this.yaw) : null;
@@ -463,8 +542,9 @@ export class Fighter {
 
 // ---------- world ----------
 export class World {
-  constructor({ arena = 6, seed = 1 } = {}) {
-    this.arena = arena; this.random = rng(seed);
+  // combat: false runs movement only (no attacks, damage or knock-outs) for tuning locomotion
+  constructor({ arena = 6, seed = 1, combat = true } = {}) {
+    this.arena = arena; this.random = rng(seed); this.combat = combat;
     this.events = []; this.waves = []; this.time = 0; this.nextId = 1;
     this.phase = 'intro'; this.phaseT = 0; this.winner = null;
   }

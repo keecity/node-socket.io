@@ -68,7 +68,7 @@ addEventListener('resize', resize);
 function newMatch() {
   for (const v of views) scene.remove(v.root);
   fx.clear();
-  world = new World({ arena: roster.arena.radius, seed: (Math.random() * 2 ** 31) | 0 });
+  world = new World({ arena: roster.arena.radius, seed: (Math.random() * 2 ** 31) | 0, combat: roster.combat !== false });
   const fs = roster.fighters.map((r, i) => new Fighter(world, packs[r.monster].mon, { id: i, name: r.name, side: i ? 1 : -1, stats: r.stats, look: r.look }));
   world.setup(fs[0], fs[1]);
   views = fs.map((f) => new FighterView(scene, f, packs[roster.fighters[f.id].monster].makeModel(), packs[roster.fighters[f.id].monster].clips));
