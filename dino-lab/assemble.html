@@ -71,7 +71,7 @@ const setupBlend = nm => {
       mis.forEach(m => { if (m.morphInstance) for (let k = 1; k < n; k++) m.morphInstance.setWeight(k - 1, w[k] / t); });
       if (paint === false) return; const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
       cx.putImageData(out, 0, 0); tex.setSource(cv); };
-    sl.forEach(x => { x.addEventListener('input', () => upd(false)); x.addEventListener('change', () => { upd(); refuse(); }); }); upd();
+    sl.forEach(x => { x.addEventListener('input', () => { upd(false); live(); }); x.addEventListener('change', () => upd()); }); upd();
   });
 };
 const geo = {}, blendW = {};
@@ -114,13 +114,15 @@ const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m
   m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex;\nvoid getAlbedo() { vec3 t = texture(uFTex, vUv0).rgb; dAlbedo = mix(t, vVertexColor.rgb, vVertexColor.a); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
   const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
 const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
-const instance = (nm, e, flip) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
+const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
   const Lc = new Float32Array(g.P.length); for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); Lc[i*3] = x; Lc[i*3+1] = y; Lc[i*3+2] = z; }
   const df = nm === 'head' ? headDf(Lc) : PROP[nm] && nm !== 'neck' ? deformer(Lc, nm) : null, dl = anchorDelta(nm, e);
   const q0 = ANCHOR[nm], bw = q0 && bodyDf ? bodyWarp : null, aw = q0 ? e.getWorldTransform().transformPoint(new pc.Vec3(...q0)) : null;
   for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z;
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
     if (bw && dl.lengthSq() + 1) { const d2 = (v.x - aw.x) ** 2 + (v.y - aw.y) ** 2 + (v.z - aw.z) ** 2, f = Math.exp(-d2 / (0.16 * 0.16)); if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
+  return P; };
+const instance = (nm, e, flip) => { const g = geo[nm], n = g.P.length / 3, P = placed(nm, e);
   const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
   const I = new Uint32Array(g.I.length); for (let t = 0; t < I.length; t += 3) { I[t] = g.I[t]; I[t+1] = flip ? g.I[t+2] : g.I[t+1]; I[t+2] = flip ? g.I[t+1] : g.I[t+2]; }
   const WI = Array.from(I, x => map[x]); return { nm, e, I, map, WP: Float32Array.from(WP), WI, uv: g.UV }; };
@@ -156,10 +158,20 @@ const anchorDelta = (nm, e) => { const d = new pc.Vec3(); if (nm === 'body' || !
 const headDf = Lc => { let x0 = Infinity; for (let i = 0; i < Lc.length; i += 3) x0 = Math.min(x0, Lc[i]); const S = props.head[0].g, W = props.head[0].w;
   return (x, y, z) => [x0 + (x - x0) * S, y * S, z * S * W]; };
 const bodyWarp = (x, y, z) => { const Mi = ents.body.getWorldTransform().clone().invert(), b = Mi.transformPoint(new pc.Vec3(x, y, z)), r = bodyDf(b.x, b.y, b.z), w = ents.body.getWorldTransform().transformPoint(new pc.Vec3(...r)); return [w.x, w.y, w.z]; };
+// live proportions: the fused mesh keeps its topology; each piece is re-placed (proportions applied to the base) and every
+// fused vertex moves with its source vertex, keeping the seam fillet's offset. No re-fuse while dragging.
+let liveState = null, liveQueued = false;
+const live = () => { if (liveQueued) return; liveQueued = true; requestAnimationFrame(() => { liveQueued = false; const S = liveState; if (!S || !fusedEnt || !fusedEnt.enabled) return;
+  bodyDf = deformer(geo.body.P, 'body'); const nr = Float32Array.from(S.raw);
+  for (const L of S.list) { const Q = placed(L.nm, L.e); for (let i = 0; i < L.map.length; i++) { const w = (L.off + L.map[i]) * 3; nr[w] = Q[i*3]; nr[w+1] = Q[i*3+1]; nr[w+2] = Q[i*3+2]; } }
+  const P = new Float32Array(S.P.length); for (let v = 0; v < P.length / 3; v++) { const u = S.src[v] >= 0 ? S.src[v] : v; for (let q = 0; q < 3; q++) P[v*3+q] = S.P[v*3+q] + nr[u*3+q] - S.raw[u*3+q]; }
+  const N = vertexNormals(P, S.I);
+  for (const mi of fusedEnt.render.meshInstances) { const wv = mi._wv; if (!wv) continue; const pos = new Float32Array(wv.length * 3), nrm = new Float32Array(wv.length * 3);
+    for (let i = 0; i < wv.length; i++) for (let q = 0; q < 3; q++) { pos[i*3+q] = P[wv[i]*3+q]; nrm[i*3+q] = N[wv[i]*3+q]; } mi.mesh.setPositions(pos); mi.mesh.setNormals(nrm); mi.mesh.update(); } }); };
 const buildProps = () => { for (const k in PROP) { const box = document.createElement('div'); box.innerHTML = '<h3 style="font-size:12px;margin:10px 0 4px">' + PROP[k].label + '</h3>';
   PROP[k].bands.forEach((nm, i) => { for (const [key, lab] of PROP[k].keys || [['l', 'length'], ['g', 'size'], ['w', 'width']]) { const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:12px';
     l.innerHTML = '<span style="width:120px">' + nm + ' ' + lab + '</span><input type="range" min="0.4" max="2" step="0.01" value="' + props[k][i][key] + '" style="flex:1">'; const x = l.querySelector('input');
-    x.addEventListener('change', () => { props[k][i][key] = +x.value; if (k === 'neck') { bendNeck(); headFollow(); } json(); refuse(); }); box.appendChild(l); } });
+    x.addEventListener('input', () => { props[k][i][key] = +x.value; if (k === 'neck') { bendNeck(); headFollow(); } json(); live(); }); box.appendChild(l); } });
   $('props').appendChild(box); } };
 const fuseNow = () => {
   { const g = geo.body; bodyDf = deformer(g.P, 'body'); }
@@ -179,10 +191,13 @@ const fuseNow = () => {
   seam.forEach((v, i) => { let n = 0; for (const u of seam) { if ((P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2 < MIX * MIX) { sc[i*3] += vc[u*3]; sc[i*3+1] += vc[u*3+1]; sc[i*3+2] += vc[u*3+2]; n++; } } sc[i*3] /= n; sc[i*3+1] /= n; sc[i*3+2] /= n; });
   for (let v = 0; v < nv; v++) { let bd = Infinity, bi = -1; for (let i = 0; i < seam.length; i++) { const u = seam[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = i; } }
     if (bi < 0) continue; const d = Math.sqrt(bd), f = d < FADE ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE) : 0; col[v*4] = sc[bi*3]; col[v*4+1] = sc[bi*3+1]; col[v*4+2] = sc[bi*3+2]; col[v*4+3] = 0.9 * f; }
+  { const raw = new Float32Array(P.length), own = new Int8Array(P.length / 3).fill(-1); list.forEach((L, k) => { raw.set(L.WP, L.off * 3); own.fill(k, L.off, L.end); });
+    const src = new Int32Array(P.length / 3).fill(-1); for (let v = 0; v < src.length; v++) if (own[v] < 0) { let bd = Infinity; for (let u = 0; u < src.length; u++) if (own[u] >= 0) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; src[v] = u; } } }
+    liveState = { list, P: Float32Array.from(P), I, raw, src }; }
   if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
   if ($('overlap').checked) { overlapBuild(list, P, I, N, strip, mis); fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true); return; }
   const meshOf = (pos, nrm, uv, idx, src, wv) => { const c = new Float32Array(wv.length * 4); wv.forEach((w, i) => c.set(col.subarray(w*4, w*4+4), i*4));
-    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, $('overlap').checked ? overlapMat(src) : seamMat(src)); mi.cull = false; mis.push(mi); };
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, $('overlap').checked ? overlapMat(src) : seamMat(src)); mi.cull = false; mi._wv = Uint32Array.from(wv); mis.push(mi); };
   list.forEach((L, k) => { const n = L.map.length, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = [];
     for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let c = 0; c < 3; c++) { pos[i*3+c] = P[w*3+c]; nrm[i*3+c] = N[w*3+c]; } }
     for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
@@ -243,7 +258,7 @@ const overlapBuild = (list, P, I, N, strip, mis) => {
     if (!idx.length) return; const pos = new Float32Array(n*3), nrm = new Float32Array(n*3);
     for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let q = 0; q < 3; q++) { pos[i*3+q] = P[w*3+q]; nrm[i*3+q] = N[w*3+q]; } }
     const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, L.uv); m.setUvs(1, L.uv); m.setColors(new Float32Array(n*4)); m.setIndices(idx); m.update();
-    const mi = new pc.MeshInstance(m, dualMat(tex(L), tex(L))); mi.cull = false; mis.push(mi); });
+    const mi = new pc.MeshInstance(m, dualMat(tex(L), tex(L))); mi.cull = false; mi._wv = Uint32Array.from({ length: n }, (_, i) => L.off + L.map[i]); mis.push(mi); });
   // around each joint (a, b): every corner carries a's skin in uv0 and b's in uv1 (its own exact, the other projected); w runs 0 (a) -> 1 (b)
   for (const [g, ts] of groups) { if (!pairs[g]) continue; const [a, b] = pairs[g], n = ts.length * 3, pos = new Float32Array(n*3), nrm = new Float32Array(n*3), u0 = new Float32Array(n*2), u1 = new Float32Array(n*2), c = new Float32Array(n*4);
     const span = (u, o) => Math.max(Math.hypot(u[o]-u[o+2], u[o+1]-u[o+3]), Math.hypot(u[o]-u[o+4], u[o+1]-u[o+5]), Math.hypot(u[o+2]-u[o+4], u[o+3]-u[o+5]));
@@ -255,7 +270,7 @@ const overlapBuild = (list, P, I, N, strip, mis) => {
       // a projected skin that jumps between texture islands across this triangle would tear: keep each corner's own skin there
       if (span(u0, q*6) > 0.08 || span(u1, q*6) > 0.08) for (let e = 0; e < 3; e++) c[(q*3+e)*4+3] = proj[e] === b ? 1 : 0; });
     const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, u0); m.setUvs(1, u1); m.setColors(c); m.setIndices([...Array(n).keys()]); m.update();
-    const mi = new pc.MeshInstance(m, dualMat(tex(list[a]), tex(list[b]))); mi.cull = false; mis.push(mi); }
+    const mi = new pc.MeshInstance(m, dualMat(tex(list[a]), tex(list[b]))); mi.cull = false; mi._wv = Uint32Array.from(ts.flatMap(t => [I[t], I[t+1], I[t+2]])); mis.push(mi); }
 };
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
 $('overlap').onchange = refuse; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
@@ -276,9 +291,9 @@ const bendNeck = () => { const g = geo.neck, n = g.P.length / 3, B = g.B || (g.B
 const headFollow = () => { if (!neck.rel) return; const M = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).mul(neck.rel);
   ents.head.setLocalPosition(M.getTranslation()); ents.head.setLocalEulerAngles(M.getEulerAngles()); ents.head.setLocalScale(M.getScale()); };
 const headCapture = () => { neck.rel = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).invert().mul(ents.head.getWorldTransform()); };
-const neckInput = () => { neck.len = +$('nlen').value; neck.bend = +$('nbend').value; neck.base = +$('nbase').value; bendNeck(); headFollow(); json(); };
-$('nlen').addEventListener('input', neckInput); $('nbase').addEventListener('input', neckInput); $('nbase').addEventListener('change', refuse); $('nbend').addEventListener('input', neckInput);
-$('nlen').addEventListener('change', refuse); $('nbend').addEventListener('change', refuse);
+const neckInput = () => { neck.len = +$('nlen').value; neck.bend = +$('nbend').value; neck.base = +$('nbase').value; bendNeck(); headFollow(); json(); live(); };
+$('nlen').addEventListener('input', neckInput); $('nbase').addEventListener('input', neckInput);  $('nbend').addEventListener('input', neckInput);
+
 $('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
 Promise.all(Object.keys(PARTS).filter(k => k !== 'props').map(nm => load(nm).then(res => {
   const e = make(res); e.setLocalPosition(...PARTS[nm].p); e.setLocalEulerAngles(...PARTS[nm].r); e.setLocalScale(...PARTS[nm].s); app.root.addChild(e); ents[nm] = e;
