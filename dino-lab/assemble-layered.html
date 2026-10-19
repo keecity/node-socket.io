@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layered Seams Test</title>
+<style>
+:root { --bg: #eef0ec; --panel: #fbfaf6; --ink: #22271f; --muted: #6a6f63; --accent: #2e7d5b; --stage: #4a5450; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1b1e1b; --panel: #232723; --ink: #e8eae2; --muted: #9aa094; --accent: #5fbf8f; --stage: #2a302d; } }
+:root[data-theme="dark"] { --bg: #1b1e1b; --panel: #232723; --ink: #e8eae2; --muted: #9aa094; --accent: #5fbf8f; --stage: #2a302d; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+#wrap { display: flex; height: 100%; } #stage { flex: 1; position: relative; min-width: 0; }
+canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+aside { width: 300px; padding: 16px; background: var(--panel); overflow: auto; box-sizing: border-box; }
+h1 { font-size: 18px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 12px; font-size: 13px; } h2 { font-size: 13px; margin: 14px 0 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; } button { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--muted); background: transparent; color: var(--ink); cursor: pointer; }
+button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monospace; background: var(--bg); color: var(--ink); }
+@media (max-width: 700px) { #wrap { flex-direction: column; } aside { width: 100%; height: 45%; } }
+</style></head>
+<body><div id="wrap"><div id="stage"><canvas id="c"></canvas></div>
+<aside><h1>Part assembly</h1><p>Pick a part, then move, rotate or scale it with the gizmo. The right arm and leg mirror the left. Drag empty space to orbit, scroll to zoom.</p>
+<h2>Part</h2><div class="row" id="parts"></div>
+<h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
+<label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
+<label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
+<h2>Neck</h2>
+<label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Length</span><input id="nlen" type="range" min="0.3" max="2.5" step="0.01" value="1" style="flex:1"></label>
+<label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Base</span><input id="nbase" type="range" min="1" max="3.5" step="0.01" value="2.2" style="flex:1"></label>
+<label style="display:flex;gap:8px;align-items:center"><span style="width:60px">Bend</span><input id="nbend" type="range" min="-120" max="120" step="1" value="0" style="flex:1"></label>
+<div id="blend"></div>
+<h2>Placement data</h2><textarea id="out" readonly></textarea><div class="row"><button id="copy">Copy</button></div><p id="stat"></p></aside></div>
+<script src="https://cdn.jsdelivr.net/npm/playcanvas@2.23.0/build/playcanvas.min.js"></script>
+<script src="fuse.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id), css = n => { const h = getComputedStyle(document.documentElement).getPropertyValue(n).trim().replace('#', ''); return new pc.Color(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255); };
+const canvas = $('c'), app = new pc.Application(canvas, { mouse: new pc.Mouse(canvas) });
+app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
+const resize = () => { const r = canvas.parentElement.getBoundingClientRect(); app.resizeCanvas(r.width, r.height); }; window.addEventListener('resize', resize);
+const cam = new pc.Entity(); cam.addComponent('camera', { clearColor: css('--stage'), fov: 35, nearClip: 0.01, farClip: 50 }); app.root.addChild(cam);
+const key = new pc.Entity(); key.addComponent('light', { type: 'directional', intensity: 1.2 }); key.setEulerAngles(45, 35, 0); app.root.addChild(key);
+const fill = new pc.Entity(); fill.addComponent('light', { type: 'directional', intensity: 0.5 }); fill.setEulerAngles(-20, -150, 0); app.root.addChild(fill);
+app.scene.ambientLight = new pc.Color(0.45, 0.45, 0.43);
+const ground = new pc.Entity(); ground.addComponent('render', { type: 'plane' }); ground.setLocalScale(6, 1, 6);
+const gm = new pc.StandardMaterial(); gm.diffuse = new pc.Color(0.42, 0.5, 0.36); gm.update(); ground.render.meshInstances[0].material = gm; app.root.addChild(ground);
+const orbit = { yaw: 30, pitch: -15, dist: 3.2, target: new pc.Vec3(0, 0.8, 0) };
+let drag = null, busy = false;
+canvas.addEventListener('pointerdown', e => { if (!busy) drag = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointermove', e => { if (!drag || busy) return; orbit.yaw -= (e.clientX - drag[0]) * 0.4; orbit.pitch = Math.max(-85, Math.min(10, orbit.pitch - (e.clientY - drag[1]) * 0.3)); drag = [e.clientX, e.clientY]; });
+window.addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.4, Math.min(12, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+
+// parts and the placement aligned by hand (parts_layout.json); arm/leg pivots are at the top of the limb
+const PARTS = {"head":{"p":[0.8826,1.2759,0],"r":[0,0,0],"s":[1.4221,1.4221,1.1046]},"arm":{"p":[0.3695,1.1758,0.2706],"r":[-40.9949,51.4832,-41.7088],"s":[1,1,1]},"leg":{"p":[-0.0393,1.0196,0.1074],"r":[-41.2838,47.5512,-49.9566],"s":[1.2895,1.2895,1.2895]},"neck":{"p":[0.493,1.2184,0],"r":[0,0,35],"s":[0.515,0.515,0.4],"len":1,"bend":0,"base":3.06},"tail":{"p":[-0.889,0.8902,0],"r":[0,0,-172.782],"s":[1,1,1]},"body":{"p":[-0.0392,1,0],"r":[0,0.8407,6.733],"s":[1,1,1]}};
+const ents = {}, mirrors = {}, VARIANTS = { head: 5, arm: 4, leg: 4 };
+// variant blending: shape through the part's morph targets (one per variant), paint by mixing the baked textures on a canvas
+const setupBlend = nm => {
+  const n = VARIANTS[nm], box = document.createElement('div'); box.innerHTML = '<h2>' + nm[0].toUpperCase() + nm.slice(1) + ' variants</h2>';
+  const sl = []; for (let k = 0; k < n; k++) { const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center';
+    l.innerHTML = '<span style="width:16px">' + 'ABCDE'[k] + '</span><input type="range" min="0" max="1" step="0.01" value="' + (k ? 0 : 1) + '" style="flex:1">'; box.appendChild(l); sl.push(l.querySelector('input')); }
+  $('blend').appendChild(box);
+  const imgs = [...Array(n)].map((_, k) => new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = 'part_' + nm + '_tex' + k + '.jpg'; }));
+  Promise.all(imgs).then(im => {
+    const S = 2048, cv = document.createElement('canvas'); cv.width = cv.height = S; const cx = cv.getContext('2d', { willReadFrequently: true });
+    const px = im.map(i => { cx.drawImage(i, 0, 0, S, S); return cx.getImageData(0, 0, S, S).data; }), out = cx.createImageData(S, S);
+    const tex = new pc.Texture(app.graphicsDevice, { width: S, height: S, format: pc.PIXELFORMAT_SRGBA8, mipmaps: true, anisotropy: 8 });
+    const mis = [ents[nm], mirrors[nm]].filter(Boolean).flatMap(e => e.findComponents('render').flatMap(r => r.meshInstances));
+    mis.forEach(m => { m.material.diffuseMap = tex; m.material.update(); });
+    const upd = paint => { const w = sl.map(x => +x.value), t = w.reduce((a, b) => a + b, 0) || 1;
+      blendW[nm] = w.slice(1).map(x => x / t); refuse();
+      mis.forEach(m => { if (m.morphInstance) for (let k = 1; k < n; k++) m.morphInstance.setWeight(k - 1, w[k] / t); });
+      if (paint === false) return; const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
+      cx.putImageData(out, 0, 0); tex.setSource(cv); };
+    sl.forEach(x => { x.addEventListener('input', () => upd(false)); x.addEventListener('change', () => { upd(); refuse(); }); }); upd();
+  });
+};
+const geo = {}, blendW = {};
+const parse = (nm, buf) => { const dv = new DataView(buf), jl = dv.getUint32(12, true), J = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl))), bin = 20 + jl + 8;
+  const acc = i => { const a = J.accessors[i], v = J.bufferViews[a.bufferView], n = { SCALAR: 1, VEC2: 2, VEC3: 3 }[a.type], T = { 5126: Float32Array, 5125: Uint32Array }[a.componentType], o = bin + (v.byteOffset || 0) + (a.byteOffset || 0); return new T(buf.slice(o, o + a.count * n * T.BYTES_PER_ELEMENT)); };
+  const pr = J.meshes[0].primitives[0]; geo[nm] = { P: acc(pr.attributes.POSITION), UV: acc(pr.attributes.TEXCOORD_0), I: acc(pr.indices), D: (pr.targets || []).map(t => acc(t.POSITION)) }; };
+const load = nm => fetch('part_' + nm + '.b64.txt').then(r => r.text()).then(t => new Promise((ok, no) => {
+  const bytes = Uint8Array.from(atob(t.trim()), c => c.charCodeAt(0)); parse(nm, bytes.buffer.slice(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'model/gltf-binary' }));
+  app.assets.loadFromUrlAndFilename(url, nm + '.glb', 'container', (err, a) => err ? no(err) : ok(a.resource));
+}));
+const make = res => { const e = res.instantiateRenderEntity(); e.findComponents('render').forEach(r => r.meshInstances.forEach(m => { m.material.cull = pc.CULLFACE_NONE; m.material.update(); })); return e; };
+let part = 'body', mode = 'move', gz = null, layer = null;
+const json = () => { const o = {}; for (const k in ents) { const e = ents[k], p = e.getLocalPosition(), r = e.getLocalEulerAngles(), s = e.getLocalScale(), f = x => +x.toFixed(4);
+  o[k] = { p: [f(p.x), f(p.y), f(p.z)], r: [f(r.x), f(r.y), f(r.z)], s: [f(s.x), f(s.y), f(s.z)] }; if (k === 'neck') { o[k].len = neck.len; o[k].bend = neck.bend; o[k].base = neck.base; } } $('out').value = JSON.stringify(o); };
+const syncMirrors = () => { for (const k in mirrors) { const e = ents[k], m = mirrors[k], p = e.getLocalPosition(), q = e.getLocalRotation(), s = e.getLocalScale();
+  m.setLocalPosition(p.x, p.y, -p.z); m.setLocalRotation(new pc.Quat(-q.x, -q.y, q.z, q.w)); m.setLocalScale(s.x, s.y, -s.z); } };
+const show = () => {
+  if (gz) gz.destroy(); if (!layer) { layer = pc.Gizmo.createLayer(app); cam.camera.layers = cam.camera.layers.concat(layer.id); }
+  gz = new ({ move: pc.TranslateGizmo, rotate: pc.RotateGizmo, scale: pc.ScaleGizmo }[mode])(cam.camera, layer);
+  if (mode === 'scale') gz.uniform = $('uni').checked;
+  gz.coordSpace = 'local'; gz.attach([ents[part]]);
+  gz.on('transform:start', () => { busy = true; drag = null; showFused(false); }); gz.on('transform:move', () => { if (part === 'neck') headFollow(); syncMirrors(); json(); }); gz.on('transform:end', () => { busy = false; if (part === 'head') headCapture(); syncMirrors(); json(); refuse(); });
+  document.querySelectorAll('#parts button').forEach(b => b.classList.toggle('on', b.dataset.p === part));
+  document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.g === mode));
+};
+document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode = b.dataset.g; show(); }); $('uni').onchange = show;
+// fuse: every part (blended, in world space) is welded by position, cut where it enters the body and zipped to the body's hole
+// (joinParts from the main viewer); each part keeps its own texture, the seam strip takes the body's paint
+let fusedEnt = null, fuseTimer = null;
+const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = src.diffuseMap; m.emissiveMap = src.diffuseMap; m.emissiveMapUv = 1; m.emissive = new pc.Color(0, 0, 0); m.gloss = 0.25;
+  m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex, uBTex;\nvoid getAlbedo() { vec3 a = texture(uFTex, vUv0).rgb, b = texture(uBTex, vUv1).rgb; float n = dot(b, vec3(0.333)) / max(dot(a, vec3(0.333)), 0.02);\n  float m = smoothstep(0.15, 0.85, vVertexColor.a + (n - 1.0) * 0.35); dAlbedo = mix(a, b, m * step(0.001, vVertexColor.a)); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
+  const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); m.setParameter('uBTex', ents.body.findComponents('render')[0].meshInstances[0].material.diffuseMap); return m; };
+const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
+const instance = (nm, e, flip) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
+  for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
+  const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
+  const I = new Uint32Array(g.I.length); for (let t = 0; t < I.length; t += 3) { I[t] = g.I[t]; I[t+1] = flip ? g.I[t+2] : g.I[t+1]; I[t+2] = flip ? g.I[t+1] : g.I[t+2]; }
+  const WI = Array.from(I, x => map[x]); return { nm, e, I, map, WP: Float32Array.from(WP), WI, uv: g.UV }; };
+const fuseNow = () => {
+  const list = [instance('body', ents.body, false), instance('neck', ents.neck, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
+  let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
+  for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: L.nm === 'tail' ? 0.3 : 0.14, collar: 0.1 }, 0.08); if (J.joined) { P = J.P; I = J.I; } else { const Q = new Float32Array(P.length + L.WP.length); Q.set(P); Q.set(L.WP, P.length); P = Q; I = Array.from(I).concat(L.WI.map(v => v + L.off)); } }   // not touching the body: kept as is
+  const N = vertexNormals(P, I), owner = v => { for (const L of list) if (v >= L.off && v < L.end) return L; return null; };
+  const kept = list.map(() => new Set()), strip = [], tk = (a, b, c) => [a, b, c].sort((x, y) => x - y).join(',');
+  for (let t = 0; t < I.length; t += 3) { const o = owner(I[t]); if (o && owner(I[t+1]) === o && owner(I[t+2]) === o) kept[list.indexOf(o)].add(tk(I[t], I[t+1], I[t+2])); else strip.push(I[t], I[t+1], I[t+2]); }
+  // paint blend at the joins: every seam vertex takes the average paint of the seam around it (both sides), and vertices
+  // near a seam fade toward that colour (vertex colour rgb = seam paint, a = fade), mixed in the shader over the texture
+  const nv = P.length / 3, col = new Float32Array(nv * 4), mat0 = L => L.e.findComponents('render')[0].meshInstances[0].material;
+  const lin = c => Math.pow(c / 255, 2.2), samplers = new Map(), pix = L => { const t = mat0(L).diffuseMap; if (!samplers.has(t)) { const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d'); x.drawImage(t.getSource(), 0, 0, S, S); samplers.set(t, { S, d: x.getImageData(0, 0, S, S).data }); } return samplers.get(t); };
+  const vc = new Float32Array(nv * 3), has = new Uint8Array(nv);
+  for (const L of list) { const sm = pix(L); for (let i = 0; i < L.map.length; i++) { const w = L.off + L.map[i]; if (has[w]) continue; has[w] = 1; const x = Math.min(sm.S - 1, Math.max(0, Math.floor((L.uv[i*2] % 1) * sm.S))), y = Math.min(sm.S - 1, Math.max(0, Math.floor((L.uv[i*2+1] % 1) * sm.S))), o = (y * sm.S + x) * 4; vc[w*3] = lin(sm.d[o]); vc[w*3+1] = lin(sm.d[o+1]); vc[w*3+2] = lin(sm.d[o+2]); } }
+  const seam = [...new Set(strip)].filter(v => has[v]), sc = new Float32Array(seam.length * 3), FADE = 0.07, MIX = 0.06;
+  seam.forEach((v, i) => { let n = 0; for (const u of seam) { if ((P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2 < MIX * MIX) { sc[i*3] += vc[u*3]; sc[i*3+1] += vc[u*3+1]; sc[i*3+2] += vc[u*3+2]; n++; } } sc[i*3] /= n; sc[i*3+1] /= n; sc[i*3+2] /= n; });
+  for (let v = 0; v < nv; v++) { let bd = Infinity, bi = -1; for (let i = 0; i < seam.length; i++) { const u = seam[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = i; } }
+    if (bi < 0) continue; const d = Math.sqrt(bd), f = d < FADE ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE) : 0; col[v*4] = sc[bi*3]; col[v*4+1] = sc[bi*3+1]; col[v*4+2] = sc[bi*3+2]; col[v*4+3] = 0.9 * f; }
+  // layered skin: near a seam the part's own paint cross-fades into the body's paint (uv1 = the nearest body point's texture
+  // coords); the shader breaks the fade edge up with the body texture's detail so the scales feather in rather than blur
+  const bodySeam = []; for (let t = 0; t < strip.length; t += 3) if (strip[t] < list[0].end || strip[t+1] < list[0].end || strip[t+2] < list[0].end) bodySeam.push(strip[t], strip[t+1], strip[t+2]);
+  const seamB = [...new Set(bodySeam)];
+  const FADE2 = 0.06, buv = new Float32Array(nv * 2), B0 = list[0], bodyUV = new Float32Array(B0.end * 2);
+  for (let i = 0; i < B0.map.length; i++) { bodyUV[B0.map[i]*2] = B0.uv[i*2]; bodyUV[B0.map[i]*2+1] = B0.uv[i*2+1]; }
+  for (let v = 0; v < nv; v++) { if (v < B0.end) { buv[v*2] = bodyUV[v*2]; buv[v*2+1] = bodyUV[v*2+1]; continue; }
+    let bd = Infinity, bi = -1; for (const u of seamB) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = u; } }
+    const d = Math.sqrt(bd); col[v*4+3] = d < FADE2 ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE2) : 0; if (!col[v*4+3]) continue;
+    let bb = Infinity, bu = 0; for (let u = 0; u < B0.end; u++) { const e = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (e < bb) { bb = e; bu = u; } }
+    buv[v*2] = bodyUV[bu*2]; buv[v*2+1] = bodyUV[bu*2+1]; }
+  // where neighbouring vertices map to different islands of the body's texture layout the fade would smear; turn it off there
+  const jump = new Uint8Array(nv); for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const p = I[t+e], q = I[t+(e+1)%3]; if (col[p*4+3] && col[q*4+3] && Math.hypot(buv[p*2]-buv[q*2], buv[p*2+1]-buv[q*2+1]) > 0.06) jump[p] = jump[q] = 1; }
+  for (let v = B0.end; v < nv; v++) if (jump[v]) col[v*4+3] = 0;
+  if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
+  const meshOf = (pos, nrm, uv, idx, src, wv) => { const c = new Float32Array(wv.length * 4); wv.forEach((w, i) => c.set(col.subarray(w*4, w*4+4), i*4));
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); const u1 = new Float32Array(wv.length * 2); wv.forEach((w, i) => { u1[i*2] = buv[w*2]; u1[i*2+1] = buv[w*2+1]; }); m.setUvs(0, uv); m.setUvs(1, u1); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, seamMat(src)); mi.cull = false; mis.push(mi); };
+  list.forEach((L, k) => { const n = L.map.length, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = [];
+    for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let c = 0; c < 3; c++) { pos[i*3+c] = P[w*3+c]; nrm[i*3+c] = N[w*3+c]; } }
+    for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
+    meshOf(pos, nrm, L.uv, idx, mat0(L), Array.from(L.map, x => L.off + x)); });
+  if (strip.length) { const B = list[0], used = [...new Set(strip)], loc = new Map(used.map((v, i) => [v, i])), pos = new Float32Array(used.length * 3), nrm = new Float32Array(used.length * 3), uv = new Float32Array(used.length * 2), buv = new Float32Array(B.WP.length / 3 * 2);
+    for (let i = 0; i < B.map.length; i++) { buv[B.map[i]*2] = B.uv[i*2]; buv[B.map[i]*2+1] = B.uv[i*2+1]; }
+    used.forEach((v, i) => { let best = 0, bd = Infinity; for (let u = 0; u < B.WP.length / 3; u++) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; best = u; } }
+      for (let c = 0; c < 3; c++) { pos[i*3+c] = P[v*3+c]; nrm[i*3+c] = N[v*3+c]; } uv[i*2] = buv[best*2]; uv[i*2+1] = buv[best*2+1]; });
+    meshOf(pos, nrm, uv, strip.map(v => loc.get(v)), mat0(B), used); }
+  fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true);
+};
+const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
+$('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
+// neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
+// along the arc, Bend curls it upward; the head rides on the arc's end
+const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, base: PARTS.neck.base || 2.2, rel: null, mesh: null };
+const neckEnd = () => { const L = neck.len, b = neck.bend * Math.PI / 180, cx = Math.abs(b) < 1e-4 ? L : L / b * Math.sin(b), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(b));
+  return new pc.Mat4().setTRS(new pc.Vec3(-0.5 + cx, cy, 0), new pc.Quat().setFromEulerAngles(0, 0, neck.bend), pc.Vec3.ONE); };
+const bendNeck = () => { const g = geo.neck, n = g.P.length / 3, B = g.B || (g.B = new Float32Array(g.P.length)), L = neck.len, b = neck.bend * Math.PI / 180;
+  for (let i = 0; i < n; i++) { const u = g.P[i*3] + 0.5, s_ = u * L, th = b * u, fl = 1 + (neck.base - 1) * Math.max(0, 1 - u / 0.45) ** 2, y = g.P[i*3+1] * fl;   // base flares into the body
+    const cx = Math.abs(b) < 1e-4 ? s_ : L / b * Math.sin(th), cy = Math.abs(b) < 1e-4 ? 0 : L / b * (1 - Math.cos(th));
+    B[i*3] = -0.5 + cx - y * Math.sin(th); B[i*3+1] = cy + y * Math.cos(th); B[i*3+2] = g.P[i*3+2] * fl; }
+  if (!neck.mesh) { const r = ents.neck.findComponents('render')[0], mat = r.meshInstances[0].material; r.enabled = false;
+    const m = new pc.Mesh(app.graphicsDevice); m.setUvs(0, g.UV); m.setIndices(g.I); const mi = new pc.MeshInstance(m, mat); mi.cull = false; const c = new pc.Entity(); c.addComponent('render', { meshInstances: [mi] }); ents.neck.addChild(c); neck.mesh = m; }
+  neck.mesh.setPositions(B); neck.mesh.setNormals(vertexNormals(B, g.I)); neck.mesh.update(); };
+const headFollow = () => { if (!neck.rel) return; const M = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).mul(neck.rel);
+  ents.head.setLocalPosition(M.getTranslation()); ents.head.setLocalEulerAngles(M.getEulerAngles()); ents.head.setLocalScale(M.getScale()); };
+const headCapture = () => { neck.rel = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).invert().mul(ents.head.getWorldTransform()); };
+const neckInput = () => { neck.len = +$('nlen').value; neck.bend = +$('nbend').value; neck.base = +$('nbase').value; bendNeck(); headFollow(); json(); };
+$('nlen').addEventListener('input', neckInput); $('nbase').addEventListener('input', neckInput); $('nbase').addEventListener('change', refuse); $('nbend').addEventListener('input', neckInput);
+$('nlen').addEventListener('change', refuse); $('nbend').addEventListener('change', refuse);
+$('copy').onclick = () => { $('out').select(); navigator.clipboard?.writeText($('out').value).catch(() => {}); };
+Promise.all(Object.keys(PARTS).map(nm => load(nm).then(res => {
+  const e = make(res); e.setLocalPosition(...PARTS[nm].p); e.setLocalEulerAngles(...PARTS[nm].r); e.setLocalScale(...PARTS[nm].s); app.root.addChild(e); ents[nm] = e;
+  if (nm === 'arm' || nm === 'leg') { const m = make(res); app.root.addChild(m); mirrors[nm] = m; }
+}))).then(() => {
+  for (const nm of Object.keys(PARTS)) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
+  $('nlen').value = neck.len; $('nbend').value = neck.bend; $('nbase').value = neck.base; bendNeck(); headCapture();
+  syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend);
+}).catch(e => { $('stat').textContent = 'Could not load parts: ' + e.message; });
+app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
+  cam.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.target); });
+resize(); app.start();
+})();
+</script></body></html>
