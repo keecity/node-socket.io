@@ -221,12 +221,16 @@ const live = () => { if (liveQueued) return; liveQueued = true; requestAnimation
     mi.mesh.update(); } }); };
 const heatMat = new pc.StandardMaterial(); heatMat.diffuseVertexColor = true; heatMat.diffuse = new pc.Color(1, 1, 1); heatMat.gloss = 0.2; heatMat.update();
 const buildProps = () => { for (const k of ['leg', 'arm']) deformer(geo[k].P, k); buildProps0(); };
+const propEl = {};
 const LIM = { l: [0.7, 1.4], g: [0.75, 1.35], w: [0.7, 1.4] };   // slider limits: length, size (and head scale), width
 const buildProps0 = () => { for (const k in PROP) { const box = document.createElement('div'); box.innerHTML = '<h3 style="font-size:12px;margin:10px 0 4px">' + PROP[k].label + '</h3>';
   PROP[k].bands.forEach((nm, i) => { for (const [key, lab] of PROP[k].keys || [['l', 'length'], ['g', 'size'], ['w', 'width']]) { const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:12px';
     l.innerHTML = (key === (PROP[k].keys ? PROP[k].keys[0][0] : 'l') ? '<input type="checkbox" class="vw" title="Show this region\'s falloff" data-k="' + k + '" data-i="' + i + '" style="margin:0">' : '<span style="width:13px"></span>') + '<span style="width:120px">' + nm + ' ' + lab + '</span><input type="range" min="' + LIM[key][0] + '" max="' + LIM[key][1] + '" step="0.01" value="' + (props[k][i][key] = Math.min(LIM[key][1], Math.max(LIM[key][0], props[k][i][key]))) + '" style="flex:1">'; const x = l.querySelector('input[type=range]'), cb = l.querySelector('.vw');
     if (cb) cb.addEventListener('change', () => { document.querySelectorAll('#props .vw').forEach(o => { if (o !== cb) o.checked = false; }); viewSel = cb.checked ? { k: cb.dataset.k, i: +cb.dataset.i } : null; live(); });
-    x.addEventListener('input', () => { props[k][i][key] = +x.value; if (k === 'neck') { bendNeck(); headFollow(); } json(); live(); }); box.appendChild(l); } });
+    propEl[k + ':' + i + ':' + key] = x;
+    x.addEventListener('input', () => { const d = +x.value - props[k][i][key]; props[k][i][key] = +x.value;
+      // neighbouring regions of the same piece follow by a fifth of the change (an extra falloff)
+      for (const j of [i - 1, i + 1]) { const o = propEl[k + ':' + j + ':' + key]; if (!o) continue; props[k][j][key] = Math.min(LIM[key][1], Math.max(LIM[key][0], props[k][j][key] + d * 0.2)); o.value = props[k][j][key]; } if (k === 'neck') { bendNeck(); headFollow(); } json(); live(); }); box.appendChild(l); } });
   $('props').appendChild(box); } };
 const fuseNow = () => {
   { const g = geo.body; bodyDf = deformer(g.P, 'body'); buildBodyGrid(); distCache.clear(); }
