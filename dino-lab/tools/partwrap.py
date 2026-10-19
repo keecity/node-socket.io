@@ -22,12 +22,26 @@ def variants(fn,lift):
         if lift: c_[1]=v[:,1].max()
         out.append(dict(Q=v-c_,UV=T[used],I=mp[Fk],TEX=TEX))
     return out,img,mime
+def untangle(X,F,iters=80):
+    # triangles the wrap folded over (facing against their neighbourhood) leave slits; relax them and their ring
+    from wrap import laplacian
+    Lap=laplacian(len(X),F);X=X.copy()
+    for it in range(iters):
+        fn=np.cross(X[F[:,1]]-X[F[:,0]],X[F[:,2]]-X[F[:,0]]);vn=np.zeros_like(X)
+        for q in range(3): np.add.at(vn,F[:,q],fn)
+        vn/=np.linalg.norm(vn,axis=1,keepdims=True)+1e-12;fu=fn/(np.linalg.norm(fn,axis=1,keepdims=True)+1e-12)
+        bad=(vn[F]*fu[:,None,:]).sum(2).mean(1)<0.2
+        if not bad.any(): break
+        S=np.zeros(len(X),bool);S[F[bad].ravel()]=True;S2=S.copy()
+        for q in range(3): S2[F[S[F].any(1)].ravel()]=True
+        X[S2]=(Lap@X)[S2]
+    return X
 def fit(base,h):
     # weld the base by position first: texture-seam duplicates must move together or the wrap tears the mesh open
     U,inv=np.unique(np.round(base['Q'],5),axis=0,return_inverse=True);inv=inv.ravel();FI=inv[base['I']]
     S,_=sample(h['Q'],h['I'],0.003);best=None
     for V0 in (U,prefit(U,h['Q'])):
-        X=wrap(V0,FI,h['Q'],h['I'],iters=45)[inv];W_,_=sample(X,base['I'],0.003)
+        X=untangle(wrap(V0,FI,h['Q'],h['I'],iters=45),FI)[inv];W_,_=sample(X,base['I'],0.003)
         e=cKDTree(W_).query(S)[0].mean()+cKDTree(S).query(W_)[0].mean()
         if best is None or e<best[0]: best=(e,X)
     return best[1],best[0]

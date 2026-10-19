@@ -61,17 +61,18 @@ const setupBlend = nm => {
   $('blend').appendChild(box);
   const imgs = [...Array(n)].map((_, k) => new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = 'part_' + nm + '_tex' + k + '.jpg'; }));
   Promise.all(imgs).then(im => {
-    const S = 2048, cv = document.createElement('canvas'); cv.width = cv.height = S; const cx = cv.getContext('2d', { willReadFrequently: true });
-    const px = im.map(i => { cx.drawImage(i, 0, 0, S, S); return cx.getImageData(0, 0, S, S).data; }), out = cx.createImageData(S, S);
+    const S = 2048, cv = document.createElement('canvas'); cv.width = cv.height = S; const cx = cv.getContext('2d');
+    let painting = false;
     const tex = new pc.Texture(app.graphicsDevice, { width: S, height: S, format: pc.PIXELFORMAT_SRGBA8, mipmaps: true, anisotropy: 8 });
     const mis = [ents[nm], mirrors[nm]].filter(Boolean).flatMap(e => e.findComponents('render').flatMap(r => r.meshInstances));
     mis.forEach(m => { m.material.diffuseMap = tex; m.material.update(); });
     const upd = paint => { const w = sl.map(x => +x.value), t = w.reduce((a, b) => a + b, 0) || 1;
-      blendW[nm] = w.slice(1).map(x => x / t); refuse();
+      blendW[nm] = w.slice(1).map(x => x / t);
       mis.forEach(m => { if (m.morphInstance) for (let k = 1; k < n; k++) m.morphInstance.setWeight(k - 1, w[k] / t); });
-      if (paint === false) return; const d = out.data; for (let i = 0; i < d.length; i += 4) { let r = 0, g = 0, b = 0; for (let k = 0; k < n; k++) if (w[k]) { const f = w[k] / t, p = px[k]; r += f * p[i]; g += f * p[i + 1]; b += f * p[i + 2]; } d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255; }
-      cx.putImageData(out, 0, 0); tex.setSource(cv); };
-    sl.forEach(x => { x.addEventListener('input', () => { upd(false); live(); }); x.addEventListener('change', () => upd()); }); upd();
+      if (paint === false) return; if (painting) return; painting = true; requestAnimationFrame(() => { painting = false;   // paint: the browser composites the bakes (running average), no per-pixel loop
+        cx.globalCompositeOperation = 'source-over'; cx.globalAlpha = 1; cx.clearRect(0, 0, S, S); let acc = 0;
+        for (let k = 0; k < n; k++) if (w[k] > 0) { acc += w[k]; cx.globalAlpha = w[k] / acc; cx.drawImage(im[k], 0, 0, S, S); } cx.globalAlpha = 1; tex.setSource(cv); tex.upload(); }); };
+    sl.forEach(x => { x.addEventListener('input', () => { upd(); live(); }); }); upd();
   });
 };
 const geo = {}, blendW = {};
