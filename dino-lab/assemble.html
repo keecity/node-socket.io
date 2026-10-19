@@ -108,7 +108,7 @@ const instance = (nm, e, flip) => { const g = geo[nm], w = blendW[nm] || [], n =
 const fuseNow = () => {
   const list = [instance('body', ents.body, false), instance('head', ents.head, false), instance('tail', ents.tail, false), instance('arm', ents.arm, false), instance('arm', mirrors.arm, true), instance('leg', ents.leg, false), instance('leg', mirrors.leg, true)];
   let P = list[0].WP, I = list[0].WI; list[0].off = 0; list[0].end = P.length / 3;
-  for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: 0.14, collar: 0.1 }, 0.08); P = J.P; I = J.I; }
+  for (const L of list.slice(1)) { L.off = P.length / 3; L.end = L.off + L.WP.length / 3; const J = joinParts(P, I, { PP: L.WP, I: L.WI, limit: L.nm === 'tail' ? 0.3 : 0.14, collar: 0.1 }, 0.08); if (J.joined) { P = J.P; I = J.I; } else { const Q = new Float32Array(P.length + L.WP.length); Q.set(P); Q.set(L.WP, P.length); P = Q; I = Array.from(I).concat(L.WI.map(v => v + L.off)); } }   // not touching the body: kept as is
   const N = vertexNormals(P, I), owner = v => { for (const L of list) if (v >= L.off && v < L.end) return L; return null; };
   const kept = list.map(() => new Set()), strip = [], tk = (a, b, c) => [a, b, c].sort((x, y) => x - y).join(',');
   for (let t = 0; t < I.length; t += 3) { const o = owner(I[t]); if (o && owner(I[t+1]) === o && owner(I[t+2]) === o) kept[list.indexOf(o)].add(tk(I[t], I[t+1], I[t+2])); else strip.push(I[t], I[t+1], I[t+2]); }
