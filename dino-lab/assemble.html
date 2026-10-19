@@ -315,7 +315,7 @@ const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc
     const h = new pc.Vec3(...b.h), L = new pc.Mat4().setTRS(h, q, pc.Vec3.ONE).mul(new pc.Mat4().setTranslate(-h.x, -h.y, -h.z));
     let M = b.parent >= 0 ? mats[b.parent].clone().mul(L) : null;
     if (M && b.key.startsWith('leg') && b.s === 3 && b.tp && $('rest').checked) {   // level the posed foot: ball to toe tips runs along the ground
-      const bw = M.transformPoint(new pc.Vec3(...b.h)), tw = M.transformPoint(new pc.Vec3(...b.tp)), d = tw.clone().sub(bw).normalize(), lv = new pc.Vec3(d.x, 0, d.z).normalize();
+      const bw = M.transformPoint(new pc.Vec3(...b.h)), tw = M.transformPoint(new pc.Vec3(...b.tp)), d = tw.clone().sub(bw).normalize(), lv = new pc.Vec3(d.x, 0, d.z).normalize(); lv.y = -0.25; lv.normalize();   /* toes slope slightly down, ~14 deg */
       const ax = new pc.Vec3().cross(d, lv), sn = ax.length(); if (sn > 1e-5) { const rq = new pc.Quat().setFromAxisAngle(ax.normalize(), Math.atan2(sn, d.dot(lv)) * 180 / Math.PI);
         M = new pc.Mat4().setTRS(bw, rq, pc.Vec3.ONE).mul(new pc.Mat4().setTranslate(-bw.x, -bw.y, -bw.z)).mul(M); } }
     if (!M) M =  new pc.Mat4().setTranslate(0, 0.012 * Math.sin(2 * w * tau) - (R.ground || 0), 0).mul(L); mats.push(M); }
