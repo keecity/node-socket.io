@@ -349,8 +349,8 @@ const bendNeck = () => { const g = geo.neck, n = g.P.length / 3, B = g.B || (g.B
     const m = new pc.Mesh(app.graphicsDevice); m.setUvs(0, g.UV); m.setIndices(g.I); const mi = new pc.MeshInstance(m, mat); mi.cull = false; const c = new pc.Entity(); c.addComponent('render', { meshInstances: [mi] }); ents.neck.addChild(c); neck.mesh = m; }
   neck.mesh.setPositions(B); neck.mesh.setNormals(vertexNormals(B, g.I)); neck.mesh.update(); };
 const headFollow = () => { if (!neck.rel) return; const M = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).mul(neck.rel);
-  ents.head.setLocalPosition(M.getTranslation()); ents.head.setLocalEulerAngles(M.getEulerAngles()); ents.head.setLocalScale(M.getScale()); };
-const headCapture = () => { neck.rel = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).invert().mul(ents.head.getWorldTransform()); };
+  ents.head.setLocalPosition(M.getTranslation()); if (neck.restRot) ents.head.setLocalRotation(neck.restRot); ents.head.setLocalScale(M.getScale()); };   /* the head keeps its rest angle */
+const headCapture = () => { neck.restRot = ents.head.getLocalRotation().clone(); neck.rel = new pc.Mat4().mul2(ents.neck.getWorldTransform(), neckEnd()).invert().mul(ents.head.getWorldTransform()); };
 const neckInput = () => { neck.len = +$('nlen').value; neck.bend = +$('nbend').value; neck.base = +$('nbase').value; bendNeck(); headFollow(); json(); live(); };
 $('nlen').addEventListener('input', neckInput); $('nbase').addEventListener('input', neckInput);  $('nbend').addEventListener('input', neckInput);
 
