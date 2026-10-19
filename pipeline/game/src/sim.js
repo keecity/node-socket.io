@@ -10,11 +10,12 @@
 export const STEP = 1 / 60;
 const TURN_RATE = 7;            // rad/s a fighter can turn while acting on its own
 const MAX_RATE = 1.8;           // locomotion clips play between 1x and this
+const RUN_RATE = 2.0;           // movement always uses the run, at this playback rate
 const REACTION = 0.18;          // s: fastest a fighter can respond to something it sees
 const LUNGE_SPEED = 1.5;        // body lengths/s: melee homing during a wind-up
-const LUNGE_MAX = 0.4;          // body lengths: most a melee wind-up may home in
+const LUNGE_MAX = 0.8;          // body lengths: most a melee wind-up may home in
 const TURN_WALK = 2.6;          // rad/s turning while walking (tight arcs)
-const TURN_RUN = 1.6;           // rad/s turning while running (wide arcs)
+const TURN_RUN = 3.2;           // rad/s turning while running
 const ACCEL = 2.5;              // body lengths/s^2 between walk and run speeds
 
 // ---------- maths ----------
@@ -202,7 +203,8 @@ export class Fighter {
       const short = this.strikeMissAt(act, act.target);
       const budget = LUNGE_MAX * this.mon.BL - (act.homed || 0);
       if (short > 0 && budget > 0) {
-        const step = Math.min(short, budget, LUNGE_SPEED * this.mon.BL * dt);
+        const run = this.gaits()[0] ? this.gaits()[0].speed * RUN_RATE : LUNGE_SPEED * this.mon.BL;
+        const step = Math.min(short, budget, run * dt);              // homes in as fast as it runs
         const [fx, fz] = this.facing();
         this.x += fx * step; this.z += fz * step; act.homed = (act.homed || 0) + step;
       }
@@ -236,7 +238,8 @@ export class Fighter {
   // moving, at a limited rate, so changes of direction are arcs; a sharp turn drops to the walk
   // for a tighter arc. There is no sliding, no sidestepping and no turning on the spot.
   gaits() {
-    if (!this._gaits) this._gaits = this.mon.loops.filter((c) => Math.abs(c.heading_deg) < 45).sort((a, b) => a.speed - b.speed);
+    // movement uses only the fastest forward gait (the run)
+    if (!this._gaits) this._gaits = this.mon.loops.filter((c) => Math.abs(c.heading_deg) < 45).sort((a, b) => a.speed - b.speed).slice(-1);
     return this._gaits;
   }
   locomote(dt) {
@@ -247,22 +250,21 @@ export class Fighter {
       const wp = nav.path[0];
       err = wrap(Math.atan2(wp[0] - this.x, wp[1] - this.z) - this.yaw);
       const walk = gaits[0], fast = gaits[gaits.length - 1];
-      target = nav.pace === 'run' ? fast.speed * MAX_RATE : walk.speed;
-      if (Math.abs(err) > Math.PI / 3) target = walk.speed;          // sharp turn: walk it
-      if (nav.arrived) target = Math.abs(nav.alignErr || 0) > 0.5 ? walk.speed : 0;   // only step to line up
+      target = fast.speed * RUN_RATE;
+      if (nav.arrived) target = 0;                                   // at the goal: stop
     }
     // speed changes smoothly between gaits; starting and stopping happen at the walk
-    const walkV = gaits.length ? gaits[0].speed : 0;
+    const walkV = gaits.length ? gaits[0].speed * RUN_RATE : 0;
     if (target === 0) this.speed = this.speed > walkV * 1.05 ? Math.max(walkV, this.speed - ACCEL * this.mon.BL * dt) : 0;
     else if (this.speed < walkV) this.speed = walkV;
     else this.speed += clamp(target - this.speed, -ACCEL * this.mon.BL * dt, ACCEL * this.mon.BL * dt);
     let clip = this.mon.clips.idle, rate = 1;
     if (this.speed > 0) {
-      clip = gaits.find((c) => c.speed * MAX_RATE >= this.speed - 1e-9) || gaits[gaits.length - 1];
-      rate = clamp(this.speed / clip.speed, 1, MAX_RATE);
+      clip = gaits[0];
+      rate = RUN_RATE;
       this.speed = clip.speed * rate;
       // turn toward the path while moving; slower turns at higher speed
-      const turn = (clip === gaits[0] ? TURN_WALK : TURN_RUN) * dt;
+      const turn = TURN_RUN * dt;
       const steer = nav?.arrived && nav.alignErr != null ? nav.alignErr : err;
       this.turnBy(clamp(steer, -turn, turn));
     }
@@ -445,13 +447,16 @@ export class Fighter {
     let arrived = ai.plan === 'press' ? s.gap <= strike : d <= stopAt;
     // a destination inside our turning circle can't be reached on an arc (we would orbit it):
     // treat it as reached and move on rather than loop around
-    const g = this.gaits()[0], rTurn = g ? g.speed / TURN_WALK : 0;
+    const g = this.gaits()[0], rTurn = g ? g.speed * RUN_RATE / TURN_RUN : 0;
     const bearing = Math.abs(wrap(Math.atan2(goal[0] - this.x, goal[1] - this.z) - this.yaw));
     if (ai.plan !== 'press' && d < 2.2 * rTurn && bearing > Math.PI / 3) arrived = true;
     if (arrived && ai.plan !== 'press') ai.planT = Math.min(ai.planT, 0.3);   // reached: pick the next plan soon
     // at striking distance, line up on the foe (a step or two on an arc), then hold
     const alignErr = ai.plan === 'press' ? wrap(Math.atan2(foe.x - this.x, foe.z - this.z) - this.yaw) : null;
-    this.nav = { goal, path, pace: s.slow < 1 ? 'walk' : pace, arrived, alignErr };
+    // arrived beside the foe but not lined up: peel off and come in again on a straight run,
+    // rather than circling at contact (a running body can't turn its nose in that space)
+    if (ai.plan === 'press' && arrived && Math.abs(alignErr) > 0.5) { ai.reason = 'swung'; ai.planT = 0; }
+    this.nav = { goal, path, pace: s.slow < 1 ? 'walk' : pace, arrived, alignErr: 0 };
   }
 
 }
