@@ -295,7 +295,8 @@ const restAngles = (R, key) => { const st = +$('stance').value, ck = key + st; R
   if (key.startsWith('leg')) { const knee = c[0].t, ball = c[2].t, [fy, fz] = d(ball, hip), full = Math.atan(-fz / (fy || -1e-6)), r1 = 0.15 * full;   /* thigh stays wider so the knee sits out */
     const k1 = rot(d(knee, hip), r1), kz = hip[2] + k1[1], target = hip[2] + fz * st, v = d(ball, knee), Rv = Math.hypot(...v), a = Math.atan2(v[1], v[0]), x = Math.max(-1, Math.min(1, (target - kz) / Rv));
     const opts = [Math.asin(x) - a, Math.PI - Math.asin(x) - a].map(t => Math.atan2(Math.sin(t), Math.cos(t))), tot = Math.abs(opts[0]) < Math.abs(opts[1]) ? opts[0] : opts[1];
-    out = [[r1 * D, 0, Math.sign(hip[2]) * 18], [(tot - r1) * D, 0, -Math.sign(hip[2]) * 18]]; }   /* knee turned out 18 deg, calf turned back */
+    const ang = b => Math.atan2(b.t[0] - b.h[0], -(b.t[1] - b.h[1])) * D, flat = 88 - ang(c[3]);   /* foot level: its bone points forward, not down */
+    out = [[r1 * D, 0, Math.sign(hip[2]) * 18], [(tot - r1) * D, 0, -Math.sign(hip[2]) * 18], [0, 0], [0, flat]]; }   /* knee turned out 18 deg, calf turned back */
   else { const e = c[c.length - 1].t, [fy, fz] = d(e, hip), full = Math.atan(-fz / (fy || -1e-6)) * D; const fwd = (b0, deg) => { const up = c[0], ua = Math.atan2(up.t[0] - up.h[0], -(up.t[1] - up.h[1])) * D, fa = Math.atan2(b0.t[0] - b0.h[0], -(b0.t[1] - b0.h[1])) * D; return deg - fa + (b0 === up ? 0 : 0); };
     const upper = fwd(c[0], 15), fore = fwd(c[1], 45) - upper, hand = 0;   /* hang: upper arm 10 deg, forearm 25 deg, hand 30 deg forward of straight down */
     out = [[full * 0.35, upper], [full * (1.05 - 0.4 * st), fore], [0, hand], [0, 12], [0, 12], [0, 12]];   /* fingers: a slight curl */   /* elbows stay out, forearms and hands turn in */ }
