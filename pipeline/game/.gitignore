@@ -1,3 +1,6 @@
-rig.fbx
+# rigs and clips are produced by the pipeline from the user's own rig; not committed
+*.fbx
+*.glb
+*.b64.txt
 anims/
 assets/

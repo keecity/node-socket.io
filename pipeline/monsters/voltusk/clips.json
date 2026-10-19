@@ -1,0 +1,72 @@
+{
+  "monster": "Voltusk",
+  "video": { "model": "wan3_0_prime", "duration_s": 6, "resolution": "720p", "aspect": "16:9", "start_image_media": "3c7acbd7-002a-492b-ba31-f619822ab6bb" },
+  "detector": "DINOv2 ViT-S/14 + heatmap head, 448 px, fine-tuned on 11,000 renders incl. 2,500 acrobatic poses",
+  "sources": {
+    "idle": {
+      "action": "IDLE animation: the creature stands in place breathing slowly, chest rising and falling, small head turns and a lazy tail sway, occasional weight shift between legs. Feet stay planted.",
+      "job": "21d29114-8c2b-47ac-9895-833e82274edf", "subject_only_clause": false,
+      "solve": { "views_agree": true }, "notes": "" },
+    "walk": {
+      "action": "WALK CYCLE IN PLACE: the four-legged creature walks with a natural quadruped gait (diagonal leg pairs alternate), body bobbing gently, head nodding, tail swaying, but it stays centered in each panel as if on a treadmill and does not leave the frame.",
+      "job": "000d813a-e383-48c0-8c76-e2a4ded8d6d2", "subject_only_clause": false,
+      "solve": { "views_agree": true },
+      "notes": "Close to marching on the spot: planted feet slide back only ~6 cm per step, so the measured ground speed is low. The left hind foot barely lifts in the solve (stiff)." },
+    "attack": {
+      "action": "ATTACK animation: the creature crouches, rears back, then lunges forward a short distance with a powerful horn headbutt and snapping jaw bite, then recovers back to its standing pose.",
+      "job": "34b1ebd8-4070-46cf-9302-dd2ac011d968", "subject_only_clause": false,
+      "solve": { "views_agree": true },
+      "notes": "Contains three thrusts; pack keeps one beat around the strongest." },
+    "bite": {
+      "action": "BITE attack animation, vicious and fast: the creature rears its head back and opens its jaws wide, then lunges forward with its whole body and snaps its jaws shut hard, snaps a second time, violently shakes its head side to side as if tearing at prey, then pulls back to its stance with the mouth closing. Aggressive fighting-game timing with strong anticipation and follow-through.",
+      "job": "d6bc8be6-bed9-4b70-bf9b-9044945841ab", "subject_only_clause": false,
+      "solve": { "views_agree": true, "bad_fraction": 0.051 }, "notes": "Several snaps; pack keeps the strongest." },
+    "jump": {
+      "action": "JUMP animation, powerful and dynamic: the creature crouches deep with anticipation, then leaps straight up high into the air, legs tucking under its body, tail swinging, head raised, hangs at the top for a moment, then drops and lands hard with all four feet, absorbing the impact with a deep squash, then rises back to its stance. Big, readable, fighting-game timing. It jumps in place and stays inside each panel.",
+      "job": "5bb72cea-04c2-422e-967e-75b92c51beff", "subject_only_clause": false,
+      "solve": { "views_agree": false, "bad_fraction": 0.108, "body_only_bad_fraction": 0.049 },
+      "notes": "The model made a rear-up stomp (front feet up ~30 cm, hind feet planted), twice, not a jump. Used as the Static Leap stomp and the victory pose. It cannot clear a ground wave; Spark Step (dodge) does that." },
+    "dodge": {
+      "action": "DODGE animation, fast and athletic: the creature tenses, then explosively hops sideways to its left, body leaning hard and tail whipping for balance, legs bunching and pushing off the ground, lands low in a defensive crouch, then springs quickly back to the center with a second quick hop and settles into a ready stance. Sharp, snappy timing like a fighting game.",
+      "job": "1da66fb0-cea7-4340-80fe-ba5ebe74d612", "subject_only_clause": false,
+      "solve": { "views_agree": true, "bad_fraction": 0.084 }, "notes": "Two real hops, fully airborne; pack keeps the first (hop out)." },
+    "spin": {
+      "action": "JUMP SPIN STRIKE special attack: the creature crouches low, launches itself high into the air, does one full fast 360-degree spin around its vertical axis while airborne with its tail whipping around, then comes crashing down head-first and strikes the ground in front of it with its horn in a powerful slam, holds the impact pose for a beat, then recovers to its stance. Explosive, acrobatic fighting-game timing. It stays roughly in place inside each panel.",
+      "job": "0b48e70f-9018-4dbc-ab19-4e9559dce6eb", "subject_only_clause": false,
+      "solve": { "views_agree": false, "bad_fraction": 0.133, "body_only_bad_fraction": 0.065 },
+      "notes": "Fully airborne ~0.8 s. The gate fails on the tail, hidden behind the body mid-spin; body joints pass. Needed the acrobatic detector retrain. Hip position jitters mid-spin; pack smooths root motion." },
+    "run": {
+      "action": "RUN CYCLE IN PLACE: the four-legged creature runs at full speed on the spot with a powerful bounding gallop, front and hind leg pairs reaching and gathering, spine flexing, head pushing forward low and aggressive, tail streaming behind and bouncing with each stride. It runs in place and does not travel across the panel. The cycle loops cleanly.",
+      "job": "0996cb7f-3c57-453d-b23b-7beaa59fda38", "subject_only_clause": true,
+      "solve": { "views_agree": false, "bad_fraction": 0.209, "body_only_bad_fraction": 0.123 },
+      "notes": "Fast gallop is the hardest clip for the detector (motion blur). Stride is short, so the run is only ~20% faster than the walk at 1x; the game plays gaits up to 1.8x." },
+    "hurt": {
+      "action": "HURT REACTION, strong and readable: the creature flinches as if struck hard on the head by an unseen blow, its head snaps back and to the side, the body recoils backwards with the front legs lifting slightly and stumbling back two short steps, the mouth opens in pain, the tail flinches, then it shakes it off and plants its feet back in its ready stance. Fast fighting-game timing.",
+      "job": "e1f0b824-6ff9-4f9a-b04c-30eb37a433ad", "subject_only_clause": true,
+      "solve": { "views_agree": true, "bad_fraction": 0.056 }, "notes": "'unseen blow' keeps the model from drawing an attacker." },
+    "faint": {
+      "action": "FAINT / KNOCKOUT: the creature staggers, wobbles unsteadily side to side, its legs buckle, the front legs fold first, then the whole body collapses heavily onto its side on the ground, the head drops to the floor and the tail goes limp. It lies completely still on the ground, unconscious, for the rest of the clip.",
+      "job": "50fb7682-a72f-4418-8c67-d6f6406d8a0d", "subject_only_clause": true,
+      "solve": { "views_agree": false, "bad_fraction": 0.116, "body_only_bad_fraction": 0.068 },
+      "notes": "Lying on its side is outside the detector's training poses; still reads correctly." },
+    "walk_back": {
+      "action": "WALK BACKWARD IN PLACE: the four-legged creature walks steadily backwards with a natural reversed quadruped gait, diagonal leg pairs alternating, stepping its feet backwards, head low and facing forward, watchful, tail swaying. It walks backward on the spot like on a treadmill and does not travel across the panel. The cycle loops cleanly.",
+      "job": "ad611581-4503-4602-b143-4cd771c8ca88", "subject_only_clause": true,
+      "solve": { "views_agree": true, "bad_fraction": 0.064 },
+      "notes": "REJECTED by pack: the feet march nearly in place and drift forward (heading 3 deg, 0.12 m/s). Regenerate." },
+    "strafe_left": {
+      "action": "SIDESTEP TO ITS LEFT IN PLACE: the creature keeps its body and head facing straight forward while it strafes sideways toward its own left with quick crossing side steps of all four legs, body swaying slightly, tail balancing, alert combat stance. It sidesteps on the spot like on a treadmill and does not travel across the panel. The cycle loops cleanly.",
+      "job": "6df256cc-6f72-4d61-8f06-edd4c4353764", "subject_only_clause": true,
+      "solve": { "views_agree": true, "bad_fraction": 0.090 },
+      "notes": "REJECTED by pack: steps go forward-right (heading -29 deg), not to its left. Regenerate." },
+    "strafe_right": {
+      "action": "SIDESTEP TO ITS RIGHT IN PLACE: the creature keeps its body and head facing straight forward while it strafes sideways toward its own right with quick crossing side steps of all four legs, body swaying slightly, tail balancing, alert combat stance. It sidesteps on the spot like on a treadmill and does not travel across the panel. The cycle loops cleanly.",
+      "job": "61e730f9-c27f-426a-95ed-0f84fb4544aa", "subject_only_clause": true,
+      "solve": { "views_agree": false, "bad_fraction": 0.103 },
+      "notes": "REJECTED by pack: steps go forward (heading -7 deg). Regenerate." },
+    "roar": {
+      "action": "ROAR / POWER UP: the creature plants its feet, lowers its head, then rears up its front body and throws its head back in a huge triumphant roar with the jaw wide open, chest pushed out, tail lifted, holds the roar for a moment, then settles back down onto all fours in its ready stance.",
+      "job": null, "subject_only_clause": true, "solve": null,
+      "notes": "NOT GENERATED: Higgsfield plan out of credits. Overcharge plays the idle clip until this exists." }
+  }
+}

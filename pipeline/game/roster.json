@@ -1,0 +1,7 @@
+{
+  "arena": { "radius": 6.0 },
+  "fighters": [
+    { "monster": "voltusk", "name": "Voltusk" },
+    { "monster": "voltusk", "name": "Shockhorn", "look": { "hue": 175 }, "stats": { "hp": 115, "attack": 1.1, "defense": 0.95, "skill": 0.4, "aggression": 0.65 } }
+  ]
+}

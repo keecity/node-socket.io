@@ -7,6 +7,7 @@
   start-frame  render the two-view start image for the video model, plus its layout/cameras
   prompt       video prompt for a clip (subject only: no effects, props or extra geometry)
   solve        generated clip -> checked, solved animation GLB for three.js
+  pack         solved clips + animation set -> monster pack (manifest + in-place clips) for the game
 """
 import argparse
 import json
@@ -137,7 +138,42 @@ def cmd_solve(a):
                         clip_name=a.name or os.path.splitext(os.path.basename(a.video))[0])
     if a.keypoints:
         np.save(a.keypoints, kp)
+    if a.motion:
+        np.savez(a.motion, local=local, root=root, fps=fps, ok=report["ok"])
     print(f"animation -> {a.out}")
+
+
+def cmd_pack(a):
+    from .pack import pack
+    skel = load_skeleton(a.skeleton)
+    with open(a.animset) as f:
+        animset = json.load(f)
+    motions = {}
+    for fn in sorted(os.listdir(a.motion_dir)):
+        if fn.endswith(".npz"):
+            d = np.load(os.path.join(a.motion_dir, fn))
+            motions[fn[:-4]] = (d["local"], d["root"], float(d["fps"]))
+    root_space = None
+    if a.target and a.target.lower().endswith(".fbx"):
+        from .fbx import root_parent_space
+        root_space = root_parent_space(a.target)
+    m = pack(skel, animset, motions, a.out, root_space=root_space, rig_path=a.target)
+    if a.log:
+        from .animlog import write_log
+        registry = None
+        if a.registry:
+            with open(a.registry) as f:
+                registry = json.load(f)
+        write_log(a.log, m, registry, animset)
+        print(f"animation log -> {a.log}")
+    for name, c in m["clips"].items():
+        extra = f"speed {c['speed']} m/s heading {c['heading_deg']}" if "speed" in c else f"event {c.get('event', '-')} s"
+        print(f"{name:13s} {c['kind']:8s} {c['duration']:5.2f} s  travel {c['travel']:.3f} m  air {c['airborne']}  {extra}")
+    for name, why in m["rejected_clips"].items():
+        print(f"REJECTED {name}: {why}")
+    if m["missing_clips"]:
+        print("missing clips (game uses fallbacks):", ", ".join(m["missing_clips"]))
+    print(f"pack -> {a.out}")
 
 
 def main(argv=None):
@@ -213,8 +249,19 @@ def main(argv=None):
     s.add_argument("--keys-only", action="store_true", help="with --key-every, use only the key frames' detections")
     s.add_argument("--target", help="model the game plays the clip on; for an .fbx the root track is written in its units/axes")
     s.add_argument("--keypoints", help="also save raw detections (.npy)")
+    s.add_argument("--motion", help="also save the solved motion (.npz) for the pack step")
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_solve)
+
+    s = sub.add_parser("pack")
+    s.add_argument("--skeleton", required=True)
+    s.add_argument("--animset", required=True, help="animset.json: clip roles, timing rules and moves")
+    s.add_argument("--motion-dir", required=True, help="folder of <source>.npz from solve --motion")
+    s.add_argument("--target", help="rig the clips play on (.fbx): sets the clips' root space and is copied in")
+    s.add_argument("-o", "--out", required=True)
+    s.add_argument("--registry", help="clips.json: prompts, generation jobs and solve quality per source clip")
+    s.add_argument("--log", help="write the animation log (Markdown) here")
+    s.set_defaults(fn=cmd_pack)
 
     a = p.parse_args(argv)
     a.fn(a)
