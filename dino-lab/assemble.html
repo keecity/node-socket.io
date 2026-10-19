@@ -21,6 +21,8 @@ textarea { width: 100%; height: 160px; box-sizing: border-box; font: 11px monosp
 <h2>Tool</h2><div class="row" id="tools"><button data-g="move">Move</button><button data-g="rotate">Rotate</button><button data-g="scale">Scale</button></div>
 <label style="display:block;margin-top:8px"><input type="checkbox" id="uni" checked> Uniform scale</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="fuse" checked> Fuse parts into one mesh</label>
+<label style="display:block;margin-top:4px"><input type="checkbox" id="anim"> Animate (walk)</label>
+<label style="display:block;margin-top:4px"><input type="checkbox" id="skel"> Show skeleton</label>
 <label style="display:block;margin-top:4px"><input type="checkbox" id="overlap" checked> Overlap joints (skins dissolve into each other)</label>
 <h2>Proportions</h2><div id="props"></div>
 <h2>Neck</h2>
@@ -118,15 +120,17 @@ const showFused = on => { for (const e of [...Object.values(ents), ...Object.val
 const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
   const Lc = new Float32Array(g.P.length); for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); Lc[i*3] = x; Lc[i*3+1] = y; Lc[i*3+2] = z; }
   const df = nm === 'head' ? headDf(Lc) : PROP[nm] && nm !== 'neck' ? deformer(Lc, nm) : null, dl = anchorDelta(nm, e);
+  const RG = rigCap ? { t: new Float32Array(n), fP: new Float32Array(n), fB: nm === 'body' ? new Float32Array(n) : null, kB: nm === 'body' ? new Array(n) : null } : null;
+  if (RG) { rigData.set(e, RG); for (let i = 0; i < n; i++) RG.t[i] = nm === 'neck' ? g.P[i*3] + 0.5 : nm === 'head' ? 0 : df ? df.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : 0; }
   const bd_ = distCache.get(e), bdNew = bd_ ? null : new Float32Array(n); if (!bd_ && ANCHOR[nm] && bodyDf) distCache.set(e, bdNew);   // distances to the body: once per fuse
   const q0 = ANCHOR[nm], bw = q0 && bodyDf ? bodyWarp : null, aw = q0 ? e.getWorldTransform().transformPoint(new pc.Vec3(...q0)) : null;
   const VW = viewSel ? new Float32Array(n) : null; if (VW) viewW.set(e, VW);
   if (VW && viewSel.k === nm) for (let i = 0; i < n; i++) VW[i] = nm === 'head' ? 1 : nm === 'neck' ? bandM('neck', g.P[i*3] + 0.5, viewSel.i) : bandM(nm, df.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]), viewSel.i);
   for (let i = 0; i < n; i++) { const q = df ? df(Lc[i*3], Lc[i*3+1], Lc[i*3+2]) : [Lc[i*3], Lc[i*3+1], Lc[i*3+2]]; v.set(q[0], q[1], q[2]); M.transformPoint(v, v); P[i*3] = v.x + dl.x; P[i*3+1] = v.y + dl.y; P[i*3+2] = v.z + dl.z;
     // near the attachment the piece follows the body's own warp (so it matches the body surface), fading to the rigid move
-    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (VW && viewSel.k === 'body' && f > 0.01) { bwV.set(v.x, v.y, v.z); bodyMi.transformPoint(bwV, bwV); VW[i] = f * bandM('body', bodyDf.t(bwV.x, bwV.y, bwV.z), viewSel.i); } if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
+    if (bw) { const d = bd_ ? bd_[i] : (bdNew[i] = bodyDist(v.x, v.y, v.z)), x_ = Math.min(1, d / 0.55), f = 1 - x_ * x_ * (3 - 2 * x_);   /* smooth fade over ~0.55 outside the body */ if (RG) RG.fP[i] = f; if (VW && viewSel.k === 'body' && f > 0.01) { bwV.set(v.x, v.y, v.z); bodyMi.transformPoint(bwV, bwV); VW[i] = f * bandM('body', bodyDf.t(bwV.x, bwV.y, bwV.z), viewSel.i); } if (f > 0.01) { const r = bw(v.x, v.y, v.z); P[i*3] += f * (r[0] - v.x - dl.x); P[i*3+1] += f * (r[1] - v.y - dl.y); P[i*3+2] += f * (r[2] - v.z - dl.z); } } }
   if (VW && nm === 'body' && viewSel.k === 'body') { const db = deformer(Lc, 'body'); for (let i = 0; i < n; i++) VW[i] = bandM('body', db.t(Lc[i*3], Lc[i*3+1], Lc[i*3+2]), viewSel.i); }
-  if (nm === 'body') for (const [k, en] of [['neck', ents.neck], ['tail', ents.tail], ['arm', ents.arm], ['arm', mirrors.arm], ['leg', ents.leg], ['leg', mirrors.leg]]) {
+  if (nm === 'body') for (const [k, en, pk] of [['neck', ents.neck, 'neck'], ['tail', ents.tail, 'tail'], ['arm', ents.arm, 'armL'], ['arm', mirrors.arm, 'armR'], ['leg', ents.leg, 'legL'], ['leg', mirrors.leg, 'legR']]) {
     if (!en) continue; const Mk = en.getWorldTransform(), Mki = Mk.clone().invert(), dk = deformer(geo[k].P, k), root = Mk.transformPoint(new pc.Vec3(...dk.c0)), a = new pc.Vec3();
     // where the piece's centreline leaves the body; the spread reaches ~1.6 root radii beyond that exit
     for (let j = 0; j <= 48; j++) { a.set(dk.c[j*3], dk.c[j*3+1], dk.c[j*3+2]); Mk.transformPoint(a, a); if (!bodyIn(a.x, a.y, a.z) || j === 48) { root.copy(a); break; } }
@@ -134,7 +138,8 @@ const placed = (nm, e) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] ||
     for (let i = 0; i < n; i++) { const d = Math.hypot(P[i*3] - root.x, P[i*3+1] - root.y, P[i*3+2] - root.z); if (d >= R) continue; const x = d / R, f = 1 - x * x * (3 - 2 * x);
       a.set(P[i*3], P[i*3+1], P[i*3+2]); Mki.transformPoint(a, a); const q = dk(a.x, a.y, a.z); a.set(q[0], q[1], q[2]); Mk.transformPoint(a, a);
       P[i*3] += f * (a.x - P[i*3]); P[i*3+1] += f * (a.y - P[i*3+1]); P[i*3+2] += f * (a.z - P[i*3+2]);
-      if (VW && viewSel.k === k) VW[i] = Math.max(VW[i], f * bandM(k, 0, viewSel.i)); } }
+      if (VW && viewSel.k === k) VW[i] = Math.max(VW[i], f * bandM(k, 0, viewSel.i));
+      if (RG && f > RG.fB[i]) { RG.fB[i] = f; RG.kB[i] = pk; } } }
   return P; };
 const instance = (nm, e, flip) => { const g = geo[nm], n = g.P.length / 3, P = placed(nm, e);
   const id = new Map(), map = new Uint32Array(n), WP = []; for (let i = 0; i < n; i++) { const k = P[i*3].toFixed(5) + ',' + P[i*3+1].toFixed(5) + ',' + P[i*3+2].toFixed(5); if (!id.has(k)) { id.set(k, WP.length / 3); WP.push(P[i*3], P[i*3+1], P[i*3+2]); } map[i] = id.get(k); }
@@ -212,6 +217,7 @@ const live = () => { if (liveQueued) return; liveQueued = true; requestAnimation
   bodyDf = deformer(geo.body.P, 'body'); buildBodyGrid(); const nr = Float32Array.from(S.raw);
   for (const L of S.list) { const Q = placed(L.nm, L.e); for (let i = 0; i < L.map.length; i++) { const w = (L.off + L.map[i]) * 3; nr[w] = Q[i*3]; nr[w+1] = Q[i*3+1]; nr[w+2] = Q[i*3+2]; } }
   const P = new Float32Array(S.P.length); for (let v = 0; v < P.length / 3; v++) { const u = S.src[v] >= 0 ? S.src[v] : v; for (let q = 0; q < 3; q++) P[v*3+q] = S.P[v*3+q] + nr[u*3+q] - S.raw[u*3+q]; }
+  S.Pcur = P; rigDirty = true;
   const N = vertexNormals(P, S.I);
   let Wv = null; if (viewSel) { Wv = new Float32Array(P.length / 3); for (const L of S.list) { const a = viewW.get(L.e); if (a) for (let i = 0; i < L.map.length; i++) Wv[L.off + L.map[i]] = Math.max(Wv[L.off + L.map[i]], a[i]); } }
   for (const mi of fusedEnt.render.meshInstances) { const wv = mi._wv; if (!wv) continue; const pos = new Float32Array(wv.length * 3), nrm = new Float32Array(wv.length * 3);
@@ -220,6 +226,52 @@ const live = () => { if (liveQueued) return; liveQueued = true; requestAnimation
     if (Wv) { const c = new Float32Array(wv.length * 4); for (let i = 0; i < wv.length; i++) { const h = Wv[wv[i]]; c[i*4] = 0.15 + 0.85 * h; c[i*4+1] = 0.2 + 0.6 * h * (1 - h) * 4 * 0.5; c[i*4+2] = 0.55 * (1 - h); c[i*4+3] = 1; } mi.mesh.setColors(c); mi.material = heatMat; }
     else if (mi.material === heatMat) { mi.mesh.setColors(mi._col); mi.material = mi._mat; }
     mi.mesh.update(); } }); };
+// ---------- rig: bones along each piece's centreline, skin weights from the same parameters the proportions use ----------
+let rigCap = false, rigDirty = true, rig = null, tau = 0; const rigData = new Map();
+const pieceKey = L => L.nm + (L.nm === 'arm' || L.nm === 'leg' ? (L.e === mirrors[L.nm] ? 'R' : 'L') : '');
+const rigBuild = () => { const S = liveState; if (!S) return null; rigCap = true; rigData.clear(); bodyDf = deformer(geo.body.P, 'body'); buildBodyGrid(); for (const L of S.list) placed(L.nm, L.e); rigCap = false;
+  const P = S.Pcur || S.P, nv = P.length / 3, own = new Int16Array(nv).fill(-1); S.list.forEach((L, k) => own.fill(k, L.off, L.end));
+  const tW = new Float32Array(nv), fP = new Float32Array(nv), fB = new Float32Array(nv), kB = new Array(nv);
+  S.list.forEach(L => { const R = rigData.get(L.e); for (let i = 0; i < L.map.length; i++) { const w = L.off + L.map[i]; tW[w] = R.t[i]; fP[w] = R.fP[i]; if (R.fB) { fB[w] = R.fB[i]; kB[w] = R.kB[i]; } } });
+  const JT = { tail: [0, 0.25, 0.5, 0.75, 1], neck: [0, 0.33, 0.66, 1], arm: [0, ...PROP.arm.auto, 1], leg: [0, ...PROP.leg.auto, 1] };
+  const cen = (k, t0, r) => { const L = S.list[k], c = [0, 0, 0]; let n = 0; for (let v = L.off; v < L.end; v++) if (Math.abs(tW[v] - t0) < r) { c[0] += P[v*3]; c[1] += P[v*3+1]; c[2] += P[v*3+2]; n++; } return n ? c.map(x => x / n) : r < 0.5 ? cen(k, t0, r * 2) : c; };
+  const bones = [], chain = {}; let bc = [0, 0, 0], bn = 0; for (let v = S.list[0].off; v < S.list[0].end; v++) { bc[0] += P[v*3]; bc[1] += P[v*3+1]; bc[2] += P[v*3+2]; bn++; } bc = bc.map(x => x / bn);
+  bones.push({ key: 'body', s: 0, h: bc, t: bc, parent: -1 }); chain.body = [0];
+  S.list.forEach((L, k) => { if (k === 0 || L.nm === 'head') return; const key = pieceKey(L), js = JT[L.nm], pts = js.map(t => cen(k, t, 0.05)); chain[key] = [];
+    for (let q = 0; q < js.length - 1; q++) { chain[key].push(bones.length); bones.push({ key, s: q, h: pts[q], t: pts[q+1], parent: q ? bones.length - 1 : 0, js }); } });
+  { const k = S.list.findIndex(L => L.nm === 'head'), last = chain.neck[chain.neck.length - 1]; chain.head = [bones.length]; bones.push({ key: 'head', s: 0, h: bones[last].t, t: cen(k, 0, 2), parent: last }); }
+  // weights: up to three influences per vertex
+  const wb = new Int16Array(nv * 3), ww = new Float32Array(nv * 3);
+  for (let v0 = 0; v0 < nv; v0++) { const v = own[v0] >= 0 ? v0 : S.src[v0] >= 0 ? S.src[v0] : v0, L = S.list[own[v]] || S.list[0], key = pieceKey(L), inf = new Map(), add = (b, w) => inf.set(b, (inf.get(b) || 0) + w);
+    if (own[v] <= 0) { add(0, 1 - fB[v]); if (fB[v] > 0 && kB[v]) add(chain[kB[v]][0], fB[v]); }
+    else if (key === 'head') add(chain.head[0], 1);
+    else { const c = chain[key], js = bones[c[0]].js, t = tW[v]; let q = 0; while (q < c.length - 1 && t > js[q+1]) q++; const W = 0.05, lo = t - js[q], hi = js[q+1] - t;
+      let a = 1; const parts = [[c[q], 1]]; if (q > 0 && lo < W) parts.push([c[q-1], 0.5 * (1 - lo / W)]); if (q < c.length - 1 && hi < W) parts.push([c[q+1], 0.5 * (1 - hi / W)]);
+      const sum = parts.reduce((x, p) => x + p[1], 0); for (const [b, w] of parts) add(b, (1 - fP[v]) * w / sum); if (fP[v] > 0) add(0, fP[v]); }
+    const top = [...inf].sort((a, b) => b[1] - a[1]).slice(0, 3), tot = top.reduce((x, p) => x + p[1], 0) || 1; top.forEach(([b, w], q) => { wb[v0*3+q] = b; ww[v0*3+q] = w / tot; }); }
+  rigDirty = false; return { bones, wb, ww, P: Float32Array.from(P), I: S.I }; };
+// walk cycle: legs stride in opposition, arms swing a little, tail sways in a travelling wave, neck and head bob
+const rigPose = (R, tau) => { const w = 2 * Math.PI * 0.9, mats = [], q = new pc.Quat(), Z = new pc.Vec3(0, 0, 1), Y = new pc.Vec3(0, 1, 0);
+  for (const b of R.bones) { const side = b.key.endsWith('R') ? Math.PI : 0, ph = w * tau + side; let ax = Z, a = 0;
+    if (b.key.startsWith('leg')) a = [24 * Math.sin(ph), -18 * (0.5 + 0.5 * Math.sin(ph + 1.2)), 14 * Math.sin(ph + 2.2), -10 * Math.sin(ph + 2.6), 10 * Math.max(0, -Math.sin(ph + 3))][b.s];
+    else if (b.key.startsWith('arm')) a = [8 * Math.sin(ph + Math.PI), 6 * Math.sin(ph + Math.PI + 0.8), 4 * Math.sin(ph + Math.PI + 1.4)][b.s];
+    else if (b.key === 'tail') { ax = Y; a = 7 * Math.sin(w * tau - b.s * 0.7); }
+    else if (b.key === 'neck') a = 3 * Math.sin(2 * w * tau + b.s);
+    else if (b.key === 'head') a = -4 * Math.sin(2 * w * tau + 3);
+    q.setFromAxisAngle(ax, a); const h = new pc.Vec3(...b.h), L = new pc.Mat4().setTRS(h, q, pc.Vec3.ONE).mul(new pc.Mat4().setTranslate(-h.x, -h.y, -h.z));
+    const M = b.parent >= 0 ? mats[b.parent].clone().mul(L) : new pc.Mat4().setTranslate(0, 0.012 * Math.sin(2 * w * tau), 0).mul(L); mats.push(M); }
+  return mats; };
+const rigSkin = (R, mats) => { const P = R.P, out = new Float32Array(P.length), v = new pc.Vec3(), r = new pc.Vec3();
+  for (let i = 0; i < P.length / 3; i++) { let x = 0, y = 0, z = 0; v.set(P[i*3], P[i*3+1], P[i*3+2]);
+    for (let q = 0; q < 3; q++) { const w = R.ww[i*3+q]; if (!w) continue; mats[R.wb[i*3+q]].transformPoint(v, r); x += w * r.x; y += w * r.y; z += w * r.z; } out[i*3] = x; out[i*3+1] = y; out[i*3+2] = z; }
+  const N = vertexNormals(out, R.I);
+  for (const mi of fusedEnt.render.meshInstances) { const wv = mi._wv; if (!wv) continue; const pos = new Float32Array(wv.length * 3), nrm = new Float32Array(wv.length * 3);
+    for (let i = 0; i < wv.length; i++) for (let k = 0; k < 3; k++) { pos[i*3+k] = out[wv[i]*3+k]; nrm[i*3+k] = N[wv[i]*3+k]; } mi.mesh.setPositions(pos); mi.mesh.setNormals(nrm); mi.mesh.update(); } };
+app.on('update', dt => { const anim = $('anim').checked, sk = $('skel').checked; if ((!anim && !sk) || !fusedEnt || !fusedEnt.enabled || busy) return;
+  if (rigDirty || !rig) { rig = rigBuild(); if (!rig) return; }
+  if (anim) tau += dt; const mats = rigPose(rig, anim ? tau : 0); if (anim) rigSkin(rig, mats);
+  if (sk) { const a = new pc.Vec3(), b = new pc.Vec3(), col = new pc.Color(1, 0.85, 0.2);
+    rig.bones.forEach((bn, k) => { mats[k].transformPoint(new pc.Vec3(...bn.h), a); mats[k].transformPoint(new pc.Vec3(...bn.t), b); app.drawLine(a, b, col, false); }); } });
 const heatMat = new pc.StandardMaterial(); heatMat.diffuseVertexColor = true; heatMat.diffuse = new pc.Color(1, 1, 1); heatMat.gloss = 0.2; heatMat.update();
 const buildProps = () => { for (const k of ['leg', 'arm']) deformer(geo[k].P, k); buildProps0(); };
 const propEl = {};
@@ -253,7 +305,7 @@ const fuseNow = () => {
     if (bi < 0) continue; const d = Math.sqrt(bd), f = d < FADE ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE) : 0; col[v*4] = sc[bi*3]; col[v*4+1] = sc[bi*3+1]; col[v*4+2] = sc[bi*3+2]; col[v*4+3] = 0.9 * f; }
   { const raw = new Float32Array(P.length), own = new Int8Array(P.length / 3).fill(-1); list.forEach((L, k) => { raw.set(L.WP, L.off * 3); own.fill(k, L.off, L.end); });
     const src = new Int32Array(P.length / 3).fill(-1); for (let v = 0; v < src.length; v++) if (own[v] < 0) { let bd = Infinity; for (let u = 0; u < src.length; u++) if (own[u] >= 0) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; src[v] = u; } } }
-    liveState = { list, P: Float32Array.from(P), I, raw, src }; }
+    liveState = { list, P: Float32Array.from(P), I, raw, src }; rigDirty = true; }
   if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
   if ($('overlap').checked) { overlapBuild(list, P, I, N, strip, mis); fusedEnt.addComponent('render', { meshInstances: mis }); app.root.addChild(fusedEnt); showFused(true); return; }
   const meshOf = (pos, nrm, uv, idx, src, wv) => { const c = new Float32Array(wv.length * 4); wv.forEach((w, i) => c.set(col.subarray(w*4, w*4+4), i*4));
@@ -333,7 +385,7 @@ const overlapBuild = (list, P, I, N, strip, mis) => {
     const mi = new pc.MeshInstance(m, dualMat(tex(list[a]), tex(list[b]))); mi.cull = false; mi._wv = Uint32Array.from(ts.flatMap(t => [I[t], I[t+1], I[t+2]])); mi._col = c; mis.push(mi); }
 };
 const refuse = () => { if (!$('fuse').checked || busy || !ents.body) return; clearTimeout(fuseTimer); fuseTimer = setTimeout(() => { try { fuseNow(); $('stat').textContent = ''; } catch (e) { $('stat').textContent = 'Fuse failed: ' + e.message; showFused(false); } }, 150); };
-$('overlap').onchange = refuse; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
+$('overlap').onchange = refuse; $('anim').onchange = () => { if (!$('anim').checked) { tau = 0; live(); } }; $('fuse').onchange = () => $('fuse').checked ? refuse() : showFused(false);
 // neck: the segment runs along a planar arc in its own space (local x is the length, -x end at the body); Length stretches it
 // along the arc, Bend curls it upward; the head rides on the arc's end
 const neck = { len: PARTS.neck.len, bend: PARTS.neck.bend, base: PARTS.neck.base || 2.2, rel: null, mesh: null };
@@ -361,7 +413,7 @@ Promise.all(Object.keys(PARTS).filter(k => k !== 'props').map(nm => load(nm).the
 }))).then(() => {
   for (const nm of Object.keys(PARTS).filter(k => k !== 'props')) { const b = document.createElement('button'); b.dataset.p = nm; b.textContent = nm[0].toUpperCase() + nm.slice(1) + (mirrors[nm] ? ' (L)' : ''); b.onclick = () => { part = nm; show(); }; $('parts').appendChild(b); }
   $('nlen').value = neck.len; $('nbend').value = neck.bend; $('nbase').value = neck.base; bendNeck(); headCapture();
-  buildProps(); syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend);
+  buildProps(); syncMirrors(); json(); show(); Object.keys(VARIANTS).forEach(setupBlend); refuse();
 }).catch(e => { $('stat').textContent = 'Could not load parts: ' + e.message; });
 app.on('update', () => { const y = orbit.yaw * Math.PI / 180, p = orbit.pitch * Math.PI / 180;
   cam.setPosition(orbit.target.x + Math.sin(y) * Math.cos(p) * orbit.dist, orbit.target.y - Math.sin(p) * orbit.dist, orbit.target.z + Math.cos(y) * Math.cos(p) * orbit.dist); cam.lookAt(orbit.target); });
