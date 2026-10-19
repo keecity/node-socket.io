@@ -100,9 +100,9 @@ document.querySelectorAll('#tools button').forEach(b => b.onclick = () => { mode
 // fuse: every part (blended, in world space) is welded by position, cut where it enters the body and zipped to the body's hole
 // (joinParts from the main viewer); each part keeps its own texture, the seam strip takes the body's paint
 let fusedEnt = null, fuseTimer = null;
-const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = src.diffuseMap; m.gloss = 0.25;
-  m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex;\nvoid getAlbedo() { vec3 t = texture(uFTex, vUv0).rgb; dAlbedo = mix(t, vVertexColor.rgb, vVertexColor.a); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
-  const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); return m; };
+const seamMats = new Map(), seamMat = src => { if (!seamMats.has(src)) { const m = new pc.StandardMaterial(); m.diffuseVertexColor = true; m.diffuseMap = src.diffuseMap; m.emissiveMap = src.diffuseMap; m.emissiveMapUv = 1; m.emissive = new pc.Color(0, 0, 0); m.gloss = 0.25;
+  m.getShaderChunks(pc.SHADERLANGUAGE_GLSL).set('diffusePS', 'uniform sampler2D uFTex, uBTex;\nvoid getAlbedo() { vec3 a = texture(uFTex, vUv0).rgb, b = texture(uBTex, vUv1).rgb; float n = dot(b, vec3(0.333)) / max(dot(a, vec3(0.333)), 0.02);\n  float m = smoothstep(0.15, 0.85, vVertexColor.a + (n - 1.0) * 0.35); dAlbedo = mix(a, b, m * step(0.001, vVertexColor.a)); }\n'); m.shaderChunksVersion = '2.8'; m.update(); seamMats.set(src, m); }
+  const m = seamMats.get(src); m.setParameter('uFTex', src.diffuseMap); m.setParameter('uBTex', ents.body.findComponents('render')[0].meshInstances[0].material.diffuseMap); return m; };
 const showFused = on => { for (const e of [...Object.values(ents), ...Object.values(mirrors)]) e.enabled = !on; if (fusedEnt) fusedEnt.enabled = on; };
 const instance = (nm, e, flip) => { const g = geo[nm], G = g.B || g.P, w = blendW[nm] || [], n = g.P.length / 3, M = e.getWorldTransform(), v = new pc.Vec3(), P = new Float32Array(g.P.length);
   for (let i = 0; i < n; i++) { let x = G[i*3], y = G[i*3+1], z = G[i*3+2]; w.forEach((f, k) => { if (f) { x += f * g.D[k][i*3]; y += f * g.D[k][i*3+1]; z += f * g.D[k][i*3+2]; } }); v.set(x, y, z); M.transformPoint(v, v); P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z; }
@@ -126,9 +126,23 @@ const fuseNow = () => {
   seam.forEach((v, i) => { let n = 0; for (const u of seam) { if ((P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2 < MIX * MIX) { sc[i*3] += vc[u*3]; sc[i*3+1] += vc[u*3+1]; sc[i*3+2] += vc[u*3+2]; n++; } } sc[i*3] /= n; sc[i*3+1] /= n; sc[i*3+2] /= n; });
   for (let v = 0; v < nv; v++) { let bd = Infinity, bi = -1; for (let i = 0; i < seam.length; i++) { const u = seam[i], d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = i; } }
     if (bi < 0) continue; const d = Math.sqrt(bd), f = d < FADE ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE) : 0; col[v*4] = sc[bi*3]; col[v*4+1] = sc[bi*3+1]; col[v*4+2] = sc[bi*3+2]; col[v*4+3] = 0.9 * f; }
+  // layered skin: near a seam the part's own paint cross-fades into the body's paint (uv1 = the nearest body point's texture
+  // coords); the shader breaks the fade edge up with the body texture's detail so the scales feather in rather than blur
+  const bodySeam = []; for (let t = 0; t < strip.length; t += 3) if (strip[t] < list[0].end || strip[t+1] < list[0].end || strip[t+2] < list[0].end) bodySeam.push(strip[t], strip[t+1], strip[t+2]);
+  const seamB = [...new Set(bodySeam)];
+  const FADE2 = 0.06, buv = new Float32Array(nv * 2), B0 = list[0], bodyUV = new Float32Array(B0.end * 2);
+  for (let i = 0; i < B0.map.length; i++) { bodyUV[B0.map[i]*2] = B0.uv[i*2]; bodyUV[B0.map[i]*2+1] = B0.uv[i*2+1]; }
+  for (let v = 0; v < nv; v++) { if (v < B0.end) { buv[v*2] = bodyUV[v*2]; buv[v*2+1] = bodyUV[v*2+1]; continue; }
+    let bd = Infinity, bi = -1; for (const u of seamB) { const d = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (d < bd) { bd = d; bi = u; } }
+    const d = Math.sqrt(bd); col[v*4+3] = d < FADE2 ? 0.5 + 0.5 * Math.cos(Math.PI * d / FADE2) : 0; if (!col[v*4+3]) continue;
+    let bb = Infinity, bu = 0; for (let u = 0; u < B0.end; u++) { const e = (P[u*3]-P[v*3])**2 + (P[u*3+1]-P[v*3+1])**2 + (P[u*3+2]-P[v*3+2])**2; if (e < bb) { bb = e; bu = u; } }
+    buv[v*2] = bodyUV[bu*2]; buv[v*2+1] = bodyUV[bu*2+1]; }
+  // where neighbouring vertices map to different islands of the body's texture layout the fade would smear; turn it off there
+  const jump = new Uint8Array(nv); for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const p = I[t+e], q = I[t+(e+1)%3]; if (col[p*4+3] && col[q*4+3] && Math.hypot(buv[p*2]-buv[q*2], buv[p*2+1]-buv[q*2+1]) > 0.06) jump[p] = jump[q] = 1; }
+  for (let v = B0.end; v < nv; v++) if (jump[v]) col[v*4+3] = 0;
   if (fusedEnt) fusedEnt.destroy(); fusedEnt = new pc.Entity(); const mis = [];
   const meshOf = (pos, nrm, uv, idx, src, wv) => { const c = new Float32Array(wv.length * 4); wv.forEach((w, i) => c.set(col.subarray(w*4, w*4+4), i*4));
-    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); m.setUvs(0, uv); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, seamMat(src)); mi.cull = false; mis.push(mi); };
+    const m = new pc.Mesh(app.graphicsDevice); m.setPositions(pos); m.setNormals(nrm); const u1 = new Float32Array(wv.length * 2); wv.forEach((w, i) => { u1[i*2] = buv[w*2]; u1[i*2+1] = buv[w*2+1]; }); m.setUvs(0, uv); m.setUvs(1, u1); m.setColors(c); m.setIndices(idx); m.update(); const mi = new pc.MeshInstance(m, seamMat(src)); mi.cull = false; mis.push(mi); };
   list.forEach((L, k) => { const n = L.map.length, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = [];
     for (let i = 0; i < n; i++) { const w = L.off + L.map[i]; for (let c = 0; c < 3; c++) { pos[i*3+c] = P[w*3+c]; nrm[i*3+c] = N[w*3+c]; } }
     for (let t = 0; t < L.I.length; t += 3) { const a = L.off + L.map[L.I[t]], b = L.off + L.map[L.I[t+1]], c = L.off + L.map[L.I[t+2]]; if (kept[k].has(tk(a, b, c))) idx.push(L.I[t], L.I[t+1], L.I[t+2]); }
