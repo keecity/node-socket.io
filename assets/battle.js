@@ -3376,6 +3376,40 @@ function markSeen(b) { if (!b.seen) { b.seen = true; known.push({ b, x: b.x, z: 
 function detect(u) { if (!u || u.team !== 1) return; const p = upos(u);
   if (u.kind && /outpost|airbase|pumpjack|woodcutter|mine|farm|warehouse|hangar|water/.test(u.kind)) { markSeen(u); return; }
   if (!u.lk || missionClock - (u.lkT || -99) >= DET_UPD) { u.lk = { x: p.x, z: p.z }; u.lkT = missionClock; } u.detT = missionClock; }
+
+// ---- satellite scan: pick a spot, a satellite sweeps it for SCAN_T seconds and reveals what it passes over (recon, like outpost radar).
+// Shown on the terrain as the HUD ring with a rotating radar fan, draped over the ground.
+const SCAN_R = 9, SCAN_T = 10, SCAN_CD = 90;
+const scan = { cd: 0, on: null, mesh: null };
+function scanMesh() { if (scan.mesh) return scan.mesh;
+  const tl = f => { const t = texLoader.load('assets/ui/' + f); t.encoding = THREE.sRGBEncoding; return t; };
+  const g = new THREE.PlaneGeometry(2, 2, 48, 48).rotateX(-Math.PI / 2);
+  const mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { tRing: { value: tl('scan_ring.png') }, tFan: { value: tl('scan_fan.png') }, uAng: { value: 0 }, uA: { value: 0 }, uP: { value: 0 } },
+    vertexShader: 'varying vec2 vP; void main(){ vP = uv * 2. - 1.; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    fragmentShader: `uniform sampler2D tRing, tFan; uniform float uAng, uA, uP; varying vec2 vP;
+      void main(){ float d = length(vP); if (d > 1.) discard;
+        vec4 r = texture2D(tRing, vP * 0.5 + 0.5);
+        float c = cos(uAng), s = sin(uAng); vec2 q = vec2(c * vP.x + s * vP.y, -s * vP.x + c * vP.y);
+        vec2 fu = vec2(0.5 + q.x * 0.765, 1. - (0.865 - q.y * 0.765)); vec4 f = (fu.x > 0. && fu.x < 1. && fu.y > 0. && fu.y < 1.) ? texture2D(tFan, fu) : vec4(0.);
+        float grid = smoothstep(0.96, 1., abs(sin(d * 28. - uP * 6.))) * 0.12;               /* faint range rings pulsing outward */
+        vec3 col = r.rgb * r.a + f.rgb * f.a * 0.8 + vec3(0.1, 0.55, 0.9) * (grid + 0.05) * (1. - d);
+        gl_FragColor = vec4(col * uA, 1.); }` });
+  const m = new THREE.Mesh(g, mat); m.frustumCulled = false; m.renderOrder = 5; m.visible = false; battleRoot.add(m); return (scan.mesh = m); }
+function startScan(x, z) { if (scan.cd > 0) return `Satellite recharging (${Math.ceil(scan.cd)} s)`; if (scan.on) return 'A scan is already running';
+  const m = scanMesh(), pos = m.geometry.attributes.position, uv = m.geometry.attributes.uv;
+  for (let i = 0; i < pos.count; i++) { const px = (uv.getX(i) * 2 - 1) * SCAN_R, pz = -(uv.getY(i) * 2 - 1) * SCAN_R; pos.setY(i, Math.max(Hd(wm(x + px), wm(z + pz)), 0) + 0.08); pos.setX(i, px); pos.setZ(i, pz); }
+  pos.needsUpdate = true; m.visible = true; scan.on = { x, z, t: 0, tick: 0 }; scan.cd = SCAN_CD;
+  log(0, '<b>Satellite</b>: scanning the area'); SFX.play('alert', null, 0.45); return null; }
+function updateScan(dt) { scan.cd = Math.max(0, scan.cd - dt); const S0 = scan.on; if (!S0) return;
+  S0.t += dt; const m = scan.mesh, U = m.material.uniforms, c = camD(); m.position.set(disp(S0.x, c.x), 0, disp(S0.z, c.z));
+  U.uAng.value = S0.t * 2.4; U.uP.value = S0.t; U.uA.value = Math.min(1, S0.t * 2, (SCAN_T - S0.t) * 1.5);
+  if ((S0.tick -= dt) <= 0) { S0.tick = 0.5; const R2 = SCAN_R;
+    for (const u of enemyUnits()) { const p = upos(u); if (wdist2(p.x, p.z, S0.x, S0.z) < R2) detect(u); }
+    for (const [, L] of BLISTS()) for (const b of L) if (b.team === 1 && b.alive && wdist2(b.x, b.z, S0.x, S0.z) < R2) markSeen(b);
+    for (const k of known) if (!k.b.alive && wdist2(k.x, k.z, S0.x, S0.z) < R2) k.b.lossSeen = true;
+    const t = towns[1]; if (t && !t.hqSeen && wdist2(t.x, t.z, S0.x, S0.z) < R2 + TOWN) { t.hqSeen = true; rebuildTerritory(); log(0, '<b>Satellite</b>: enemy headquarters identified'); } }
+  if (S0.t >= SCAN_T) { scan.on = null; m.visible = false; } }
 let reconT = 0;
 function updateRecon(dt) { reconT -= dt; if (reconT > 0) return; reconT = 1;
   const eyes = outposts.filter(o => o.alive && o.team === 0 && o.done !== false);
@@ -3738,7 +3772,7 @@ const Battle = {
   },
   update(dt) {
     if (!gltf) return;
-    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateFlags(); updateCitizens(dt); updateRecon(dt); updateWaterTowers(); updateBubbles();
+    updateRoadTiles(); updateCars(dt); updatePeds(dt); updateOutposts(dt); updateAirbases(dt); updateSites(dt); updatePumps(dt); updateOilFields(); updateCamps(dt); updateBridges(dt); updateMines(dt); updateFarms(dt); updateWarehouses(); updateTrucks(dt); if (soldierKinds) updateSoldiers(dt); updateHangars(dt); updateDepots(dt); updateTanks(dt); updateDemolish(dt); updatePower(dt); updateFlags(); updateCitizens(dt); updateRecon(dt); updateScan(dt); updateWaterTowers(); updateBubbles();
     const c = camD();
     for (const f of robots) { if (f.docked) { f.vel.set(0, 0, 0); continue; } defend(f, dt); updateRobot(f, dt); }
     separate();
@@ -3791,7 +3825,7 @@ const Battle = {
   tanks, TANK_BUILD, queueTank, get tankError() { return TANK_ERR; }, _makeTank: (team, x, z, yaw) => makeTank(team, x, z, yaw), warehouseAt2D: (xw, zw) => { const x = wm(xw / S), z = wm(zw / S); return warehouses.find(w => w.alive && inWhLot(w, x, z, 0)) || null; },
   fogTex, fogData, FOG_N, fogVisible, fogExplored, fogSeen, get fogOn() { return FOG_ON; }, set fogOn(v) { FOG_ON = v; fogT = 0; fogDirty = true; },
   buildingAt2D: (xw, zw) => buildingAt2D(0, wm(xw / S), wm(zw / S)), demolish,
-  _props: props, setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
+  _props: props, scan: (xw, zw) => startScan(wm(xw / S), wm(zw / S)), get scanState() { return { cd: scan.cd, on: !!scan.on, cdMax: SCAN_CD, r: SCAN_R }; }, setNight(n) { NIGHT_U.value = n; GROUP_DEFS.lamp.mat.emissiveIntensity = 0.25 + 4 * n; GROUP_DEFS.winLit.mat.emissiveIntensity = 0.5 + 2.2 * n; },
   waterTowers, canPlaceWater, buildWaterTower: (xw, zw, rot) => buildWaterTower(0, xw, zw, rot), waterGhost: () => makeWaterTowerModel(true), towns, NEEDS, townAt2D: (xw, zw) => townAt2D(wm(xw / S), wm(zw / S)), EAT, citizen, get focusPed() { return focusPed; }, set focusPed(v) { focusPed = v; },
   producerAt2D: (xw, zw) => producerAt2D(wm(xw / S), wm(zw / S)), setPickFlag, clearPickFlag: p => { p.pickFlag = null; p.obstructed = false; p.obstructT = 0; showFlag(p); }, FLAG_R,
   SFX,
